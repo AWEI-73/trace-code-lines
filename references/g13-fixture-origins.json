@@ -1,0 +1,47 @@
+{
+  "schema": "synthetic-fixture-origins-v1",
+  "notice": "Library and task-list fixtures are synthetic, not private source excerpts. Some syntax shapes were informed by nonpublic sources. Paths, identifiers, messages and data describe invented examples; historical line offsets are test coordinates, not locators into a private repository. No claim of independent clean-room provenance is made.",
+  "source": "scripts/self-test.mjs",
+  "groups": [
+    {
+      "id": "G45/G47",
+      "kind": "synthetic",
+      "shape": "Literal/computed import, nullish fallback, JSON URL, regex literals and re-export chains."
+    },
+    {
+      "id": "G11-H2/M6",
+      "kind": "synthetic",
+      "shape": "URL/dirname helper paths, same-file method forwarding, aliased child process call, declarative command/args and NODE_OPTIONS; line offsets and nesting retained."
+    },
+    {
+      "id": "G121/G121B",
+      "kind": "synthetic",
+      "shape": "44 literal modules, arrays, loops, conditional branches, immediate vm read and computed data-only read; CRLF and line coordinates retained. fixtureSha256 hashes the included fragment, not an original file."
+    },
+    {
+      "id": "G13",
+      "kind": "synthetic",
+      "shape": "GAS forwarding exports, commented triggers, TypeScript request branches, optional chaining, multiline client callbacks, Electron preload/helper/loadFile; original fixture line-ending sequences retained."
+    },
+    {
+      "id": "G14",
+      "kind": "synthetic",
+      "shape": "Local GAS scope, computed HTML call, imports, bundle reader/writer, documentation clues and flow anchors; line offsets retained."
+    },
+    {
+      "id": "H1/M12",
+      "kind": "synthetic",
+      "shape": "New TS/TSX library inputs and Python catalog scan replace prior public ky, Taxonomy and HTTPie excerpts; keep assertion intent and tested Python line coordinates."
+    }
+  ],
+  "retainedThirdParty": {
+    "project": "crewAI",
+    "license": "MIT",
+    "notice": "references/fixture-source-license.txt",
+    "commits": [
+      "fa6d7121abaa432899b68b58a1be16488f545e13",
+      "95de6ea1fbf5cf3a9074d4efd20073bed39559c1"
+    ],
+    "use": "Parsed as source text, never imported or executed."
+  }
+}

@@ -1,0 +1,262 @@
+{
+  "ui": {
+    "mapProduction": "正式路線",
+    "mapCountproduction": "{n} 個在正式路線",
+    "mapCounttestOnly": "{n} 個只有測試用",
+    "mapCountunused": "{n} 個沒人用",
+    "mapUncounted": "{n} 個其他檔案",
+    "healthTitle": "程式健檢",
+    "flowTitle": "回答流程",
+    "eyebrow": "程式脈絡・閱讀版",
+    "flowEyebrow": "服務說明・回答路線",
+    "subtitle": "只讀程式內容，沒有執行或修改受查專案。",
+    "detail": "細節",
+    "risk": "會怎樣",
+    "advice": "建議怎麼做",
+    "happening": "發生什麼",
+    "fileCount": "{n} 個檔案",
+    "targetCount": "{n} 個目標",
+    "rawCount": "合併前有 {n} 筆引用，整理成 {cards} 張卡片。",
+    "productionFiles": "正式路線檔數",
+    "broken": "斷線",
+    "odd": "怪異",
+    "testOnly": "只有測試在用",
+    "unused": "沒人用",
+    "entry": "入口",
+    "mapTitle": "模組線圖",
+    "mapIntro": "每一塊只出現一次。點方塊可以看它接到哪裡。",
+    "mapLegend": "綠：正式　黃：只有測試用　橘：沒人用　灰：測試程式或其他檔案　圓點：相關問題卡數",
+    "mapLimit": "每塊只放在一區，色條表示塊內檔案的分布。桌機圖保留主要正式連線；展開後列出全部區塊間的引用條數，不代表執行次數。測試程式另放一區，不列入三種狀態。同張問題卡可能涉及多個區塊。",
+    "issuesTitle": "需要留意的地方",
+    "groupsTitle": "本次入口沒有用到的程式",
+    "modulesTitle": "區塊說明",
+    "limitsTitle": "還看不清楚的地方",
+    "limitsIntro": "有 {n} 筆無法確認的記錄，不計入斷線或怪異。",
+    "noIssue": "這次沒有辨識到斷線或怪異，仍需留意下方限制。",
+    "verdict": "正式路線包含 {files} 個檔案，發現 {broken} 處斷線，另有 {odd} 張需要留意的卡片。這是閱讀程式的結果，不能證明實際執行正常。",
+    "genericBlock": "程式區塊 {n}",
+    "genericStep": "處理步驟 {n}",
+    "genericCondition": "依條件繼續",
+    "countMeta": "正式 {p}・只有測試 {t}・未用 {u}",
+    "moduleMeta": "{n} 個程式檔案",
+    "rootMeta": "{n} 個入口",
+    "moreIssues": "其餘 {n} 張問題卡",
+    "moreGroups": "其餘 {n} 張群組卡",
+    "moreModules": "其餘 {n} 個區塊",
+    "noItems": "本次沒有項目",
+    "scopeTitle": "範圍與原始資料",
+    "sources": "位置、原文與推測來源",
+    "inference": "推測",
+    "unknownLine": "未提供行號",
+    "target": "目標",
+    "position": "位置",
+    "witness": "引用證據",
+    "original": "原始說明",
+    "groupList": "完整檔案清單",
+    "limitWarning": "沒有用到只表示本次選定入口沒有涵蓋，不能據此刪除。",
+    "footer": "本報告自帶內容，可離線閱讀。",
+    "flowIntro": "從上往下閱讀，沿分支條件前進。點選節點可展開細步驟與原始位置。",
+    "flowLimit": "位置核對只確認原始檔案、行號與文字；不代表流程曾執行或業務判斷已獲驗證。",
+    "flowStatus": "位置核對：通過 {pass} 處，未通過 {fail} 處。",
+    "flowDetails": "細步驟與來源",
+    "flowLegend": "綠色：回覆　藍色：補問　橘色：轉人工　灰色：拒答",
+    "flowStep": "步驟",
+    "flowDecision": "判斷",
+    "flowEnd": "結果",
+    "checkFailed": "有位置未通過核對",
+    "next": "接著",
+    "flowLegacy": "這份舊格式沒有主節點分組，先呈現前十二步；完整步驟、回路與條件保留在細節。",
+    "flowBoundary": "主圖省略的例外、保存與重送條件，請展開細節查看。",
+    "rawStats": "原始統計",
+    "sourceName": "原始名稱",
+    "sourceType": "原始種類",
+    "links": "完整連線",
+    "yes": "是",
+    "no": "否",
+    "all": "全部",
+    "flowMain": "主要流程",
+    "block": "區塊",
+    "mapTests": "測試程式",
+    "mapTestPurpose": "{n} 個檔，用來檢查其他程式",
+    "mapTestExcluded": "測試程式不計入正式、只有測試用、沒人用三種狀態。",
+    "mapZoneCount": "{n} 塊，{files} 個檔",
+    "mapUses": "會用到：",
+    "mapUsedBy": "被誰用到：",
+    "mapLinkCount": "{n} 條",
+    "mapNoLinks": "本次沒有找到其他區塊",
+    "mapRelated": "相關問題",
+    "mapNoIssues": "本次沒有相關問題卡",
+    "mapIssueCount": "{n} 張相關問題卡",
+    "mapClue": "來源描述：「{text}」。",
+    "mapNoClue": "本次沒有可用的用途說明。"
+  },
+  "issues": {
+    "broken": {
+      "name": "需要的檔案找不到",
+      "description": "這條路線要使用的檔案不在本次資料裡，也沒找到替代來源。",
+      "risk": "走到這一步時，功能可能無法繼續。",
+      "advice": "核對檔案是否漏帶、改名，或需要先產生。"
+    },
+    "nonproduction": {
+      "name": "正式程式直接用到非正式區塊",
+      "description": "正式程式直接引用了仍放在原型、實驗或規劃區的檔案。",
+      "risk": "整理或改動非正式區塊時，正式功能也可能受到影響。",
+      "advice": "確認共用責任，將穩定的程式移到適當位置，或明確註記正式用途。"
+    },
+    "redirect": {
+      "name": "可能靠轉址才接得上",
+      "description": "原本指向的位置沒有檔案，但找到其他位置的同名檔與讀取線索。",
+      "risk": "若改變組裝順序或開啟方式，這條路線可能中斷。",
+      "advice": "核對實際轉接方式，改用清楚的直接引用，或留下完整說明。"
+    },
+    "generated": {
+      "name": "頁面或檔案要打包後才有",
+      "description": "程式需要的檔案不在原始資料中，找到打包時可能產生它的程式。",
+      "risk": "發布前漏了打包，頁面或功能可能無法開啟。",
+      "advice": "核對打包結果與發布清單，確認需要的檔案確實已產生。"
+    },
+    "bundled": {
+      "name": "打包時一併帶上的原型檔",
+      "description": "打包入口以讀檔方式，將非正式區塊的內容一起組進成品。",
+      "risk": "原型檔改動後，打包成品也可能跟著改變。",
+      "advice": "保留打包用途說明，並檢查這些內容是否仍需要一併發布。"
+    },
+    "testOnly": {
+      "name": "只有測試在用",
+      "description": "這個區塊有 {n} 個檔案只被選定的測試用到。",
+      "risk": "正式入口目前沒有連到它們，不能因此認定它們沒有價值。",
+      "advice": "確認測試用途與保留理由；要整理前先查清其他使用方式。"
+    },
+    "unused": {
+      "name": "本次入口沒人用",
+      "description": "這個區塊有 {n} 個檔案沒有被本次選定入口用到。",
+      "risk": "它們可能是手動工具，或透過工具尚未看懂的方式使用。",
+      "advice": "先核對手動用途與其他入口，不要直接刪除。"
+    },
+    "limitation": {
+      "name": "目前還無法確認",
+      "description": "這部分超出本次工具可確認的範圍。",
+      "risk": "缺少的連線可能影響對全貌的判斷。",
+      "advice": "查看細節中的原因，再補充來源或執行證據。"
+    }
+  },
+  "kinds": {
+    "production": {
+      "name": "正式程式",
+      "description": "這個區塊被設定為正式程式。",
+      "risk": "分類不代表實際使用或發布狀態。",
+      "advice": "依來源與用途確認分類。"
+    },
+    "prototype": {
+      "name": "原型",
+      "description": "這個區塊被設定為原型。",
+      "risk": "分類不代表實際使用或發布狀態。",
+      "advice": "依來源與用途確認分類。"
+    },
+    "experiment": {
+      "name": "實驗",
+      "description": "這個區塊被設定為實驗。",
+      "risk": "分類不代表實際使用或發布狀態。",
+      "advice": "依來源與用途確認分類。"
+    },
+    "plan": {
+      "name": "規劃稿",
+      "description": "這個區塊被設定為規劃稿。",
+      "risk": "分類不代表實際使用或發布狀態。",
+      "advice": "依來源與用途確認分類。"
+    },
+    "tools": {
+      "name": "工具",
+      "description": "這個區塊被設定為工具。",
+      "risk": "分類不代表實際使用或發布狀態。",
+      "advice": "依來源與用途確認分類。"
+    },
+    "tests": {
+      "name": "測試",
+      "description": "這個區塊被設定為測試。",
+      "risk": "分類不代表實際使用或發布狀態。",
+      "advice": "依來源與用途確認分類。"
+    },
+    "docs": {
+      "name": "文件",
+      "description": "這個區塊被設定為文件。",
+      "risk": "分類不代表實際使用或發布狀態。",
+      "advice": "依來源與用途確認分類。"
+    }
+  },
+  "statuses": {
+    "PASS": {
+      "name": "通過",
+      "description": "目前顯示為通過。",
+      "risk": "顯示結果仍有本次檢查範圍的限制。",
+      "advice": "查看細節中的來源與判斷依據。"
+    },
+    "FAIL": {
+      "name": "未通過",
+      "description": "目前顯示為未通過。",
+      "risk": "顯示結果仍有本次檢查範圍的限制。",
+      "advice": "查看細節中的來源與判斷依據。"
+    },
+    "UNKNOWN": {
+      "name": "尚未確認",
+      "description": "目前顯示為尚未確認。",
+      "risk": "顯示結果仍有本次檢查範圍的限制。",
+      "advice": "查看細節中的來源與判斷依據。"
+    },
+    "answer": {
+      "name": "回覆",
+      "description": "目前顯示為回覆。",
+      "risk": "顯示結果仍有本次檢查範圍的限制。",
+      "advice": "查看細節中的來源與判斷依據。"
+    },
+    "ask": {
+      "name": "補問",
+      "description": "目前顯示為補問。",
+      "risk": "顯示結果仍有本次檢查範圍的限制。",
+      "advice": "查看細節中的來源與判斷依據。"
+    },
+    "handoff": {
+      "name": "轉人工",
+      "description": "目前顯示為轉人工。",
+      "risk": "顯示結果仍有本次檢查範圍的限制。",
+      "advice": "查看細節中的來源與判斷依據。"
+    },
+    "decline": {
+      "name": "拒答",
+      "description": "目前顯示為拒答。",
+      "risk": "顯示結果仍有本次檢查範圍的限制。",
+      "advice": "查看細節中的來源與判斷依據。"
+    }
+  },
+  "aliases": {
+    "GAS 入口": "網頁與排程入口",
+    "(root)": "根目錄",
+    "src": "主要程式",
+    "src/server": "伺服器程式",
+    "src/web": "網頁程式",
+    "tests": "測試",
+    "test": "測試",
+    "docs": "文件",
+    "scripts": "工具程式",
+    "prototype": "原型",
+    "experiments": "實驗",
+    "plan-code": "規劃稿"
+  },
+  "forbidden": [
+    "production",
+    "prototype",
+    "experiment",
+    "DATA_READ",
+    "STATIC_IMPORT",
+    "UNKNOWN",
+    "closure",
+    "gap",
+    "candidate",
+    "runtimeVerified",
+    "GAS_",
+    "CORE_PIN",
+    "legacy",
+    ":null",
+    ":UNKNOWN"
+  ]
+}

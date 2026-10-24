@@ -1,0 +1,62 @@
+{
+  "root": "/absolute/record-root",
+  "job": {
+    "relativePath": "workspace/work/example-work"
+  },
+  "recordFile": "recipe-run.json",
+  "population": "CALLER_SELECTED_RETAINED_WORK",
+  "stores": [
+    {
+      "id": "work",
+      "path": "recipe-run.json",
+      "mode": "one-json-per-file"
+    },
+    {
+      "id": "state",
+      "root": "/absolute/state-root",
+      "path": "results",
+      "recursive": true,
+      "filePattern": "\\.json$",
+      "mode": "one-json-per-file",
+      "where": {
+        "workId": "example-work"
+      }
+    },
+    {
+      "id": "events",
+      "root": "/absolute/event-root",
+      "path": "events.jsonl",
+      "mode": "jsonl",
+      "where": {
+        "workId": "example-work"
+      }
+    }
+  ],
+  "joins": [
+    {
+      "id": "work-state",
+      "from": {
+        "store": "work",
+        "key": "workId"
+      },
+      "to": {
+        "store": "state",
+        "key": "workId"
+      },
+      "cardinality": "one-to-one"
+    },
+    {
+      "id": "work-events",
+      "from": {
+        "store": "work",
+        "key": "workId"
+      },
+      "to": {
+        "store": "events",
+        "key": "workId"
+      },
+      "cardinality": "one-to-many"
+    }
+  ],
+  "pathConventions": []
+}

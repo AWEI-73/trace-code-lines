@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {discoverEntries} from './discover-entries.mjs';
+import {writeCard} from './check-card.mjs';
+import {writeUTF8} from './report.mjs';
+import {hash} from './cassette.mjs';
+const a=process.argv.slice(2),root=path.resolve(a[a.indexOf('--repo')+1]??''),out=path.resolve(a[a.indexOf('--out')+1]??'');
+if(!a.includes('--repo')||!a.includes('--out'))throw Error('Usage: node scripts/inspect-repo.mjs --repo /isolated/repo --out /reports/repo');
+if(out===root||out.startsWith(root+path.sep))throw Error('Output must be outside audited repository');
+const inventory=discoverEntries(root);fs.mkdirSync(out,{recursive:true});writeUTF8(path.join(out,'entry-inventory.json'),JSON.stringify(inventory,null,2)+'\n');
+const card=writeCard({root,title:path.basename(root),entries:inventory.entries,inputs:{status:'UNKNOWN',reason:'Read each candidate signature and document argument formats'},outputs:{status:'UNKNOWN'},sideEffects:{status:'UNKNOWN'},cost:{status:'UNKNOWN',policy:'No paid calls are executed'},tools:[{name:'node',version:process.version,sha256:hash(fs.readFileSync(process.execPath))}],runnability:{status:'UNKNOWN',reason:'Default scan does not execute the repository'},limits:[inventory.coverage],evidence:[{file:'entry-inventory.json',sha256:hash(fs.readFileSync(path.join(out,'entry-inventory.json')))}]},out);
+console.log(JSON.stringify({status:'PASS',scope:'Static inventory and card generation only',entries:card.entries.length,out}));

@@ -1,0 +1,46 @@
+{
+  "clone": "${CLONE}",
+  "tempRoot": "${RUN_TEMP}",
+  "isolationRoot": "${RUN_TEMP}/home",
+  "outputDirectory": "${RUN_TEMP}/trace",
+  "command": [
+    "${NODE}",
+    "${CLONE}/entry.mjs"
+  ],
+  "resolvedWriteRoots": [
+    "${RUN_TEMP}/work"
+  ],
+  "executables": [
+    "${NODE}"
+  ],
+  "boundaries": [
+    {
+      "id": "factory-seam",
+      "executable": "declared-factory",
+      "stdinMode": "ignore",
+      "failure": {
+        "exitCode": 70,
+        "message": "FACTORY_PREREQUISITE_UNAVAILABLE"
+      }
+    }
+  ],
+  "environment": {
+    "TRACE_WRITE_CLASS": "preparation"
+  },
+  "writeClass": "preparation",
+  "valueReceipts": [
+    {
+      "targetPattern": "/work/state\\.json$",
+      "fields": [
+        {
+          "field": "job.phase",
+          "selector": "phase"
+        },
+        {
+          "field": "job.items[].status",
+          "selector": "items[].status"
+        }
+      ]
+    }
+  ]
+}
