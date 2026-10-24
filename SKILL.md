@@ -1,6 +1,6 @@
 ---
 name: trace-code-lines
-version: 1.17.2
+version: 1.17.3
 description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，交付可追到證據的體檢卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
 
@@ -45,4 +45,4 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 
 ## 版本
 
-目前版本：1.17.2（2026-10-24）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.17.3（2026-10-24）。歷史見 [changelog](references/changelog.md)。
