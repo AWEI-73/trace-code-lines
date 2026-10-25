@@ -1,3 +1,4 @@
+import {scanStopSites,readStopPolicy,compareStopSites,stopMaintenanceItems,renderStopComparison} from './stop-sites.mjs';
 import {failureRows,clusterFailures,projectSite,relativeCommand} from './maintenance-failures.mjs';
 import {groupMaintenance,buildMaintenance,loadMaintenanceWater,renderMaintenanceHTML,renderMaintenanceMarkdown} from './maintenance.mjs';
 import {requestKey,preflight,commandPolicy} from './cassette.mjs';
@@ -57,6 +58,7 @@ const files={
   'escape.mjs':"import '../outside.mjs';\n"
 };
 try {
+  if(process.env.TRACE_G180_ONLY){console.log(JSON.stringify({status:'PASS',checks:g180Checks()}));process.exit(0);}
   if(process.env.TRACE_G170_ONLY){console.log(JSON.stringify({status:'PASS',checks:g170Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G160_ONLY){console.log(JSON.stringify({status:'PASS',checks:await g160Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G150_ONLY){console.log(JSON.stringify({status:'PASS',checks:[...g150Checks(),...g151Checks(),...g152Checks(),...g153Checks()]}));process.exit(0);}
@@ -538,7 +540,7 @@ try {
 }
 
 async function g7Checks(root,only){
-  const checks=[...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
+  const checks=[...g180Checks(),...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
   const baseline=old?await import(pathToFileURL(join(old,'scripts/language-static.mjs')).href):null;
   const oldInference=old?await import(pathToFileURL(join(old,'scripts/inference-layer.mjs')).href):null;
   const oldReconcile=old?await import(pathToFileURL(join(old,'scripts/gap-reconcile.mjs')).href):null;
@@ -1512,5 +1514,36 @@ function g170Checks(root){
   const refs=[{report:record,config,snapshot}],water=loadMaintenanceWater([...refs,...refs],dir,repo);assert.equal(water.evidence.length,1);assert.equal(water.evidence[0].payload.stdout,tap);assert.equal(water.runs.length,1);
   const sheet=buildMaintenance({repo,issues:[],blocks:[]},{water,read:()=>''});assert(!JSON.stringify(sheet).includes('UNIQUE_FULL_TRANSCRIPT'));assert(!renderMaintenanceMarkdown(sheet).includes('UNIQUE_FULL_TRANSCRIPT'));assert.equal(sheet.evidence[0].id,water.evidence[0].id);
  });
+ return checks;
+}
+
+function g180Checks(){
+ const checks=[],check=(name,fn)=>{fn();checks.push('G180 '+name);};
+ const policy='Hard-block only: authorization violations.\n',files={'POLICY.md':policy,'main.ts':"export function run(input: string, authorized: boolean) {\n if(!authorized)throw Object.assign(new Error('authorization violation'),{code:'SAME_CODE'});\n if(!input)throw Object.assign(new Error('missing input'),{code:'SAME_CODE'});\n}\nfunction _guard(value){\n if(typeof value !== 'string')throw new TypeError('missing input');\n}\n"};
+ const config={policy:'POLICY.md'},routes=[{root:'main.ts',files:['main.ts']}],read=p=>{if(!(p in files))throw Error('MISSING');return files[p];};
+ const result=()=>compareStopSites({files:['main.ts'],read,config,routes}),r=result();
+ check('three classes at exact sites with a shared reason code',()=>{assert.deepEqual(r.sites.map(s=>s.classification),['baseline','needs-attention','uncertain']);assert.equal(r.sites[0].reasonCode,r.sites[1].reasonCode);});
+ check('typed TS symbol anchors and hashes',()=>{assert.equal(r.sites[0].locator,'main.ts#run');assert.equal(r.sites[0].line,2);assert.equal(r.sites[0].snippetSha256,sha256(r.sites[0].snippet));assert.equal(r.sites[0].sourceSha256,sha256(files['main.ts']));});
+ check('declared baseline carries verbatim policy anchor',()=>{const a=r.sites[0].declarationAnchors[0];assert.equal(a.file,'POLICY.md');assert.equal(a.line,1);assert.equal(a.expect,policy.trim());});
+ check('no declaration is inventory only',()=>{const x=compareStopSites({files:['main.ts'],read,routes});assert(x.inventoryOnly);assert(x.sites.every(s=>s.classification==='uncertain'&&s.reason==='NO_DECLARATION'));assert(renderStopComparison(x).includes('\u6c92\u6709\u5ba3\u544a\u53ef\u5c0d\u7167'));});
+ check('unknown route cannot promote repairable stop',()=>{const x=compareStopSites({files:['main.ts'],read,config});assert.equal(x.sites[1].classification,'uncertain');assert.equal(x.sites[1].reach.static,'UNKNOWN');});
+ check('file closure never claims site execution',()=>{assert.equal(r.sites[1].reach.static,'FILE_REACHABLE');assert.equal(r.sites[1].reach.siteObserved,false);});
+ check('bound site observation and test command survive',()=>{const water={runs:[{id:'demo',sourceBound:true,source:'test-recording',coveredFiles:['main.ts'],executedSites:[{file:'main.ts',line:3}],perTest:[{file:'main.test.mjs',coveredFiles:['main.ts'],command:['node','--test','main.test.mjs']}]}]};const x=compareStopSites({files:['main.ts'],read,config,routes,water});assert(x.sites[1].reach.siteObserved);assert(!x.sites[0].reach.siteObserved);assert.deepEqual(x.sites[1].verification[0].command,['node','--test','main.test.mjs']);});
+ check('mixed condition never forced into baseline',()=>{const body="export function run(x,a){if(!x || !a)throw Error('authorization violation');}";const x=compareStopSites({files:['x.js'],read:p=>p==='POLICY.md'?policy:body,config,routes:[{root:'x.js',files:['x.js']}]});assert.equal(x.sites[0].classification,'uncertain');assert.equal(x.sites[0].reason,'MIXED_CONDITION');});
+ check('Python raise sys.exit and refusal return',()=>{const x=scanStopSites('x.py',"def run(x):\n    if not x:\n        raise ValueError('missing input')\n    sys.exit(3)\n    return {'status':'rejected','reason_code':'BAD_INPUT'}\n");assert.deepEqual(x.map(s=>s.kind),['raise','sys.exit','return-status']);assert(x.every(s=>s.symbol==='run'));assert.equal(x[2].reasonCode,'BAD_INPUT');});
+ check('JS exits returns and configurable status pattern',()=>{const x=scanStopSites('x.js',"process.exit(2);\nfunction run(){return {status:'halted',code:'R42'};}\n",{statusPattern:'^halted$',reasonCodePattern:'^R[0-9]+$'});assert.deepEqual(x.map(s=>s.kind),['process.exit','return-status']);assert.equal(x[1].reasonCode,'R42');});
+ check('comments strings and regex never become stop sites',()=>{assert.equal(scanStopSites('x.js',"// throw Error('missing')\nconst s='raise process.exit(1)';\nconst re=/throw|process.exit/;\n").length,0);assert.equal(scanStopSites('x.py',"# raise Exception()\nx = '''sys.exit(1)'''\n").length,0);});
+ check('one-hop helper call retains call-site reason and message',()=>{const x=scanStopSites('x.js',"const fail=(code,message)=>{throw Object.assign(new Error(message),{code});};\nexport function run(x){if(!x)fail('BAD_INPUT','missing input');}\n");const s=x.find(s=>s.kind==='throw-helper');assert(s);assert.equal(s.line,2);assert.equal(s.symbol,'run');assert.equal(s.reasonCode,'BAD_INPUT');assert.equal(s.message,'missing input');});
+ check('JSON mapping requires real declaration anchors',()=>{const obj={categories:[{id:'auth',anchor:{file:'POLICY.md',line:1,expect:policy.trim()}}],mappings:[{category:'auth',reasonCodes:['DENIED']}]};const p=readStopPolicy({policy:'rules.json'},p=>p==='rules.json'?JSON.stringify(obj):read(p));assert.equal(p.categories[0].id,'auth');assert.throws(()=>readStopPolicy({policy:'rules.json'},p=>p==='rules.json'?JSON.stringify({...obj,categories:[{id:'auth',anchor:{file:'POLICY.md',line:7,expect:'absent'}}]}):read(p)),/ANCHOR_MISMATCH/);});
+ check('policy hash and undefined categories rejected',()=>{assert.throws(()=>readStopPolicy({policy:{file:'POLICY.md',sha256:'0'.repeat(64)}},read),/INTEGRITY/);assert.throws(()=>readStopPolicy({policy:'POLICY.md',mappings:[{category:'invented',reasonCodes:['X']}]},read),/MAPPING_CATEGORY/);});
+ check('maintenance groups file and cause without merging classifications',()=>{const copy={...r,sites:[...r.sites],groups:[...r.groups]};const items=stopMaintenanceItems(copy);assert.equal(items.length,3);assert.deepEqual(items.map(i=>i.mark),['fine','handling','unsure']);assert(items.every(i=>i.mark!=='broken'));assert(items[1].fixes.length&&items[1].verificationMethod&&items[1].missing);});
+ check('maintenance preserves existing broken counting',()=>{const base={repo:'unused',issues:[],blocks:[]};const before=buildMaintenance(base,{read}),after=buildMaintenance({...base,stopSites:r},{read});assert.equal(before.counts.broken,after.counts.broken);assert.equal(after.counts.handling,1);assert(renderMaintenanceHTML(after).includes('stop-site-comparison'));assert(renderMaintenanceMarkdown(after).includes('main.ts'));});
+ check('check card nests stop comparison with existing declarations',()=>{const card=buildCard({root:'unused',stopSites:{...config,files:['main.ts'],routes},declarations:[]},{read});assert.deepEqual(card.stopSites.counts,r.counts);assert.equal(card.declarations.length,0);assert(renderCardSection(card).includes('stop-site-comparison'));});
+ check('success and nested data statuses are not direct refusals',()=>{const source="function data(){return {status:'ok',code:'SUCCESS'};}\nfunction payload(){return {data:{status:'error',code:'BAD_INPUT'}};}\nfunction bool(){return {ok:true,code:'BAD_INPUT'};}\n";assert.equal(scanStopSites('x.js',source).length,0);});
+ check('caught JS and Python throws remain uncertain',()=>{for(const [file,body] of [['x.js',"export function run(){try {throw Error('missing input');}catch(e){return 'recovered';}}"],['x.py',"def run():\n    try:\n        raise Exception('missing input')\n    except Exception:\n        return None\n"]]){const x=compareStopSites({files:[file],read:p=>p==='POLICY.md'?policy:body,config,routes:[{root:file,files:[file]}]});assert.equal(x.sites[0].classification,'uncertain');assert.equal(x.sites[0].reason,'CATCH_BOUNDARY_UNKNOWN');}});
+ check('configured verification command is never execution evidence',()=>{const x=compareStopSites({files:['main.ts'],read,config:{...config,verificationCommands:[{file:'main.ts',command:['node','main.ts','repairable']}]},routes});assert.equal(x.sites[1].verification[0].source,'configured-unexecuted');assert.equal(x.sites[1].verification[0].status,'NOT_EXECUTED');assert.equal(x.sites[1].reach.siteObserved,false);});
+ check('generic invalid error is not automatically repairable',()=>{const x=compareStopSites({files:['x.js'],read:p=>p==='POLICY.md'?policy:"export function run(){throw Error('invalid state');}",config,routes:[{root:'x.js',files:['x.js']}]});assert.equal(x.sites[0].classification,'uncertain');});
+ check('overlapping declarations remain uncertain',()=>{const p='Hard-block only: authorization violations, credential use.\n',x=compareStopSites({files:['x.js'],read:f=>f==='POLICY.md'?p:"export function run(){throw Error('authorization violation and credential use');}",config,routes:[{root:'x.js',files:['x.js']}]});assert.equal(x.sites[0].classification,'uncertain');assert.equal(x.sites[0].candidateCategories.length,2);});
+ check('source read failures stay explicit',()=>{const x=compareStopSites({files:['absent.py'],read,config});assert.equal(x.status,'UNKNOWN');assert.equal(x.readFailures.length,1);});
  return checks;
 }

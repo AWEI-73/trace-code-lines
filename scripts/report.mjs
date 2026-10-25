@@ -1,3 +1,4 @@
+import {compareStopSites} from './stop-sites.mjs';
 import {buildMaintenance,loadMaintenanceWater,renderMaintenanceMarkdown} from './maintenance.mjs';
 // Offline source-bound health and on-demand flow reports; no target code execution.
 import {renderHumanHealth,renderHumanFlow,validateMainFlow} from './report-html.mjs';
@@ -171,9 +172,10 @@ export function buildReport(inputs,config={},options={}){
     conclusion:'\u6b63\u5f0f\u8def\u7dda '+stats.productionFiles+' \u6a94\uff0c\u5b57\u9762\u65b7\u7dda '+stats.broken+' \u8655\uff0c\u9700\u7559\u610f '+stats.odd+' \u8655\u3002\u9019\u662f\u975c\u614b\u67e5\u7dda\u7d50\u679c\uff0c\u5c1a\u672a\u9a57\u8b49\u57f7\u884c\u3002',
     roots:maps.flatMap((m,i)=>m.roots.map(r=>({...r,role:roles[i],file:r.path,line:null,category:'\u5165\u53e3',source:'\u67e5\u7dda'}))),
     blocks:blocks.filter(b=>b.programFiles.length||b.production.length),links:[...links.values()].filter(l=>blocks.find(b=>b.id===l.from).programFiles.length||blocks.find(b=>b.id===l.from).production.length).filter(l=>blocks.find(b=>b.id===l.to).programFiles.length||blocks.find(b=>b.id===l.to).production.length),issues,groups:categoryGroups,limitations:dedup(limitations,l=>JSON.stringify([l.file,l.line,l.reason])),rejectedNotes,commands:config.commands??[],sourceReads:[]};
+  if(config.stopSites)report.stopSites=compareStopSites({root:repo,files:inventory,config:{...config.stopSites,comparisonCommands:config.commands?.map(c=>[c.bin,...c.args])??[]},read,routes:maps.flatMap((m,i)=>m.closures.map(c=>({...c,role:roles[i]}))),water:config.maintenanceWater});
   report.maintenance=buildMaintenance(report,{decisions:config.maintenanceDecisions??[],water:config.maintenanceWater,edges:allEdges,routes:maps.flatMap(m=>m.closures),rerunPrerequisites:config.maintenance?.rerunPrerequisites??[],read:get});
   if(report.maintenance.waterProvided)report.conclusion='\u5df2\u63a5\u5165\u8a66\u8dd1\u7d50\u679c\uff1b\u9010\u4ef6\u898b\u7dad\u4fee\u55ae\uff0c\u8dd1\u904e\u4e0d\u7b49\u65bc\u9a57\u6536\u901a\u904e\u3002';
-  report.sourceReads=[...cache].map(([file,body])=>({file,sha256:sha256(body)}));
+  report.sourceReads=[...new Map([...cache].map(([file,body])=>({file,sha256:sha256(body)})).concat(report.stopSites?.sourceReads??[]).map(s=>[s.file,s])).values()];
   return report;
 }
 export function checkFlow(flow,map,read){

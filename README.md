@@ -1,4 +1,4 @@
-# Trace Code Lines 1.17.3
+# Trace Code Lines 1.18.0
 
 [English](#english) · [繁體中文](#traditional-chinese)
 
@@ -6,6 +6,8 @@
 ## English
 
 Trace Code Lines never treats a description as proof of success. Its review workflow ties each conclusion to a code location or an actual execution record and labels its evidence level: **real use > scenarios with stand-ins > executed tests > static reading**. An agent's narrative is not evidence. Authorized runs take place in isolated copies, use stand-ins for paid services and models, remove credentials from the child environment, and block live paid, login and deployment actions. The result is a human-facing maintenance sheet: related observations are grouped, marked **broken / needs attention / fine / uncertain**, and accompanied by repair guidance and verification commands when the evidence supports them.
+
+Stop-site comparison is available under declaration checks. Add `stopSites.policy` to the report configuration to compare JS/TS/Python termination and refusal candidates with an explicitly supplied hard-block policy. Results are baseline, needs attention or uncertain, with source/policy anchors, file-route reach and available verification commands. Private/type guards and mixed conditions remain uncertain; without a declaration, the tool lists candidates only. Reason/keyword mappings are optional, and results remain diagnostic suggestions for agent review. See [configuration and limitations](references/stop-sites.md).
 
 ### How it differs from maps and summaries
 
@@ -99,6 +101,8 @@ Static parsing is bounded. Computed imports, build configuration, complete synta
 
 Trace Code Lines **不把描述當成功**。查線流程要求每個結論對到程式位置或實際執行紀錄，並標明證據等級：**真實使用 ＞ 用替身的情境試跑 ＞ 測試跑過 ＞ 只讀程式**；agent 的敘述不算證據。獲授權的試跑只在隔離副本進行，付費服務與模型使用替身，子程序環境移除帳密，真實付費、登入與部署動作一律擋下。產出是給人看的維修單：合併相關觀測，標記為**壞了／要處理／沒問題／不確定**，並在證據足夠時附修法與驗證指令。
 
+
+宣告對照新增阻擋點檢查：在報告設定提供 `stopSites.policy`，把 JS／TS／Python 終止與拒絕候選分成底線、要處理、不確定，附原碼／宣告錨點、檔案路線與可用驗證命令。內部防呆與混合條件保留不確定；沒宣告只能列清單，沒有 reason code 時準確度較低。結果交給 agent 判讀，不替人決定。設定與限制見[阻擋點對照](references/stop-sites.md)。
 ### 跟地圖或摘要工具差在哪
 
 依賴地圖顯示程式指向哪裡，摘要描述程式看起來做什麼。這個流程還會核對文件宣告與實作、區分已觀測故障和靜態候選，並說清楚哪些路徑真的跑過。缺證據就明寫。故障合併只表示觀測到相同邊界，不代表已證明共同根因。agent 仍須讀原碼並提出語義判讀；這不是全自動的正確性檢查器。

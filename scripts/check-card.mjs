@@ -1,3 +1,4 @@
+import {compareStopSites,renderStopComparison} from './stop-sites.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -33,7 +34,7 @@ export function compareDeclarations(root,items=[]){
    basis:'Anchors and disclosed absence searches checked mechanically; semantic extraction remains an attributed agent interpretation.'};
  });
 }
-export function buildCard(c){
+export function buildCard(c,options={}){
  const allowed=['entries','inputs','outputs','sideEffects','cost','tools','runnability'];
  const fields=Object.fromEntries(allowed.map(k=>[k,c[k]??{status:'UNKNOWN'}]));
  const scenarios=c.water?.results??[];
@@ -42,6 +43,7 @@ export function buildCard(c){
  if(cleanupUnknown&&fields.runnability.status!=='FAIL')fields.runnability={...fields.runnability,status:'UNKNOWN',cleanupUnverified:true,description:'\u60c5\u5883\u901a\u904e\uff0c\u7a0b\u5e8f\u6e05\u7406\u7121\u6cd5\u5728\u6b64\u5e73\u53f0\u6838\u5c0d'};
  const walk=x=>{if(!x||typeof x!=='object')return;for(const k of Object.keys(x)){if(/^(?:deploymentId|operation|entryId|pathId|profileId|organizationId|instanceId|selector)$/i.test(k))throw Error('NON_GENERIC_CARD_FIELD '+k);walk(x[k]);}};walk(fields);
  return {schema:'check-card-v1',title:c.title??'Repository check',...fields,declarations:compareDeclarations(c.root,c.declarations),
+  ...(c.stopSites?{stopSites:compareStopSites({root:c.root,files:c.stopSites.files??[],config:c.stopSites,read:options.read,routes:c.stopSites.routes??[],water:c.maintenanceWater})}:{}),
   evidenceLevel:c.water?.evidenceLevel??'STATIC_ONLY',waterSource:c.water?.source??'none',coveredFiles:c.water?.coveredFiles??[],additionalFlowFiles:c.water?.additionalFlowFiles??0,
   removalTrials:c.removalTrials??[],limits:c.limits??[],boundaries:{instrument:'API hooks, not an operating-system sandbox',python:'Python audit cannot rewrite child argv; child coverage may be incomplete',paidCalls:'Stand-ins only; never live',network:'Denied during execution',credentials:'Removed from child environment',externalActions:'Deployment, publishing, mail and production writes are forbidden'},
   evidence:c.evidence??[],extractionBasis:'Agent-read source with explicit anchors; coverage is observation, not business acceptance'};
@@ -51,6 +53,7 @@ const levels={STATIC_ONLY:'只有靜態',TEST_EXECUTED:'測試跑過',AGENT_DRIV
 export function renderCardMarkdown(c){
  const lines=['# '+c.title+'：體檢卡','','證據等級：'+(levels[c.evidenceLevel]??c.evidenceLevel)+'；觀測到 '+c.coveredFiles.length+' 個檔案，比只讀原碼多 '+c.additionalFlowFiles+' 個實跑檔案。','','儀器是在程式的 API 上掛記錄器，不是作業系統沙盒。Python 記錄器不能改寫子程序參數；該部分可能缺少覆蓋。',''];
  for(const [key,label] of Object.entries(labels)){lines.push('## '+label,'','~~~json',JSON.stringify(c[key],null,2),'~~~','');}
+ if(c.stopSites)lines.push('## \u5ba3\u544a\u5c0d\u7167\uff1a\u963b\u64cb\u9ede','','~~~json',JSON.stringify(c.stopSites,null,2),'~~~','');
  return lines.join('\n');
 }
 export function renderCardSection(c){
@@ -58,7 +61,7 @@ export function renderCardSection(c){
  const summaries={entries:'入口與參數格式請展開查看；未確認的入口保持未知。',inputs:c.inputs.summary??c.inputs.description??'輸入格式仍待確認。',outputs:c.outputs.summary??c.outputs.description??'輸出與位置仍待確認。',sideEffects:c.sideEffects.description??'程序、網路及寫入需依本次紀錄判讀。',cost:'本次只准使用替身；未執行的外部服務費用仍未知。',tools:'工具版本與檔案指紋請展開查看。',runnability:(c.runnability.cleanupUnverified?c.runnability.description:state[c.runnability.status])??'仍缺證據',declarations:'已核對 '+c.declarations.length+' 條宣告；其中 '+c.declarations.filter(d=>d.status==='FAIL').length+' 條不一致，'+c.declarations.filter(d=>d.status==='UNKNOWN').length+' 條缺證據。',removalTrials:c.removalTrials.length?'各候選結果列於下方。':'本次沒有執行拆除試驗。',limits:'覆蓋僅表示路徑曾執行，不表示所有功能均正確。',boundaries:'網路預設拒絕、移除金鑰、禁止真實付費與部署。'};
  const candidateRows=c.removalTrials.flatMap(t=>t.candidates??[t]).map(t=>'<p>'+esc(t.path??t.id??'候選')+'：'+esc(t.status??'UNKNOWN')+'</p>').join('');
  const sections=Object.entries(labels).map(([k,l])=>'<div><h3>'+l+'</h3><p>'+esc(summaries[k])+'</p>'+(k==='removalTrials'?candidateRows:'')+'<details><summary>查看依據</summary><pre>'+esc(JSON.stringify(c[k],null,2))+'</pre></details></div>').join('');
- return '<section id="check-card"><style>#check-card{font-family:system-ui;line-height:1.6;margin:16px auto;max-width:900px;padding:16px;box-sizing:border-box;color:var(--fg,#202632);background:var(--card,#fff);border:1px solid #7b8494;border-radius:12px}#check-card pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}#check-card summary{font-weight:700;padding:12px 0}#check-card details{border-top:1px solid #7b8494}#check-card p{overflow-wrap:anywhere}@media(prefers-color-scheme:dark){#check-card{color:#e8edf4;background:#151c28}}</style><h2>體檢卡</h2><details><summary>受查對象</summary><p>'+esc(c.title)+'</p></details><p>證據等級：'+esc(levels[c.evidenceLevel]??c.evidenceLevel)+'。觀測 '+c.coveredFiles.length+' 個檔案；比靜態多 '+c.additionalFlowFiles+' 個實跑檔案。</p><p>記錄器只在程式介面上掛勾，不是作業系統沙盒。部分子程序參數不能改寫，覆蓋可能不完整。</p>'+sections+'</section>';
+ return '<section id="check-card"><style>#check-card{font-family:system-ui;line-height:1.6;margin:16px auto;max-width:900px;padding:16px;box-sizing:border-box;color:var(--fg,#202632);background:var(--card,#fff);border:1px solid #7b8494;border-radius:12px}#check-card pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}#check-card summary{font-weight:700;padding:12px 0}#check-card details{border-top:1px solid #7b8494}#check-card p{overflow-wrap:anywhere}@media(prefers-color-scheme:dark){#check-card{color:#e8edf4;background:#151c28}}</style><h2>體檢卡</h2><details><summary>受查對象</summary><p>'+esc(c.title)+'</p></details><p>證據等級：'+esc(levels[c.evidenceLevel]??c.evidenceLevel)+'。觀測 '+c.coveredFiles.length+' 個檔案；比靜態多 '+c.additionalFlowFiles+' 個實跑檔案。</p><p>記錄器只在程式介面上掛勾，不是作業系統沙盒。部分子程序參數不能改寫，覆蓋可能不完整。</p>'+sections+renderStopComparison(c.stopSites,'card-stop-site-comparison')+'</section>';
 }
 export function writeCard(c,out,healthFile){
  const card=buildCard(c);fs.mkdirSync(out,{recursive:true});const receipts=[];

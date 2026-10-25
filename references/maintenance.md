@@ -84,3 +84,5 @@ health.json 保留舊 stats、issues、groups、blocks、links、limitations、s
 HTML 保留原技術報告展開區；Markdown 不再嵌入整份舊報告與每卡 JSON。舊文字連結重定位仍由 renderLegacyMarkdown 的相容性檢查覆蓋。流程圖、路線動態圖與體檢卡不改。
 
 主畫面繁中敘述不放英文 JSON 欄位或 :UNKNOWN；檔名、明確標記的命令、原始錯誤及穩定識別碼保留原字。禁用詞檢查只豁免這些必須可核對的內容。維修單不是完整故障偵測器；後續盲測與業務驗收仍須獨立進行。
+
+阻擋點亦屬宣告對照：提供政策清單與 reason／關鍵字表，分底線、要處理、不確定；無宣告只列清單，防呆與混合條件不硬判。設定、錨點與限制見[阻擋點](stop-sites.md)。
