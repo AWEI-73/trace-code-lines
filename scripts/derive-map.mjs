@@ -3,7 +3,7 @@ import {buildFrameworkGraph} from './gas-framework.mjs';
 // Parameterized packaging of MAP-2; target code is read, never imported.
 import fs from 'node:fs';
 import cp from 'node:child_process';
-import {resolve,relative,isAbsolute,join} from 'node:path';
+import {resolve,relative,isAbsolute,join,dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {writerCandidates} from './language-static.mjs';
 import {attachInferenceLayer} from './inference-layer.mjs';
@@ -68,7 +68,7 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
   if(typeof config.repo!=='string'||!isAbsolute(config.repo))throw Error('repo must be absolute');
   if(typeof config.temp!=='string'||!isAbsolute(config.temp))throw Error('temp must be absolute');
   const {repo,temp,scratch}=tempLayout(config);
-  if((process.env.TEMP&&resolve(process.env.TEMP)!==temp)||(process.env.TMP&&resolve(process.env.TMP)!==temp))throw Error('Keep process TEMP/TMP fixed. Set config.temp to the current TEMP and put clone/scratch in separate subdirectories.');
+  if((process.env.TEMP&&resolve(process.env.TEMP)!==temp)||(process.env.TMP&&resolve(process.env.TMP)!==temp))throw Error('Keep process TEMP/TMP fixed. Set config.temp to the current TEMP and put clone/scratch in separate subdirectories. '+JSON.stringify({'config.temp':config.temp,'process TEMP':process.env.TEMP??null,'process TMP':process.env.TMP??null}));
   const commands=[];
   const git=args=>{
     commands.push({bin:'git',args:['-C',repo,...args]});
@@ -192,22 +192,32 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
   return result;
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) {
-  if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node derive-map.mjs --config file [--calibrate-only] [--inferred-edges file] [--calibration file]");process.exit(0);}
+  if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node derive-map.mjs --config file [--calibrate-only] [--inferred-edges file] [--calibration file] [--out file]");process.exit(0);}
 
   try {
     const args=process.argv.slice(2);
-    if(args[0]!=='--config'||!args[1])throw Error('Usage: node derive-map.mjs --config file [--calibrate-only] [--inferred-edges file] [--calibration file]');
-    let calibrateOnly=false,inferredEdges,calibration;
+    if(args[0]!=='--config'||!args[1])throw Error('Usage: node derive-map.mjs --config file [--calibrate-only] [--inferred-edges file] [--calibration file] [--out file]');
+    let calibrateOnly=false,inferredEdges,calibration,out;
     for(let i=2;i<args.length;i++){
       if(args[i]==='--calibrate-only'&&!calibrateOnly)calibrateOnly=true;
+      else if(args[i]==='--out'&&args[i+1]&&!args[i+1].startsWith('--')&&out===undefined)out=resolve(args[++i]);
       else if(args[i]==='--calibration'&&args[i+1]&&calibration===undefined)calibration=resolve(args[++i]);
       else if(args[i]==='--inferred-edges'&&args[i+1]&&inferredEdges===undefined)inferredEdges=resolve(args[++i]);
       else throw Error('Unknown, duplicate or incomplete argument: '+args[i]);
     }
     const config=JSON.parse(fs.readFileSync(args[1],'utf8'));
     if(calibration)config.calibration={...(config.calibration??{}),roots:config.calibration?.roots??config.roots,baseline:{path:calibration}};
+    if(out){
+      noLinks(out);
+      const within=(root,p)=>{const r=relative(resolve(root),p).replaceAll('\\','/');return r===''||(!r.startsWith('../')&&r!=='..'&&!isAbsolute(r));};
+      if([config.repo,...(config.protectedRoots??[])].some(root=>within(root,out)))throw Error('Output must be outside repo/protected roots');
+      if(fs.existsSync(out))throw Error('Output already exists');
+    }
     const result=analyze(config,{calibrateOnly,inferredEdges,progress:message=>process.stderr.write(message+'\n')});
-    process.stdout.write(JSON.stringify(result,null,2)+'\n');
+    if(out){
+      fs.mkdirSync(dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify(result,null,2)+'\n',{encoding:'utf8',flag:'wx'});
+      process.stdout.write(JSON.stringify({schema:result.schema,status:result.status,toolVersion:result.toolVersion,outputs:{map:out}})+'\n');
+    }else process.stdout.write(JSON.stringify(result,null,2)+'\n');
     if(result.status.startsWith('STOPPED'))process.exitCode=2;
   } catch(error) {
     process.stderr.write(JSON.stringify({status:'ERROR',message:error.message})+'\n');

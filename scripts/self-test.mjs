@@ -1,3 +1,4 @@
+import {reach,importUses} from './reach.mjs';
 import {scanStopSites,readStopPolicy,compareStopSites,stopMaintenanceItems,renderStopComparison} from './stop-sites.mjs';
 import {failureRows,clusterFailures,projectSite,relativeCommand} from './maintenance-failures.mjs';
 import {groupMaintenance,buildMaintenance,loadMaintenanceWater,renderMaintenanceHTML,renderMaintenanceMarkdown} from './maintenance.mjs';
@@ -58,6 +59,7 @@ const files={
   'escape.mjs':"import '../outside.mjs';\n"
 };
 try {
+  if(process.env.TRACE_G190_ONLY){console.log(JSON.stringify({status:'PASS',checks:g190Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G180_ONLY){console.log(JSON.stringify({status:'PASS',checks:g180Checks()}));process.exit(0);}
   if(process.env.TRACE_G170_ONLY){console.log(JSON.stringify({status:'PASS',checks:g170Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G160_ONLY){console.log(JSON.stringify({status:'PASS',checks:await g160Checks(root)}));process.exit(0);}
@@ -540,7 +542,7 @@ try {
 }
 
 async function g7Checks(root,only){
-  const checks=[...g180Checks(),...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
+  const checks=[...g190Checks(root),...g180Checks(),...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
   const baseline=old?await import(pathToFileURL(join(old,'scripts/language-static.mjs')).href):null;
   const oldInference=old?await import(pathToFileURL(join(old,'scripts/inference-layer.mjs')).href):null;
   const oldReconcile=old?await import(pathToFileURL(join(old,'scripts/gap-reconcile.mjs')).href):null;
@@ -1547,3 +1549,56 @@ function g180Checks(){
  check('source read failures stay explicit',()=>{const x=compareStopSites({files:['absent.py'],read,config});assert.equal(x.status,'UNKNOWN');assert.equal(x.readFailures.length,1);});
  return checks;
 }
+
+function g190Checks(root){
+ const checks=[],check=(name,fn)=>{fn();checks.push('G190 '+name);};
+ const base=join(root,'reach-case'),repo=join(base,'repo'),scratch=join(base,'scratch');fs.mkdirSync(repo,{recursive:true});fs.mkdirSync(scratch);
+ const put=(p,s)=>{const f=join(repo,p);fs.mkdirSync(dirname190(f),{recursive:true});fs.writeFileSync(f,s,'utf8');};
+ put('main.mjs',"import {used} from './used.mjs';\nimport {legacy} from './legacy.mjs';\nused();\nexport const chosen=declared => declared ?? legacy;\n");
+ put('used.mjs','export function used(){return 1;}\n');put('legacy.mjs','export function legacy(){return 2;}\n');put('solo.mjs','throw Error("NEVER_EXECUTE_TARGET");\n');
+ put('tests/main.test.mjs',"import {used} from '../used.mjs';\nused();\n");
+ const run=(script,args=[],extra={})=>spawnSync(process.execPath,[fileURLToPath(new URL(script,import.meta.url)),...args],{encoding:'utf8',env:process.env,...extra});
+ const git=args=>{const r=spawnSync('git',['-C',repo,...args],{encoding:'utf8',env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+ for(const a of [['init'],['config','core.autocrlf','false'],['add','.'],['-c','user.name=Fixture','-c','user.email=fixture.invalid','-c','core.hooksPath='+scratch,'-c','commit.gpgsign=false','commit','-m','synthetic']])git(a);
+ const config={repo,temp:process.env.TEMP,scratch,roots:['main.mjs','solo.mjs','tests/main.test.mjs'],classification:{rules:[{name:'tests',pattern:'^tests/'},{name:'source',pattern:'\\.mjs$'}],fallback:'other'}};
+ const cfg=join(base,'config.json');fs.writeFileSync(cfg,JSON.stringify(config));
+ const cli=run('./derive-map.mjs',['--config',cfg]);let map;
+ check('derive stdout is directly parseable JSON',()=>{assert.equal(cli.status,0,cli.stderr);map=JSON.parse(cli.stdout);assert.equal(map.schema,'trace-code-lines-v1');});
+ check('derive progress remains on stderr',()=>{assert(cli.stderr.includes('map: inventory'));assert(cli.stderr.includes('walk: starting'));assert(!cli.stdout.includes('map: inventory'));});
+ const out=join(base,'map.json'),written=run('./derive-map.mjs',['--config',cfg,'--out',out]);
+ check('derive out summary has absolute output and full map file',()=>{assert.equal(written.status,0,written.stderr);assert.equal(JSON.parse(written.stdout).outputs.map,resolve(out));assert.equal(JSON.parse(fs.readFileSync(out)).schema,map.schema);assert(written.stdout.length<500);});
+ check('out preserves analysis data with accurate invocation metadata',()=>{const expected=analyze(config),saved=JSON.parse(fs.readFileSync(out));expected.command={bin:process.execPath,args:[fileURLToPath(new URL('./derive-map.mjs',import.meta.url)),'--config',cfg,'--out',out]};assert.deepEqual(saved,expected);});
+ check('derive refuses overwrite and output inside repo',()=>{for(const p of [out,join(repo,'x.json')])assert.equal(run('./derive-map.mjs',['--config',cfg,'--out',p]).status,1);assert(!fs.existsSync(join(repo,'x.json')));});
+ check('TEMP mismatch includes config TEMP and TMP values',()=>{const r=run('./derive-map.mjs',['--config',cfg],{env:{...process.env,TEMP:base,TMP:scratch}});assert.equal(r.status,1);const m=JSON.parse(r.stderr.trim().split('\n').at(-1)).message;for(const x of ['config.temp','process TEMP','process TMP',JSON.stringify(config.temp).slice(1,-1),JSON.stringify(base).slice(1,-1),JSON.stringify(scratch).slice(1,-1)])assert(m.includes(x),x);});
+ const result=reach(map,['solo.mjs','used.mjs','legacy.mjs']);
+ check('self root is orphan candidate without executing target',()=>{const r=result.targets[0];assert(r.onlySelfRoot);assert.equal(r.verdictHint,'ORPHAN_CANDIDATE');});
+ check('direct source use is reachable and populations separate',()=>{const r=result.targets[1];assert.equal(r.verdictHint,'REACHABLE');assert.deepEqual(r.roots.source,['main.mjs']);assert.deepEqual(r.roots.tests,['tests/main.test.mjs']);});
+ check('fallback value reference gives guarded hint',()=>{const r=result.targets[2];assert.equal(r.verdictHint,'REACHABLE_ONLY_BEHIND_GUARD');assert.equal(r.callSites[0].kind,'REFERENCE');assert.equal(r.callSites[0].conditionStatus,'UNKNOWN');});
+ check('importers carry existing edge line names and source hash',()=>{const r=result.targets[1];assert.equal(r.importers[0].line,1);assert.deepEqual(r.importers[0].names,[{imported:'used',local:'used'}]);assert.equal(r.importers[0].sourceSha256,sha256(fs.readFileSync(join(repo,'main.mjs'))));});
+ check('uses include exact line snippet hash',()=>{const r=result.targets[1].callSites[0];assert.equal(r.line,3);assert.equal(r.snippet,'used();');assert.equal(r.snippetSha256,sha256('used();'));});
+ const edge={kind:'STATIC_IMPORT',path:'main.mjs',line:1,specifier:'./legacy.mjs',targets:['legacy.mjs']};
+ const scan=body=>importUses(edge,"import {legacy as fallback} from './legacy.mjs';\n"+body);
+ check('aliases and multiline imports preserve local binding',()=>{const r=importUses(edge,"import {\nlegacy as fallback\n} from './legacy.mjs';\nfallback();");assert.equal(r.names[0].local,'fallback');assert.equal(r.callSites[0].line,4);});
+ check('nullish and logical RHS are guarded, left use is not',()=>{const r=scan('const a=x ?? fallback();\nconst b=x || fallback();\nconst c=fallback() || x;\n');assert.deepEqual(r.callSites.map(s=>s.guarded),['FALLBACK_GUARD','FALLBACK_GUARD',null]);});
+ check('ternary false branch guarded and true branch not inferred',()=>{const r=scan('const a=x ? other() : fallback();\nconst b=x ? fallback() : other();\n');assert.deepEqual(r.callSites.map(s=>s.guarded),['FALLBACK_GUARD',null]);});
+ check('negated if single statement and multiline block',()=>{const r=scan('if(!declared.length) return fallback();\nif(!declared){\n fallback();\n}\nfallback();\n');assert.deepEqual(r.callSites.map(s=>s.guarded),['FALLBACK_GUARD','FALLBACK_GUARD',null]);});
+ check('comments strings regex and property names excluded',()=>{const r=scan('// fallback();\nconst s="fallback()";\nconst re=/fallback/;\nobj.fallback();\nfallback();\n');assert.equal(r.callSites.length,1);assert.equal(r.callSites[0].line,6);});
+ check('guard cannot spill across semicolon on same line',()=>{const r=scan('const x=declared ?? 1; fallback();');assert.equal(r.callSites[0].guarded,null);});
+ check('guard does not leak across automatic semicolon insertion',()=>{const r=scan('const x=declared ?? 1\nfallback()\n');assert.equal(r.callSites[0].guarded,null);});
+ check('shadowed function and arrow parameters disclose ambiguity',()=>{for(const body of ['function f(fallback){return x ?? fallback();}','const f=(fallback)=>x ?? fallback();','const f=fallback=>x ?? fallback();'])assert(scan(body).gaps.some(g=>g.code==='BINDING_SHADOW_OR_PARAMETER_USE'));});
+ check('multiple same-line imports anchor correct specifier',()=>{const r=importUses(edge,"import {x} from './x.mjs'; import {legacy} from './legacy.mjs'; legacy();");assert.deepEqual(r.names,[{imported:'legacy',local:'legacy'}]);assert.equal(r.callSites.length,1);});
+ check('re-export preserves names and explicitly lacks local use',()=>{const r=importUses(edge,"export {legacy as api} from './legacy.mjs';");assert.equal(r.names[0].imported,'legacy');assert.equal(r.names[0].local,null);assert(r.gaps.some(g=>g.code==='REEXPORT_USES_UNKNOWN'));});
+ check('side-effect imports remain explicit gaps',()=>{assert(importUses(edge,"import './legacy.mjs';").gaps.some(g=>g.code==='SIDE_EFFECT_OR_UNSUPPORTED_IMPORT'));});
+ check('missing target and absent map membership become unknown',()=>{assert.equal(reach(map,['absent.mjs']).targets[0].verdictHint,'UNKNOWN');const m=structuredClone(map);m.closures=m.closures.filter(c=>c.root!=='solo.mjs');assert.equal(reach(m,['solo.mjs']).targets[0].verdictHint,'UNKNOWN');});
+ check('head mismatch degrades every target',()=>{const r=reach({...map,head:'0'.repeat(40)},['solo.mjs','used.mjs']);assert(r.targets.every(t=>t.verdictHint==='UNKNOWN'&&t.gaps.some(g=>g.code==='MAP_HEAD_MISMATCH')));});
+ check('dirty working tree cannot reuse map as current',()=>{fs.appendFileSync(join(repo,'used.mjs'),'// changed\n');try{assert(reach(map,['used.mjs']).targets[0].gaps.some(g=>g.code==='REPO_DIRTY'));}finally{put('used.mjs','export function used(){return 1;}\n');}});
+ check('absolute target accepted only inside repo and traversal denied',()=>{assert.equal(reach(map,[join(repo,'solo.mjs')]).targets[0].target,'solo.mjs');for(const p of ['../escape.mjs',join(base,'escape.mjs')])assert.throws(()=>reach(map,[p]),/regular package-relative/);});
+ check('duplicate edges and targets do not duplicate evidence',()=>{const m=structuredClone(map);m.closures.push(m.closures[0]);const r=reach(m,['legacy.mjs','legacy.mjs']);assert.equal(r.targets.length,1);assert.equal(r.targets[0].importers.length,1);assert.equal(r.targets[0].callSites.length,1);});
+ check('explicit population beats conventional heuristic',()=>{const m=structuredClone(map);m.closures[0].population='tests';const r=reach(m,['legacy.mjs']).targets[0];assert.equal(r.verdictHint,'ORPHAN_CANDIDATE');assert.deepEqual(r.roots.tests,['main.mjs']);});
+ check('reach CLI combines repeated targets and file; out stays JSON',()=>{const list=join(base,'targets.json');fs.writeFileSync(list,JSON.stringify(['legacy.mjs']));const p=join(base,'reach.json'),r=run('./reach.mjs',['--map',out,'--target','solo.mjs','--target','used.mjs','--targets-file',list,'--out',p]);assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).outputs.reach,resolve(p));assert.deepEqual(JSON.parse(fs.readFileSync(p)).targets.map(t=>t.verdictHint),['ORPHAN_CANDIDATE','REACHABLE','REACHABLE_ONLY_BEHIND_GUARD']);});
+ check('reach JSON stdout and newline target list',()=>{const list=join(base,'targets.txt');fs.writeFileSync(list,'solo.mjs\r\nlegacy.mjs\r\n');const r=run('./reach.mjs',['--map',out,'--targets-file',list]);assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).targets.length,2);});
+ check('reach rejects input overwrite and repo output',()=>{for(const p of [out,join(repo,'bad.json')]){const r=run('./reach.mjs',['--map',out,'--target','solo.mjs','--out',p]);assert.equal(r.status,1);}assert.equal(git(['status','--porcelain']),'');});
+ check('hints never contain a deletion verdict',()=>{assert(result.targets.every(t=>['ORPHAN_CANDIDATE','REACHABLE','REACHABLE_ONLY_BEHIND_GUARD','UNKNOWN'].includes(t.verdictHint)));assert.equal(result.readOnly.status,'PASS');});
+ return checks;
+}
+function dirname190(p){return resolve(p,'..');}

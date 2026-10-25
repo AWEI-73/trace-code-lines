@@ -1,5 +1,12 @@
 # 版本記錄
 
+## 1.19.0（2026-10-26）
+
+- derive-map 保持 stdout 純 JSON、進度走 stderr，新增 --out 完整地圖與精簡收據。
+- 新增 reach：反查入口、直接 importer、名稱使用與回退提示；舊地圖版本不符降 UNKNOWN，不代為決策。
+- TEMP 不一致錯誤附 config.temp、process TEMP、process TMP。
+- 擴充既有 self-test；公開包不含真實校準地圖或案例。
+
 ## 1.18.0（2026-10-25）
 
 - 宣告對照新增可選阻擋點檢查：JS／TS／Python 終止、拒絕狀態與單跳同檔 wrapper 候選，保存行、symbol、片段 hash、訊息與 reason code。

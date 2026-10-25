@@ -9,9 +9,14 @@
 ```text
 node /absolute/trace-code-lines/scripts/derive-map.mjs --config /absolute/config.json --calibrate-only
 node /absolute/trace-code-lines/scripts/derive-map.mjs --config /absolute/config.json
+node /absolute/trace-code-lines/scripts/derive-map.mjs --config /absolute/config.json --out /absolute/trace-map.json
 ```
 
-程式只讀取 repo，輸出 JSON 到 stdout；不寫 repo，不 import 受測模組。
+程式只讀取 repo，不 import 受測模組。stdout 僅有 JSON，可直接 `JSON.parse`；map/walk 進度與錯誤走 stderr。
+不帶 `--out` 時 stdout 是完整地圖；帶 `--out <file>` 時完整地圖寫入新檔，stdout 只回傳 `{schema,status,toolVersion,outputs:{map:"absolute-path"}}`。
+輸出必須在 repo/protectedRoots 外，不覆寫既有檔案，不跟隨 symlink。圖內 command 仍記錄真實 Node argv。
+report、check-card、gap-reconcile 的 JSON 成功輸出也在 stdout，錯誤與 gap-reconcile 寫入檢查在 stderr；其既有輸出格式不變。
+需反查目標時讀 [reach](reach.md)。
 移除 --calibrate-only 才產生 roots、closures、zeroCoverageCandidates、populationStats。
 校準失敗 exit 2 並省略閉包／候選；唯讀完整性失敗亦 exit 2。
 輸入／Git／I/O 錯誤 exit 1。exit 0 只代表程序完成，還要讀 status、
@@ -73,6 +78,7 @@ calibration、每根 gaps 與 readOnly；UNCALIBRATED/PARTIAL 不能當校準 PA
 
 上面是配置形狀示例；用真實根與獨立基準替換，不能把示例當受測資料。
 
+- TEMP/TMP 不一致時錯誤訊息附 `config.temp`、`process TEMP`、`process TMP` 三值；未設值以 null 呈現。
 - repo/temp 必須存在且為絕對路徑；config.temp 必須等於既有程序 TEMP/TMP；工具不改程序環境。
   另可指定 scratch：固定 TEMP=X、repo=X/clone、scratch=X/scratch；兩個子目錄不得互相包含。
   scratch 預設 temp；scratch 與 repo/protectedRoots 任一方向重疊都拒絕。程序 TEMP/TMP 維持 X，不切換成 scratch。
@@ -88,7 +94,7 @@ calibration、每根 gaps 與 readOnly；UNCALIBRATED/PARTIAL 不能當校準 PA
   腳本不會自行產生「真實閉包」。未校準的一切候選標 PROVISIONAL_STATIC。
 - classification 規則由 caller 提供，順序優先、互斥統計，fallback 必填。
   可加其他分類，但 source/tests/fixtures/docs 應分開；flags 不允許 g/y。
-- config 本身與輸出也要放 repo 外。程式不代為建立或寫入輸出。
+- config 本身與輸出也要放 repo 外。`--out` 會建立輸出父目錄與新檔；不帶時不寫檔。
 - commands 記錄實跑 Git argv；command 記 Node argv；configurationSha256 綁定配置。
   readOnly 記前後 status/HEAD、tracked 可讀檔雜湊差異及 unhashed 清單。
 

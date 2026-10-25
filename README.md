@@ -1,4 +1,4 @@
-# Trace Code Lines 1.18.0
+# Trace Code Lines 1.19.0
 
 [English](#english) · [繁體中文](#traditional-chinese)
 
@@ -8,6 +8,8 @@
 Trace Code Lines never treats a description as proof of success. Its review workflow ties each conclusion to a code location or an actual execution record and labels its evidence level: **real use > scenarios with stand-ins > executed tests > static reading**. An agent's narrative is not evidence. Authorized runs take place in isolated copies, use stand-ins for paid services and models, remove credentials from the child environment, and block live paid, login and deployment actions. The result is a human-facing maintenance sheet: related observations are grouped, marked **broken / needs attention / fine / uncertain**, and accompanied by repair guidance and verification commands when the evidence supports them.
 
 Stop-site comparison is available under declaration checks. Add `stopSites.policy` to the report configuration to compare JS/TS/Python termination and refusal candidates with an explicitly supplied hard-block policy. Results are baseline, needs attention or uncertain, with source/policy anchors, file-route reach and available verification commands. Private/type guards and mixed conditions remain uncertain; without a declaration, the tool lists candidates only. Reason/keyword mappings are optional, and results remain diagnostic suggestions for agent review. See [configuration and limitations](references/stop-sites.md).
+
+Reverse a map with `node scripts/reach.mjs --map map.json --target src/helper.mjs` (repeat `--target`, or use `--targets-file`). It reports roots by population, direct importers, lexical uses with snippet hashes, and fallback guard hints. Hints support agent review and never authorize deletion; stale maps become UNKNOWN. `derive-map` and `reach` emit parseable JSON on stdout; `derive-map` progress goes to stderr. With `--out`, the full JSON goes to a new file and stdout contains a compact JSON receipt with absolute `outputs` paths. See [reach](references/reach.md) and [runner](references/runner.md).
 
 ### How it differs from maps and summaries
 
@@ -103,6 +105,8 @@ Trace Code Lines **不把描述當成功**。查線流程要求每個結論對�
 
 
 宣告對照新增阻擋點檢查：在報告設定提供 `stopSites.policy`，把 JS／TS／Python 終止與拒絕候選分成底線、要處理、不確定，附原碼／宣告錨點、檔案路線與可用驗證命令。內部防呆與混合條件保留不確定；沒宣告只能列清單，沒有 reason code 時準確度較低。結果交給 agent 判讀，不替人決定。設定與限制見[阻擋點對照](references/stop-sites.md)。
+新增 `reach.mjs --map map.json --target src/helper.mjs`，可重複 `--target` 或用 `--targets-file`，反查入口分組、直接 importer、名稱使用行與片段 hash、回退條件。提示交給 agent 判讀，不授權刪除；地圖版本不同時降為 UNKNOWN。derive-map 與 reach 的 stdout 可直接解析 JSON，進度走 stderr；`--out` 寫入完整 JSON，stdout 僅留含絕對路徑 `outputs` 的精簡收據。詳見 [reach](references/reach.md) 與 [runner](references/runner.md)。
+
 ### 跟地圖或摘要工具差在哪
 
 依賴地圖顯示程式指向哪裡，摘要描述程式看起來做什麼。這個流程還會核對文件宣告與實作、區分已觀測故障和靜態候選，並說清楚哪些路徑真的跑過。缺證據就明寫。故障合併只表示觀測到相同邊界，不代表已證明共同根因。agent 仍須讀原碼並提出語義判讀；這不是全自動的正確性檢查器。

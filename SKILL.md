@@ -1,6 +1,6 @@
 ---
 name: trace-code-lines
-version: 1.18.0
+version: 1.19.0
 description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，交付可追到證據的體檢卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
 
@@ -28,6 +28,7 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 證據由強到弱：真實使用 ＞ AGENT_DRIVEN_STUBBED ＞ 測試跑過 ＞ 只有靜態；替身不能升格為真實使用。
 
 按需讀取：
+- 反查入口、importer 與回退條件：[reach](references/reach.md)，只提供判讀提示。
 - 既有事件分類、普查與路線骨架：[record-census](references/record-census.md)；單案連結：[runtime-tools](references/runtime-tools.md)。
 - 覆蓋對帳與語言限制：[language-support](references/language-support.md)。
 - 隔離試跑或拆除試驗：[run-once](references/run-once.md)。程序成功與候選拆除結果分開，逐候選列出。
@@ -47,4 +48,4 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 
 ## 版本
 
-目前版本：1.18.0（2026-10-25）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.19.0（2026-10-26）。歷史見 [changelog](references/changelog.md)。
