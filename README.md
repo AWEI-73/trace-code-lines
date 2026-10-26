@@ -1,4 +1,4 @@
-# Trace Code Lines 1.19.0
+# Trace Code Lines 1.20.0
 
 [English](#english) · [繁體中文](#traditional-chinese)
 
@@ -10,6 +10,8 @@ Trace Code Lines never treats a description as proof of success. Its review work
 Stop-site comparison is available under declaration checks. Add `stopSites.policy` to the report configuration to compare JS/TS/Python termination and refusal candidates with an explicitly supplied hard-block policy. Results are baseline, needs attention or uncertain, with source/policy anchors, file-route reach and available verification commands. Private/type guards and mixed conditions remain uncertain; without a declaration, the tool lists candidates only. Reason/keyword mappings are optional, and results remain diagnostic suggestions for agent review. See [configuration and limitations](references/stop-sites.md).
 
 Reverse a map with `node scripts/reach.mjs --map map.json --target src/helper.mjs` (repeat `--target`, or use `--targets-file`). It reports roots by population, direct importers, lexical uses with snippet hashes, and fallback guard hints. Hints support agent review and never authorize deletion; stale maps become UNKNOWN. `derive-map` and `reach` emit parseable JSON on stdout; `derive-map` progress goes to stderr. With `--out`, the full JSON goes to a new file and stdout contains a compact JSON receipt with absolute `outputs` paths. See [reach](references/reach.md) and [runner](references/runner.md).
+
+Check dependency direction across repositories with `node scripts/boundary.mjs --config boundary.json [--out result.json]`. Configured zones and marker rules classify resolved static edges and lexical dynamic import/require/read/spawn paths as VIOLATION, DECLARED, ALLOWED or UNKNOWN. Every finding carries source anchors and hashes; unknown paths and skipped files remain visible. A declared marker is a routing signal, not proof of runtime safety. Findings support maintenance and check-card review at most as needs attention, without changing broken counts. See [boundary configuration and limits](references/boundary.md).
 
 ### How it differs from maps and summaries
 
@@ -106,6 +108,8 @@ Trace Code Lines **不把描述當成功**。查線流程要求每個結論對�
 
 宣告對照新增阻擋點檢查：在報告設定提供 `stopSites.policy`，把 JS／TS／Python 終止與拒絕候選分成底線、要處理、不確定，附原碼／宣告錨點、檔案路線與可用驗證命令。內部防呆與混合條件保留不確定；沒宣告只能列清單，沒有 reason code 時準確度較低。結果交給 agent 判讀，不替人決定。設定與限制見[阻擋點對照](references/stop-sites.md)。
 新增 `reach.mjs --map map.json --target src/helper.mjs`，可重複 `--target` 或用 `--targets-file`，反查入口分組、直接 importer、名稱使用行與片段 hash、回退條件。提示交給 agent 判讀，不授權刪除；地圖版本不同時降為 UNKNOWN。derive-map 與 reach 的 stdout 可直接解析 JSON，進度走 stderr；`--out` 寫入完整 JSON，stdout 僅留含絕對路徑 `outputs` 的精簡收據。詳見 [reach](references/reach.md) 與 [runner](references/runner.md)。
+
+新增 `boundary.mjs --config boundary.json [--out result.json]`，以 zone 與 marker 規則檢查跨 repo 依賴方向。靜態邊與動態 import／require／read／spawn 路徑分為 VIOLATION、DECLARED、ALLOWED、UNKNOWN，附原碼錨點、hash、命中 marker 與缺口。負面觀察附檔數與略過原因；宣告命中不是執行安全證明。結果可附入維修單與體檢卡，最多標為要處理，不改壞了的計數。詳見 [boundary](references/boundary.md)。
 
 ### 跟地圖或摘要工具差在哪
 

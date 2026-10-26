@@ -1,3 +1,4 @@
+import {boundary,pathSites} from './boundary.mjs';
 import {reach,importUses} from './reach.mjs';
 import {scanStopSites,readStopPolicy,compareStopSites,stopMaintenanceItems,renderStopComparison} from './stop-sites.mjs';
 import {failureRows,clusterFailures,projectSite,relativeCommand} from './maintenance-failures.mjs';
@@ -59,6 +60,7 @@ const files={
   'escape.mjs':"import '../outside.mjs';\n"
 };
 try {
+  if(process.env.TRACE_G200_ONLY){console.log(JSON.stringify({status:'PASS',checks:g200Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G190_ONLY){console.log(JSON.stringify({status:'PASS',checks:g190Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G180_ONLY){console.log(JSON.stringify({status:'PASS',checks:g180Checks()}));process.exit(0);}
   if(process.env.TRACE_G170_ONLY){console.log(JSON.stringify({status:'PASS',checks:g170Checks(root)}));process.exit(0);}
@@ -542,7 +544,7 @@ try {
 }
 
 async function g7Checks(root,only){
-  const checks=[...g190Checks(root),...g180Checks(),...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
+  const checks=[...g200Checks(root),...g190Checks(root),...g180Checks(),...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
   const baseline=old?await import(pathToFileURL(join(old,'scripts/language-static.mjs')).href):null;
   const oldInference=old?await import(pathToFileURL(join(old,'scripts/inference-layer.mjs')).href):null;
   const oldReconcile=old?await import(pathToFileURL(join(old,'scripts/gap-reconcile.mjs')).href):null;
@@ -1602,3 +1604,75 @@ function g190Checks(root){
  return checks;
 }
 function dirname190(p){return resolve(p,'..');}
+
+function g200Checks(root){
+ const checks=[],check=(name,fn)=>{fn();checks.push('G200 '+name);};
+ const base=join(root,'boundary-case'),a=join(base,'a'),b=join(base,'b'),output=join(base,'out');
+ for(const p of [a,b,output])fs.mkdirSync(p,{recursive:true});
+ const put=(repo,file,s)=>{const p=join(repo,file);fs.mkdirSync(dirname190(p),{recursive:true});fs.writeFileSync(p,s,'utf8');};
+ put(a,'client/static.mjs',"import '../server/api.mjs';\n");put(a,'server/api.mjs','throw Error("TARGET_MUST_NEVER_RUN");\n');
+ put(a,'client/dynamic.mjs',"async function run(input){\nconst base=join(input.engineRoot,'engine/lib');\nreturn import(pathToFileURL(join(base,'entry.mjs')));\n}\n");
+ put(a,'client/unknown.mjs','import(unresolved);\n');
+ put(a,'client/read.mjs',"readFileSync(join(input.engineRoot,'data.json'),'utf8');\n");
+ put(a,'client/spawn.mjs',"spawn('node',[join(input.engineRoot,'entry.mjs')],{cwd:input.otherRoot});\n");
+ put(a,'client/python.py',"import importlib\nimport sys\nbase = engineRoot + '/engine/lib'\nimportlib.import_module(base)\nsys.path.insert(0, base)\n");
+ put(a,'client/local.mjs',"require('../server/api.mjs'); import('../server/api.mjs');\n");
+ put(a,'client/noise.mjs',"// import(input.engineRoot)\nconst text='import(input.engineRoot)';\nconst regex=/import(engineRoot)/;\n");
+ put(a,'client/note.txt','included unsupported text\n');put(a,'outside.mjs','import(unknown);\n');
+ put(b,'engine/declared.mjs',"import(join(installed.snapshotRoot,pack.entry));\n");
+ put(b,'engine/unknown.py','import importlib\nimportlib.import_module(unknown)\n');
+ const git=(repo,args)=>{const r=spawnSync('git',['-C',repo,...args],{encoding:'utf8',env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+ for(const repo of [a,b])for(const args of [['init'],['config','core.autocrlf','false'],['add','.'],['-c','user.name=Fixture','-c','user.email=fixture.invalid','-c','core.hooksPath='+output,'-c','commit.gpgsign=false','commit','-m','synthetic boundary']])git(repo,args);
+ const config={zones:[{name:'client',repo:a,include:['client/**']},{name:'server',repo:a,include:['server/**']},{name:'engine',repo:b,include:['engine/**']}],rules:[{from:'client',to:'server',allow:true,markers:[]},{from:'client',to:'engine',allow:false,markers:['engineRoot','engine/lib']},{from:'engine',to:'client',allow:'declared',markers:['snapshotRoot','pack.entry']}]};
+ const result=boundary(config),find=(file,kind)=>result.findings.filter(f=>f.file===file&&(!kind||f.kind===kind));
+ check('two repos and three zones keep exact inventory',()=>{assert.equal(result.scope.zones.length,3);assert.equal(result.readOnly.repos.length,2);assert.equal(result.scope.fileCount,11);});
+ check('static cross-zone edge reuses walker resolution',()=>{const r=find('client/static.mjs')[0];assert.equal(r.classification,'ALLOWED');assert.equal(r.target,'server/api.mjs');assert.equal(r.basis,'WALKER_RESOLVED');});
+ check('dynamic one-assignment marker crosses repos',()=>{const r=find('client/dynamic.mjs')[0];assert.equal(r.classification,'VIOLATION');assert.equal(r.to,'engine');assert.deepEqual(r.matchedMarkers,['engineRoot','engine/lib']);assert.equal(r.bindings[0].line,2);});
+ check('declared direction needs configured marker',()=>{const r=find('engine/declared.mjs')[0];assert.equal(r.classification,'DECLARED');assert.deepEqual(r.matchedMarkers,['snapshotRoot','pack.entry']);});
+ check('unresolved path retains UNKNOWN and a gap',()=>{const r=find('client/unknown.mjs')[0];assert.equal(r.classification,'UNKNOWN');assert.equal(r.to,null);assert(r.gaps.includes('PATH_MARKER_NOT_FOUND'));});
+ check('read path excludes encoding and options',()=>{assert.equal(find('client/read.mjs')[0].classification,'VIOLATION');assert.equal(pathSites('x.mjs',"readFileSync(path,{encoding:'engineRoot'});")[0].tokens.some(t=>t.v==='engineRoot'),false);});
+ check('spawn scans executable and script argv',()=>{const r=find('client/spawn.mjs')[0];assert.equal(r.classification,'VIOLATION');assert(!r.expression.includes('otherRoot'));});
+ check('Python importlib and sys.path markers',()=>{const r=find('client/python.py');assert.equal(r.length,2);assert(r.every(f=>f.classification==='VIOLATION'));assert.deepEqual(r.map(f=>f.kind),['PY_IMPORTLIB','PY_SYS_PATH']);});
+ check('Python unsupported computed path remains unknown',()=>{assert.equal(find('engine/unknown.py')[0].classification,'UNKNOWN');});
+ check('require and dynamic literal resolve once each',()=>{const r=find('client/local.mjs');assert.equal(r.length,2);assert(r.every(f=>f.classification==='ALLOWED'));assert.equal(new Set(r.map(f=>f.column)).size,2);});
+ check('comments strings and regex are not path sites',()=>{assert.equal(find('client/noise.mjs').length,0);});
+ check('anchors hash exact source and snippet bytes',()=>{for(const f of result.findings){assert.equal(f.snippetSha256,sha256(f.snippet));assert.equal(f.sourceSha256,sha256(fs.readFileSync(join(f.repo,f.file))));assert(f.line>0&&f.column>0);}});
+ check('backward assignment anchors have hashes',()=>{const r=find('client/dynamic.mjs')[0];assert.equal(r.bindings[0].snippetSha256,sha256(r.bindings[0].snippet));assert(r.bindings[0].snippet.includes('engineRoot'));});
+ check('unsupported and outside files have skip reasons',()=>{assert(result.scope.skippedFiles.some(f=>f.file==='client/note.txt'&&f.reason==='UNSUPPORTED_LANGUAGE'));assert(result.scope.skippedFiles.some(f=>f.file==='outside.mjs'&&f.reason==='OUTSIDE_ZONE_INCLUDE'));});
+ check('read-only integrity and never executes targets',()=>{assert.equal(result.readOnly.status,'PASS');assert(result.findings.every(f=>f.runtimeVerified===false));assert.equal(git(a,['status','--porcelain']),'');});
+ const path=(s,py=false)=>pathSites(py?'x.py':'x.mjs',s);
+ const values=s=>path(s).at(-1).tokens.map(t=>t.v);
+ check('single assignment without semicolon stops at newline',()=>{assert(values("const p=engineRoot\nimport(p)\n").includes('engineRoot'));});
+ check('multiple assignments do not pick a convenient marker',()=>{const r=path("let p=engineRoot; p=other; import(p);")[0];assert(!r.tokens.some(t=>t.v==='engineRoot'));assert(r.gaps.some(g=>g.startsWith('MULTIPLE_OR_FORWARD')));});
+ check('increment and compound writes invalidate backward binding',()=>{for(const mutation of ['p++','p+=other','p-=1'])assert(!values('let p=engineRoot; '+mutation+'; import(p);').includes('engineRoot'));});
+ check('forward assignments remain unresolved',()=>{assert(!values('import(p); const p=engineRoot;').includes('engineRoot'));});
+ check('sibling named function assignments never leak',()=>{assert(!values('function a(){const p=engineRoot;} function b(){import(p);}').includes('engineRoot'));});
+ check('sibling arrow assignments never leak',()=>{assert(!values('const a=()=>{const p=engineRoot;}; const b=()=>{import(p);};').includes('engineRoot'));});
+ check('enclosing single assignment reaches map callback',()=>{const r=path("async function f(){const base=engineRoot; return names.map(name=>import(join(base,name)));}")[0];assert(r.tokens.some(t=>t.v==='engineRoot'));assert(r.bindings[0].captured);});
+ check('parameter shadow prevents enclosing assignment leakage',()=>{assert(!values('const p=engineRoot; function f(p){import(p);}').includes('engineRoot'));assert(!values('const p=engineRoot; values.map(p=>import(p));').includes('engineRoot'));});
+ check('object property metadata is not a resolved path value',()=>{assert(!values("const cfg={note:'engineRoot',path:other}; import(cfg.path);").includes('engineRoot'));});
+ check('function body is not a path value',()=>{assert(!values('const p=()=>engineRoot; import(p);').includes('engineRoot'));});
+ check('dotted and template path expressions remain available',()=>{assert(values('import(join(this.pack.entry,installed.snapshotRoot));').includes('entry'));assert(values('import(`engine/lib/${name}`);').some(v=>v.includes('engine/lib')));});
+ check('Python spec file parameter excludes module-name metadata',()=>{const r=path("importlib.util.spec_from_file_location('engineRoot',path)\n",true)[0];assert(!r.tokens.some(t=>t.v==='engineRoot'));});
+ check('Python sys.path assignment and extend are found',()=>{assert.deepEqual(path("sys.path = [engineRoot]\nsys.path.extend([engineRoot])\n",true).map(f=>f.kind),['PY_SYS_PATH','PY_SYS_PATH']);});
+ check('multiline call anchors exact end line',()=>{const r=path('import(\n join(engineRoot,\n "x")\n);')[0];assert.equal(r.line,1);assert.equal(r.endLine,4);assert.equal(r.snippetSha256,sha256(r.snippet));});
+ check('invalid and duplicate configuration rejected',()=>{for(const changed of [{...config,zones:[...config.zones,config.zones[0]]},{...config,rules:[...config.rules,config.rules[0]]},{...config,rules:[{from:'missing',to:'server',allow:false,markers:[]}]},{...config,zones:[{name:'x',repo:'relative',include:['**']}]},{...config,zones:[{name:'x',repo:a,include:['../**']}]}])assert.throws(()=>boundary(changed));});
+ check('overlapping zones never silently choose an owner',()=>{assert.throws(()=>boundary({...config,zones:[...config.zones,{name:'overlap',repo:a,include:['client/**']}]}),/Ambiguous/);});
+ check('missing direction rule is UNKNOWN',()=>{const r=boundary({...config,rules:config.rules.filter(r=>r.to!=='server')});assert(r.findings.filter(f=>f.file==='client/static.mjs').every(f=>f.classification==='UNKNOWN'));});
+ check('static declared edge without marker stays UNKNOWN',()=>{const r=boundary({...config,rules:config.rules.map(r=>r.to==='server'?{...r,allow:'declared'}:r)});assert.equal(r.findings.find(f=>f.file==='client/static.mjs').classification,'UNKNOWN');});
+ check('static declared edge with marker is DECLARED',()=>{const r=boundary({...config,rules:config.rules.map(r=>r.to==='server'?{...r,allow:'declared',markers:['server/']}:r)});assert.equal(r.findings.find(f=>f.file==='client/static.mjs').classification,'DECLARED');});
+ check('conflicting marker destinations preserve ambiguity',()=>{const r=boundary({...config,rules:config.rules.map(r=>r.to==='server'?{...r,markers:['engineRoot']}:r)});const f=r.findings.filter(f=>f.file==='client/dynamic.mjs');assert.equal(f.length,2);assert(f.every(f=>f.classification==='UNKNOWN'&&f.gaps.includes('AMBIGUOUS_MARKER_TARGET')));});
+ check('negative conclusion includes scope and unknown counts',()=>{const r=boundary({...config,rules:config.rules.map(r=>({...r,allow:true}))});assert.equal(r.counts.VIOLATION,0);assert.equal(r.negativeConclusion.fileCount,r.scope.fileCount);assert.equal(r.negativeConclusion.skippedFiles,r.scope.skippedFiles.length);assert(r.negativeConclusion.unknownFindings>0);});
+ const cfg=join(base,'config.json');fs.writeFileSync(cfg,JSON.stringify(config));
+ const run=args=>spawnSync(process.execPath,[fileURLToPath(new URL('./boundary.mjs',import.meta.url)),...args],{encoding:'utf8',env:process.env});
+ check('CLI JSON stdout with no target execution',()=>{const r=run(['--config',cfg]);assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).schema,'trace-boundary-v1');});
+ const out=join(output,'boundary.json');
+ check('CLI out writes complete JSON and compact receipt',()=>{const r=run(['--config',cfg,'--out',out]);assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).outputs.boundary,resolve(out));assert.deepEqual(JSON.parse(fs.readFileSync(out)).counts,result.counts);});
+ check('CLI rejects overwrites and output in every repo',()=>{for(const p of [out,join(a,'bad.json'),join(b,'bad.json'),cfg])assert.equal(run(['--config',cfg,'--out',p]).status,1);assert(!fs.existsSync(join(a,'bad.json')));assert(!fs.existsSync(join(b,'bad.json')));});
+ check('CLI rejects unknown duplicate and incomplete arguments',()=>{for(const args of [[],['--config',cfg,'--wat'],['--config',cfg,'--out'],['--config',cfg,'--out',out,'--out',out]])assert.equal(run(args).status,1);assert.equal(run(['--help']).status,0);});
+ check('untracked files are disclosed without scanning',()=>{put(a,'client/untracked.mjs','import(engineRoot);');try{const r=boundary(config);assert(r.scope.skippedFiles.some(f=>f.file==='client/untracked.mjs'&&f.reason==='UNTRACKED'));assert(!r.findings.some(f=>f.file==='client/untracked.mjs'));}finally{fs.unlinkSync(join(a,'client/untracked.mjs'));}});
+ check('symlink output ancestor is rejected',()=>{const link=join(output,'link');fs.symlinkSync(a,link,process.platform==='win32'?'junction':'dir');try{const r=run(['--config',cfg,'--out',join(link,'escape.json')]);assert.equal(r.status,1);assert(!fs.existsSync(join(a,'escape.json')));}finally{fs.unlinkSync(link);}});
+ check('maintenance severity never claims broken or safe deletion',()=>{assert(result.findings.every(f=>['needs-attention','uncertain','informational'].includes(f.severity)));assert(!result.findings.some(f=>f.severity==='broken'));});
+ check('deterministic replay preserves findings and configuration hash',()=>{const r=boundary(config);assert.deepEqual(r.findings,result.findings);assert.equal(r.configurationSha256,sha256(JSON.stringify(config)));});
+ return checks;
+}
