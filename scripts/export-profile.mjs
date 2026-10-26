@@ -1,3 +1,4 @@
+if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node export-profile.mjs input.json output.json');process.exit(0);}
 // Optional adapter only. Never invoked by check-card or the default workflow.
 import fs from 'node:fs';
 const [input,output]=process.argv.slice(2);

@@ -1,3 +1,4 @@
+if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node capture-card.mjs --browser executable --html health.html --out screenshots --temp scratch');process.exit(0);}
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn,spawnSync} from 'node:child_process';

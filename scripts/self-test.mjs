@@ -1,3 +1,4 @@
+import {displayGroups,renderGroups,renderGroupsMarkdown,evidenceNeeds} from './display-groups.mjs';
 import {boundary,pathSites} from './boundary.mjs';
 import {reach,importUses} from './reach.mjs';
 import {scanStopSites,readStopPolicy,compareStopSites,stopMaintenanceItems,renderStopComparison} from './stop-sites.mjs';
@@ -6,7 +7,7 @@ import {groupMaintenance,buildMaintenance,loadMaintenanceWater,renderMaintenance
 import {requestKey,preflight,commandPolicy} from './cassette.mjs';
 import {waterSource,scenarioStatus,waterStatus} from './water-source.mjs';
 import {judgeScenario,commandStatuses,classifyTests} from './observations.mjs';
-import {compareDeclarations,buildCard,renderCardSection} from './check-card.mjs';
+import {compareDeclarations,buildCard,renderCardSection,renderCardMarkdown} from './check-card.mjs';
 import {rebaseLinks} from './report.mjs';
 import {checkRoutes,candidateRoutes} from './route-map.mjs';
 import {layoutRoutes,renderRouteMap} from './route-map-html.mjs';
@@ -544,7 +545,7 @@ try {
 }
 
 async function g7Checks(root,only){
-  const checks=[...g200Checks(root),...g190Checks(root),...g180Checks(),...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
+  const checks=[...g210Checks(root),...g200Checks(root),...g190Checks(root),...g180Checks(),...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
   const baseline=old?await import(pathToFileURL(join(old,'scripts/language-static.mjs')).href):null;
   const oldInference=old?await import(pathToFileURL(join(old,'scripts/inference-layer.mjs')).href):null;
   const oldReconcile=old?await import(pathToFileURL(join(old,'scripts/gap-reconcile.mjs')).href):null;
@@ -1048,7 +1049,7 @@ function g14Checks(root){
   const config={blocks:[{name:'prototype',match:['prototype/**'],kind:'prototype'}],notesData:[{target:'src/library/catalog-proxy.mjs:4',reason:'missing-source-note',sources:[]},{target:'src/library/catalog-proxy.mjs:4',reason:'grounded-note',sources:['src/library/catalog-proxy.mjs:4']}]};
   const report=buildReport([{map:main,role:'production'},{map:test,role:'tests'}],config,{read:p=>source[p]});
   check('health categories and noise boundary use one model',()=>{
-    assert.deepEqual(report.stats,{productionFiles:7,broken:0,odd:3,testOnly:1,unused:1});
+    assert.deepEqual(report.stats,{productionFiles:7,broken:0,odd:3,testOnly:1,unused:1,declaredExcluded:0});
     assert.deepEqual(report.issues.map(i=>i.category).sort(),['generated','nonproduction','redirect']);
     assert(report.issues.some(i=>i.clues.some(c=>c.file==='scripts/bundle.mjs'&&c.line===125)));
     assert(report.groups.some(g=>g.clues.some(c=>c.file==='plan/README.md')));
@@ -1164,8 +1165,8 @@ function g141Checks(root){
      for(const {count} of expected)assert(rel.includes(count+' \u689d'));
     }
     const b=fixture.blocks.find(b=>b.id===id),cards=humanIssues(fixture).filter(c=>[c.file,...c.targets].some(file=>b.files.includes(file)));
-    assert.deepEqual([...body.matchAll(/data-map-issue="([^"]+)"/g)].map(m=>m[1]),cards.map(c=>c.id));
-    for(const c of cards)assert(html.includes('id="'+c.id+'"'));
+    assert.deepEqual([...body.matchAll(/data-map-issue="([^"]+)"/g)].map(m=>m[1]),cards.slice(0,3).map(()=>'health-issues'));
+    assert(html.includes('id="health-issues"')); // Grouped summary is the bounded map destination.
    }
    assert(mobile.includes('data-block-id="m2" data-zone="tests"'));
    const tests=mobile.slice(mobile.indexOf('<section class="map-zone" data-zone="tests"'));
@@ -1674,5 +1675,57 @@ function g200Checks(root){
  check('symlink output ancestor is rejected',()=>{const link=join(output,'link');fs.symlinkSync(a,link,process.platform==='win32'?'junction':'dir');try{const r=run(['--config',cfg,'--out',join(link,'escape.json')]);assert.equal(r.status,1);assert(!fs.existsSync(join(a,'escape.json')));}finally{fs.unlinkSync(link);}});
  check('maintenance severity never claims broken or safe deletion',()=>{assert(result.findings.every(f=>['needs-attention','uncertain','informational'].includes(f.severity)));assert(!result.findings.some(f=>f.severity==='broken'));});
  check('deterministic replay preserves findings and configuration hash',()=>{const r=boundary(config);assert.deepEqual(r.findings,result.findings);assert.equal(r.configurationSha256,sha256(JSON.stringify(config)));});
+ return checks;
+}
+
+function g210Checks(root){
+ const checks=[],check=(name,fn)=>{fn();checks.push('G210 '+name);};
+ const rows=Array.from({length:100},(_,i)=>({id:'row-'+i,mark:'unsure',reason:'INTERNAL_GUARD',cause:{file:'f'+i+'.mjs',line:i+1},count:i+1,locations:[{file:'f'+i+'.mjs',line:i+1}]}));
+ check('display caps each category at twenty with honest totals',()=>{const s=displayGroups(rows);assert.equal(s.items,100);assert.equal(s.groups,100);assert.equal(s.shown,20);assert.equal(s.categories[0].omitted,80);assert.equal(s.categories[0].occurrences,5050);});
+ check('production groups sort before larger off-route groups',()=>{assert.equal(displayGroups(rows,{productionFiles:['f0.mjs']}).categories[0].selected[0].file,'f0.mjs');});
+ check('occurrence ordering is stable and descending',()=>{assert.equal(displayGroups(rows).categories[0].selected[0].file,'f99.mjs');assert.deepEqual(displayGroups(rows),displayGroups(rows));});
+ check('same verdict reason and file merge with three anchors',()=>{const rs=rows.map(r=>({...r,cause:{file:'same.mjs',line:r.count},locations:[{file:'same.mjs',line:r.count}]}));const s=displayGroups(rs);assert.equal(s.groups,1);assert.equal(s.categories[0].selected[0].count,100);assert.equal(s.categories[0].selected[0].anchors.length,3);});
+ check('different reasons and verdicts never merge',()=>{const s=displayGroups([rows[0],{...rows[0],reason:'MIXED_CONDITION'},{...rows[0],mark:'handling'}]);assert.equal(s.groups,3);});
+ check('uncertain subgroups describe missing evidence',()=>{const s=displayGroups([{...rows[0],reason:'INTERNAL_GUARD'},{...rows[1],reason:'ROUTE_EVIDENCE_MISSING'},{...rows[2],reason:'CATCH_BOUNDARY_UNKNOWN'}]);assert.equal(Object.keys(s.categories[0].needs).length,3);assert(s.categories[0].needs[evidenceNeeds.caller]);assert(s.categories[0].needs[evidenceNeeds.execution]);});
+ check('presentation never mutates full data or broken counts',()=>{const before=JSON.stringify(rows);displayGroups(rows);renderGroups(displayGroups(rows));assert.equal(JSON.stringify(rows),before);});
+ check('Markdown groups stay bounded as readable source text',()=>{const md=renderGroupsMarkdown(displayGroups(rows));assert(!md.includes('<article'));assert(!md.includes('f0.mjs'));assert(md.includes('f99.mjs'));assert(md.startsWith('### '));});
+ check('omitted groups are absent even from hidden HTML',()=>{const h=renderGroups(displayGroups(rows));assert(!h.includes('f0.mjs'));assert(h.includes('f99.mjs'));assert.equal((h.match(/class="display-group"/g)||[]).length,20);assert(h.includes('health.json'));});
+ check('display validates positive integer limits',()=>{for(const limit of [0,-1,1.5,'20'])assert.throws(()=>displayGroups(rows,{limit}));assert.equal(displayGroups(rows,{limit:2}).shown,2);});
+ check('boundary groups separate repositories and target directions',()=>{const a={classification:'UNKNOWN',file:'x.mjs',gaps:['CALLER_CONTRACT_UNKNOWN:p'],repo:'a',from:'a',to:'b'};assert.equal(displayGroups([a,{...a,repo:'b'},{...a,to:'c'}]).groups,3);});
+ check('boundary gaps with different identifiers group by evidence class',()=>{const a={classification:'UNKNOWN',file:'x.mjs',gaps:['CALLER_CONTRACT_UNKNOWN:p']};assert.equal(displayGroups([a,{...a,gaps:['CALLER_CONTRACT_UNKNOWN:q']}]).groups,1);});
+ const inventory=['entry.mjs','pkg/hook.py','hook.py','static/app.js','static-extra/app.js','archive/old.js','other.mjs'];
+ const map={repo:root,head:'synthetic',toolVersion:'fixture',readOnly:{status:'PASS'},roots:[{path:'entry.mjs'}],closures:[{root:'entry.mjs',files:['entry.mjs'],edges:[],gaps:[]}],zeroCoverageCandidates:inventory.slice(1).map(path=>({path})),limitations:[]};
+ const config={unusedExclusions:{conventionLoaded:['**/hook.py'],staticDirectories:['static'],historyDirectories:['archive']}};
+ const make=c=>buildReport([{map}],c,{read:()=>''});
+ check('unused defaults preserve all candidates',()=>{assert.equal(make({}).stats.unused,6);assert.equal(make({}).stats.declaredExcluded,0);});
+ check('declared conventions static and history exclusions reduce unused only',()=>{const r=make(config);assert.equal(r.stats.unused,2);assert.equal(r.stats.declaredExcluded,4);assert.deepEqual(r.issues,make({}).issues);assert.equal(r.stats.broken,0);assert(r.unusedExclusions.excluded.every(x=>x.matches.length));});
+ check('directory exclusion does not leak to similarly named siblings',()=>{assert(make(config).groups.some(g=>g.files.includes('static-extra/app.js')));});
+ check('declarations do not demote production coverage',()=>{const r=make({unusedExclusions:{conventionLoaded:['**']}});assert.equal(r.stats.productionFiles,1);assert(!r.unusedExclusions.excluded.some(x=>x.file==='entry.mjs'));});
+ check('overlapping exclusions count each candidate once and retain matches',()=>{const r=make({unusedExclusions:{conventionLoaded:['static/**'],staticDirectories:['static']}});assert.equal(r.stats.declaredExcluded,1);assert.equal(r.unusedExclusions.excluded[0].matches.length,2);});
+ check('malformed or absolute exclusions rejected',()=>{for(const c of [{conventionLoaded:'**'},{staticDirectories:['../outside']},{historyDirectories:['/absolute']},{staticDirectories:['static/**']},{typo:[]}])assert.throws(()=>make({unusedExclusions:c}));});
+ const sites=s=>pathSites('fixture.mjs',s),last=s=>sites(s).at(-1),has=(s,v)=>last(s).tokens.some(t=>t.v===v);
+ check('one same-file caller argument reaches a parameter path',()=>{const s='function load(p){return import(p);} const entry=join(installed.snapshotRoot,"x"); load(entry);';const r=last(s);assert(r.tokens.some(t=>t.v==='snapshotRoot'));assert(r.bindings.some(b=>b.kind==='CALLER_ARGUMENT'&&b.callLevel===1));});
+ check('one same-file helper return reaches a wrapped import',()=>{const s='function file(p){return join(installed.snapshotRoot,p);} import(pathToFileURL(file("x")));';const r=last(s);assert(r.tokens.some(t=>t.v==='snapshotRoot'));assert(r.bindings.some(b=>b.kind==='HELPER_RETURN'));});
+ check('helper parameter substitutions carry caller markers',()=>{assert(has('function file(p){return join(p,"x");} import(file(snapshotRoot));','snapshotRoot'));});
+ check('return anchors and caller anchors carry exact hashes',()=>{for(const r of sites('function file(){return snapshotRoot;} import(file());'))for(const b of r.bindings){assert.equal(b.snippetSha256,sha256(b.snippet));assert.equal(b.sourceSha256,sha256('function file(){return snapshotRoot;} import(file());'));}});
+ check('multiple callers retain uncertainty instead of selecting one',()=>{const r=last('function load(p){return import(p);} load(snapshotRoot);load(other);');assert(!r.tokens.some(t=>t.v==='snapshotRoot'));assert(r.gaps.some(g=>g.startsWith('CALLER_CONTRACT_UNKNOWN')));});
+ check('second call level is not followed',()=>{const r=last('function inner(){return snapshotRoot;} function outer(){return inner();} import(outer());');assert(!r.tokens.some(t=>t.v==='snapshotRoot'));assert(r.gaps.some(g=>g.startsWith('CALL_LEVEL_LIMIT')));});
+ check('multiple and conditional helper returns remain uncertain',()=>{for(const s of ['function f(x){if(x){return snapshotRoot;}return other;} import(f(x));','function f(x){if(x)return snapshotRoot;} import(f(x));']){assert(!has(s,'snapshotRoot'));assert(last(s).gaps.some(g=>g.startsWith('HELPER_RETURN_UNSUPPORTED')));}});
+ check('unrelated helper body markers never become path evidence',()=>{assert(!has('function f(){const note="snapshotRoot"; return other;} import(f());','snapshotRoot'));});
+ check('shadowed helper cannot leak enclosing return',()=>{assert(!has('function f(){return snapshotRoot;} function g(f){import(f());}','snapshotRoot'));});
+ check('reassigned helper cannot supply a return',()=>{assert(!has('function f(){return snapshotRoot;} f=other; import(f());','snapshotRoot'));});
+ check('imported helper and member aliases remain unresolved',()=>{assert(!has('import {f} from "helper"; import(f());','snapshotRoot'));assert(!has('function f(){return snapshotRoot;} import(obj.f());','snapshotRoot'));});
+ check('unsupported destructured parameters do not claim argument values',()=>{assert(!has('function load({p}){import(p);}load(snapshotRoot);','snapshotRoot'));});
+ check('mutated parameters never borrow caller values',()=>{assert(!has('function load(p){p=other;import(p);} load(snapshotRoot);','snapshotRoot'));});
+ check('mutated helper parameters never substitute the original argument',()=>{assert(!has('function f(p){p=other;return p;} import(f(unknown));','snapshotRoot'));assert(last('function f(p){p=other;return p;} import(f(unknown));').gaps.some(g=>g.startsWith('HELPER_RETURN_UNSUPPORTED')));});
+ check('Python one-level helper return carries a marker',()=>{const r=pathSites('fixture.py','def f():\n    return snapshotRoot\nsys.path.append(f())\n')[0];assert(r.tokens.some(t=>t.v==='snapshotRoot'));assert(r.bindings.some(b=>b.kind==='HELPER_RETURN'));});
+ check('Python conditional helper return remains unresolved',()=>{const r=pathSites('fixture.py','def f():\n    if condition:\n        return snapshotRoot\nsys.path.append(f())\n')[0];assert(!r.tokens.some(t=>t.v==='snapshotRoot'));assert(r.gaps.some(g=>g.startsWith('HELPER_RETURN_UNSUPPORTED')));});
+ check('exclusive UTF8 outputs cannot overwrite an existing file',()=>{const p=join(root,'exclusive-output.txt');writeUTF8(p,'first',{exclusive:true});assert.throws(()=>writeUTF8(p,'second',{exclusive:true}),/EEXIST/);assert.equal(fs.readFileSync(p,'utf8'),'first');});
+ check('repair sentence preserves English terms and has a complete empty fallback',()=>{const item={id:'fix',mark:'handling',label:'handling',count:1,title:'fix',cause:{file:'x.mjs',line:1},locations:[],reason:'',executionLabel:'read',demotions:[],observations:[],fixes:[{file:'x.mjs',line:1,change:'改成 finding、補資料。'}],verification:[],uncoveredFiles:[],references:[]};const sheet={rawAnomalies:1,count:1,counts:{handling:1},items:[item]};assert(renderMaintenanceMarkdown(sheet).includes('finding'));item.fixes[0].change='';assert(!renderMaintenanceMarkdown(sheet).includes('改成 、'));assert(renderMaintenanceMarkdown(sheet).includes('呼叫端合約'));});
+ check('check card bounds declaration lists without losing raw JSON records',()=>{const c=buildCard({root,declarations:[]});c.declarations=rows.map(r=>({id:r.id,status:'UNKNOWN',category:'MISSING_SIDE',implemented:{anchor:{file:r.cause.file,line:1}}}));const before=JSON.stringify(c),h=renderCardSection(c),md=renderCardMarkdown(c);assert.equal((h.match(/class="display-group"/g)||[]).length,20);assert(!h.includes('f99.mjs'));assert(!md.includes('f99.mjs'));assert.equal(JSON.stringify(c),before);});
+ check('health caps all rendered issue and limitation populations',()=>{const r=make({});r.limitations=rows.map(x=>({file:x.cause.file,line:1,category:'limitation',reason:'MISSING'}));const before=JSON.stringify(r),h=renderHealth(r);assert.equal((h.match(/class="display-group"/g)||[]).length,26);assert(!h.includes('f99.mjs'));assert.equal(JSON.stringify(r),before);});
+ check('check-card unknown subcategories distinguish missing sides from bad anchors',()=>{const rows=[{category:'UNKNOWN',status:'UNKNOWN',declared:{status:'UNKNOWN',reason:'MISSING_SIDE'},implemented:{status:'PASS'}},{category:'UNKNOWN',status:'UNKNOWN',declared:{status:'UNKNOWN',anchor:{status:'FAIL'}},implemented:{status:'PASS'}}];const d=displayGroups(rows);assert.equal(d.groups,2);assert.equal(Object.keys(d.categories[0].needs).length,2);});
+ const publicCLIs=['boundary','boundary-stub','capture-card','check-card','classify-records','coverage-reconcile','derive-map','discover-entries','export-profile','gap-reconcile','inspect-repo','instrument','language-self-test','reach','record-census','removal-trial','report','route-map','route-skeletons','run-once','scan-empty-catch','self-test','trace-one-job','version-chain','water-source'];
+ for(const name of publicCLIs)check('CLI help exits zero without configuration: '+name,()=>{const r=spawnSync(process.execPath,[fileURLToPath(new URL('./'+name+'.mjs',import.meta.url)),'--help'],{encoding:'utf8'});assert.equal(r.status,0,name+': '+r.stderr);assert.match(r.stdout,/Usage:/);assert.equal(r.stderr,'');});
  return checks;
 }

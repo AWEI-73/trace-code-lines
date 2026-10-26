@@ -81,8 +81,35 @@ ERR_TEST_FAILURE、ERR_ASSERTION、AssertionError 等框架通用碼，以及只
 
 health.json 保留舊 stats、issues、groups、blocks、links、limitations、sourceReads，新增維修單摘要、失敗列、關聯及 evidence 參照，不放完整 TAP。卡片的觀測只留執行識別碼與匹配檔案。report.md 主體只有維修單與 JSON／證據連結，目標小於 200 KB；大量不同故障仍可能超標，交付時要量測，不能截掉故障湊大小。
 
-HTML 保留原技術報告展開區；Markdown 不再嵌入整份舊報告與每卡 JSON。舊文字連結重定位仍由 renderLegacyMarkdown 的相容性檢查覆蓋。流程圖、路線動態圖與體檢卡不改。
+HTML 保留原技術報告展開區；Markdown 不再嵌入整份舊報告與每卡 JSON。舊文字連結重定位仍由 renderLegacyMarkdown 的相容性檢查覆蓋。流程圖與路線動態圖不改；體檢卡也採用有上限的分組。
 
 主畫面繁中敘述不放英文 JSON 欄位或 :UNKNOWN；檔名、明確標記的命令、原始錯誤及穩定識別碼保留原字。禁用詞檢查只豁免這些必須可核對的內容。維修單不是完整故障偵測器；後續盲測與業務驗收仍須獨立進行。
 
 阻擋點亦屬宣告對照：提供政策清單與 reason／關鍵字表，分底線、要處理、不確定；無宣告只列清單，防呆與混合條件不硬判。設定、錨點與限制見[阻擋點](stop-sites.md)。
+
+## 1.21.0 顯示與宣告排除
+
+報告按「同判定、同原因、同檔案」合併，每類預設顯示 20 組，先列正式路線，再按件數排序。每組附件數、出現處數與前三個錨點；不確定按呼叫端合約、執行證據、觸發條件等缺口分小類。省略組數明列，完整清單只放 JSON，不改「壞了」計數與原判定。
+
+`maintenance.count` 與 `counts` 仍是原維修項目數；`occurrences` 是所附站點或觀測數。`maintenance.display` 另列顯示組數、省略數、小類統計與對回 `items` 的 indices。顯示合併不代表共同根因。修法句保留技術詞，缺值使用完整的查證句子。
+
+~~~json
+{
+  "display": {
+    "maxGroupsPerCategory": 20
+  },
+  "unusedExclusions": {
+    "conventionLoaded": [
+      "plugins/**/hook.py"
+    ],
+    "staticDirectories": [
+      "public"
+    ],
+    "historyDirectories": [
+      "archive"
+    ]
+  }
+}
+~~~
+
+排除只套用於原本「沒人用」的候選，不影響正式閉包、斷線或測試分類。重疊宣告只計一檔，`unusedExclusions.excluded` 保留所有命中樣式，`stats.declaredExcluded` 另列數量。路徑使用 repo 相對路徑與 `/`，不接受絕對路徑或 `..`；目錄欄位不接受 glob。無預設專案名單，宣告不證明實際載入。

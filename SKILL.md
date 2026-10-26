@@ -1,6 +1,6 @@
 ---
 name: trace-code-lines
-version: 1.20.0
+version: 1.21.0
 description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，交付可追到證據的體檢卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
 
@@ -18,7 +18,7 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 
 5. **交付**：`report.mjs --config <file>` 產出原有健檢；再用 `check-card.mjs --config <file>` 寫入 check-card.md、check-card.json 與健檢 HTML 的新增章節。卡片列入口、輸入、輸出、副作用、費用、工具、能否執行及宣告對照。快速靜態入口與安裝方法見 [README](README.md)。
 
-維修單的合併、標記、錨點核對與試跑對照規則見 [維修單](references/maintenance.md)。
+報告每類預設 20 組、前三錨點，不確定依缺證據分類；全量在 JSON。宣告排除與維修單規則見 [維修單](references/maintenance.md)。
 
 ## 需要「水有沒有流過」時
 
@@ -49,4 +49,4 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 
 ## 版本
 
-目前版本：1.20.0（2026-10-26）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.21.0（2026-10-26）。歷史見 [changelog](references/changelog.md)。

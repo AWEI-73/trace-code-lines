@@ -87,7 +87,20 @@ export function buildReport(inputs,config={},options={}){
   }
   const isTest=p=>testFile(p)||blockOf.get(p)?.kind==='tests';
   const testOnly=inventory.filter(p=>tests.has(p)&&!production.has(p)&&programFile(p)&&!isTest(p));
-  const unused=inventory.filter(p=>!tests.has(p)&&!production.has(p)&&programFile(p)&&!isTest(p));
+  const candidates=inventory.filter(p=>!tests.has(p)&&!production.has(p)&&programFile(p)&&!isTest(p));
+  const declarations=config.unusedExclusions??{},exclusionRules=[];
+  if(!declarations||Array.isArray(declarations)||typeof declarations!=='object')throw Error('unusedExclusions must be an object');
+  for(const key of Object.keys(declarations))if(!['conventionLoaded','staticDirectories','historyDirectories'].includes(key))throw Error('Unknown unused exclusion kind: '+key);
+  for(const kind of ['conventionLoaded','staticDirectories','historyDirectories']){
+   const values=declarations[kind]??[];if(!Array.isArray(values))throw Error('unusedExclusions.'+kind+' must be an array');
+   for(const value of values){
+    if(typeof value!=='string'||!value||!relativeSafe(value)||kind!=='conventionLoaded'&&/[*?]/.test(value))throw Error('Invalid unused exclusion path');
+    const pattern=kind==='conventionLoaded'?value:(value.endsWith('/')?value.slice(0,-1):value)+'/**';
+    exclusionRules.push({kind,pattern,match:glob(pattern)});
+   }
+  }
+  const excluded=candidates.flatMap(file=>{const matches=exclusionRules.filter(r=>r.match.test(file)).map(({kind,pattern})=>({kind,pattern}));return matches.length?[{file,label:'依宣告排除',matches}]:[];});
+  const excludedPaths=new Set(excluded.map(r=>r.file)),unused=candidates.filter(p=>!excludedPaths.has(p));
   for(const p of testOnly)blockOf.get(p).testOnly.push(p);for(const p of unused)blockOf.get(p).unused.push(p);
   const allEdges=dedup(maps.flatMap(m=>[...m.closures.flatMap(c=>c.edges??[]),...(m.gasAnalysis?.edges??[]),...(m.frameworkPathLoads?.edges??[])]),e=>JSON.stringify([e.kind,e.path,e.line,e.targets,e.specifier]));
   const prodEdges=allEdges.filter(e=>production.has(e.path));
@@ -167,8 +180,8 @@ export function buildReport(inputs,config={},options={}){
     const a=blockOf.get(e.path),b=blockOf.get(target);if(!a||!b||a===b)continue;
     const key=a.id+'>'+b.id;if(!links.has(key))links.set(key,{from:a.id,to:b.id,count:0,production:0});const link=links.get(key);link.count++;if(production.has(e.path))link.production++;
   }
-  const stats={productionFiles:production.size,broken:issues.filter(f=>f.category==='broken').length,odd:issues.filter(f=>['generated','redirect','nonproduction'].includes(f.category)).length,testOnly:testOnly.length,unused:unused.length};
-  const report={schema:'trace-health-v1',title:config.title??'\u67e5\u7dda\u5065\u6aa2',repo,commit:head,toolVersion:version,configurationSha256:config.configurationSha256??sha256(JSON.stringify(config)),inputs:inputs.map((x,i)=>({path:x.path??'map-'+i,role:roles[i],sha256:x.sha256??sha256(JSON.stringify(maps[i])),configurationSha256:maps[i].configurationSha256})),stats,
+  const stats={productionFiles:production.size,broken:issues.filter(f=>f.category==='broken').length,odd:issues.filter(f=>['generated','redirect','nonproduction'].includes(f.category)).length,testOnly:testOnly.length,unused:unused.length,declaredExcluded:excluded.length};
+  const report={schema:'trace-health-v1',display:config.display??{},unusedExclusions:{declarations,excluded,candidates:candidates.length},title:config.title??'\u67e5\u7dda\u5065\u6aa2',repo,commit:head,toolVersion:version,configurationSha256:config.configurationSha256??sha256(JSON.stringify(config)),inputs:inputs.map((x,i)=>({path:x.path??'map-'+i,role:roles[i],sha256:x.sha256??sha256(JSON.stringify(maps[i])),configurationSha256:maps[i].configurationSha256})),stats,
     conclusion:'\u6b63\u5f0f\u8def\u7dda '+stats.productionFiles+' \u6a94\uff0c\u5b57\u9762\u65b7\u7dda '+stats.broken+' \u8655\uff0c\u9700\u7559\u610f '+stats.odd+' \u8655\u3002\u9019\u662f\u975c\u614b\u67e5\u7dda\u7d50\u679c\uff0c\u5c1a\u672a\u9a57\u8b49\u57f7\u884c\u3002',
     roots:maps.flatMap((m,i)=>m.roots.map(r=>({...r,role:roles[i],file:r.path,line:null,category:'\u5165\u53e3',source:'\u67e5\u7dda'}))),
     blocks:blocks.filter(b=>b.programFiles.length||b.production.length),links:[...links.values()].filter(l=>blocks.find(b=>b.id===l.from).programFiles.length||blocks.find(b=>b.id===l.from).production.length).filter(l=>blocks.find(b=>b.id===l.to).programFiles.length||blocks.find(b=>b.id===l.to).production.length),issues,groups:categoryGroups,limitations:dedup(limitations,l=>JSON.stringify([l.file,l.line,l.reason])),rejectedNotes,commands:config.commands??[],sourceReads:[]};
@@ -232,9 +245,9 @@ export function renderMarkdown(r,options={}){
  return renderMaintenanceMarkdown(sheet)+'\n[\u5b8c\u6574\u6280\u8853\u8cc7\u6599](health.json)\n';
 }
 export const renderFlow=renderHumanFlow;
-export function writeUTF8(file,body){
+export function writeUTF8(file,body,{exclusive=false}={}){
   const eol=fs.existsSync(file)&&fs.readFileSync(file,'utf8').includes('\r\n')?'\r\n':'\n';
-  body=body.replace(/\r?\n/g,eol);fs.writeFileSync(file,body,'utf8');
+  body=body.replace(/\r?\n/g,eol);fs.writeFileSync(file,body,{encoding:'utf8',flag:exclusive?'wx':'w'});
   const actual=fs.readFileSync(file,'utf8');if(actual!==body)throw Error('UTF8 readback mismatch');
   return {file,sha256:sha256(actual),cjk:(actual.match(/[\u3400-\u4dbf\u4e00-\u9fff]/g)??[]).length,questionMarks:(actual.match(/\?/g)??[]).length,replacementCharacters:(actual.match(/\ufffd/g)??[]).length,cr:(actual.match(/\r/g)??[]).length};
 }

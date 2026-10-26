@@ -1,3 +1,5 @@
+import {displayGroups,renderGroupsMarkdown} from './display-groups.mjs';
+import {writeUTF8} from './report.mjs';
 // Read-only, configured dependency-direction evidence. Never imports target code.
 import fs from 'node:fs';
 import {execFileSync} from 'node:child_process';
@@ -101,15 +103,67 @@ export function pathSites(file,source){
   if(!writes.has(key))writes.set(key,[]);writes.get(key).push(entry);
   if(simple){if(!assignments.has(key))assignments.set(key,[]);assignments.get(key).push(entry);}
  }
- function expand(arg,at){
+ // Resolve only named declarations in the same lexical environment. Member calls,
+  // aliases, ambiguous definitions and reassigned names cannot supply a call edge.
+  function localCallee(name,at){
+   for(const owner of [...scopes(at),null]){
+    if(owner?.params.some(p=>p.name===name)||(writes.get(name)??[]).some(w=>w.scope===owner))return null;
+    const found=ranges.filter(f=>f.name===name&&!f.method&&Number.isInteger(f.nameAt)&&scope(f.nameAt)===owner);
+    if(found.length)return found.length===1?found[0]:null;
+   }
+   return null;
+  }
+  function simpleParams(f){
+   if(!Number.isInteger(f.nameAt))return false;
+   const args=callArgs(t,f.nameAt+1).args.filter(a=>compact(a).length);
+   return args.every(a=>compact(a).length===1&&compact(a)[0].kind==='name')&&!f.params.some(p=>(writes.get(p.name)??[]).some(w=>w.scope===f));
+  }
+  const callers=f=>t.flatMap((x,i)=>x.kind==='name'&&x.v===f.name&&t[i+1]?.v==='('&&t[i-1]?.v!=='.'&&!ranges.some(g=>g.nameAt===i)&&localCallee(x.v,i)===f?[{at:i,...callArgs(t,i+1)}]:[]);
+  function returned(f){
+   const found=[];let braces=0;
+   const indentation=i=>source.split('\n')[t[i].line-1].match(/^[ \t]*/)[0];
+   const first=t.findIndex((x,i)=>i>=f.start&&i<f.end&&x.v!=='\n');
+   for(let i=f.start;i<f.end;i++){
+    if(scope(i)!==f||t[i].kind==='string'||t[i].kind==='regex')continue;
+    if(t[i].v==='{')braces++;if(t[i].v==='}')braces--;
+    if(t[i].v==='return')found.push({at:i,tokens:t.slice(i+1,endExpression(t,i+1)),top:py?first>=0&&indentation(i)===indentation(first):braces===0&&[';','{','}','\n'].includes(t[i-1]?.v)});
+   }
+   return found.length===1&&found[0].top&&found[0].tokens.length?found[0]:null;
+  }
+  function expand(arg,at){
   const expanded=[...arg],bindings=[],gaps=[],visited=new Set();
-  function visit(ts,before,depth){
+  function visit(ts,before,depth,callLevel=0,parameters=null){
    if(depth>8){gaps.push('BINDING_DEPTH_LIMIT');return;}
    for(let k=0;k<ts.length;k++){
-    const x=ts[k];if(x.kind!=='name'||ts[k-1]?.v==='.'||ts[k+1]?.v==='('||ts[k+1]?.v===':'||ts[k+1]?.v==='.')continue;
+    const x=ts[k];if(x.kind!=='name'||ts[k-1]?.v==='.')continue;
+     if(ts[k+1]?.v==='('){
+      const f=localCallee(x.v,before);
+      if(f){
+       if(callLevel>=1){gaps.push('CALL_LEVEL_LIMIT:'+x.v);continue;}
+       const ret=returned(f),args=callArgs(ts,k+1).args.filter(a=>compact(a).length);
+       if(!simpleParams(f)||!ret||args.length!==f.params.length){gaps.push('HELPER_RETURN_UNSUPPORTED:'+x.v);continue;}
+       const key='return:'+f.nameAt+':'+before;if(visited.has(key))continue;visited.add(key);
+       const mapping=new Map(f.params.map((p,i)=>[p.name,{tokens:args[i],at:before}]));
+       // Exclude the parameter identifiers from marker signals: substitute actual arguments.
+       const value=ret.tokens.flatMap((v,i)=>v.kind==='name'&&ret.tokens[i-1]?.v!=='.'&&mapping.has(v.v)?mapping.get(v.v).tokens:[v]);
+       expanded.push(...value);bindings.push({...anchor(file,source,t[ret.at].start,ret.tokens.at(-1).end),name:f.name,kind:'HELPER_RETURN',callLevel:1,call:anchor(file,source,x.start,ts[callArgs(ts,k+1).end]?.end??x.end)});
+       visit(ret.tokens,ret.at,depth+1,1,mapping);
+      }
+      continue;
+     }
+     if(ts[k+1]?.v===':'||ts[k+1]?.v==='.')continue;
+     if(parameters?.has(x.v)){const actual=parameters.get(x.v);expanded.push(...actual.tokens);visit(actual.tokens,actual.at,depth+1,callLevel);continue;}
     const chain=[...scopes(before),null];let chosen;
     for(const owner of chain){
-     if(owner?.params.some(p=>p.name===x.v)){gaps.push('PARAMETER_OR_CAPTURE_UNKNOWN:'+x.v);break;}
+     if(owner?.params.some(p=>p.name===x.v)){
+       const calls=callers(owner),index=owner.params.findIndex(p=>p.name===x.v);
+       if(callLevel>=1){gaps.push('CALL_LEVEL_LIMIT:'+x.v);break;}
+       if(!simpleParams(owner)||calls.length!==1||!calls[0].args[index]?.length){gaps.push('CALLER_CONTRACT_UNKNOWN:'+x.v);break;}
+       const call=calls[0],actual=call.args[index],key='parameter:'+owner.nameAt+':'+index;
+       if(visited.has(key)){gaps.push('RECURSIVE_CALL_UNKNOWN:'+x.v);break;}visited.add(key);
+       expanded.push(...actual);bindings.push({...anchor(file,source,t[call.at].start,t[call.end].end),name:x.v,kind:'CALLER_ARGUMENT',callLevel:1,parameter:anchor(file,source,t[owner.nameAt].start,t[owner.start-1].end)});
+       visit(actual,call.at,depth+1,1);break;
+      }
      const defs=(assignments.get(x.v)??[]).filter(a=>a.scope===owner);
      const changes=(writes.get(x.v)??[]).filter(a=>a.scope===owner);
      if(defs.length||changes.length){
@@ -122,7 +176,7 @@ export function pathSites(file,source){
     if(chosen.tokens.some((x,j,a)=>x.v==='function'||x.v==='='&&a[j+1]?.v==='>')||chosen.tokens[0]?.v==='{'){gaps.push('UNSUPPORTED_BINDING_VALUE:'+x.v);continue;}
     const key=chosen.at;if(visited.has(key))continue;visited.add(key);
     expanded.push(...chosen.tokens);bindings.push({...anchor(file,source,t[chosen.at].start,chosen.tokens.at(-1)?.end??t[chosen.at].end),name:x.v,captured:scope(before)!==chosen.scope});
-    visit(chosen.tokens,chosen.at,depth+1);
+    visit(chosen.tokens,chosen.at,depth+1,callLevel,parameters);
    }
   }visit(arg,at,0);return {expanded,bindings,gaps:unique(gaps)};
  }
@@ -215,16 +269,20 @@ export function boundary(config){
  }
  const counts=Object.fromEntries(['VIOLATION','DECLARED','ALLOWED','UNKNOWN'].map(k=>[k,findings.filter(r=>r.classification===k).length]));
  const scope={population:'Git tracked files; no target execution; ignored paths are not enumerated',fileCount:[...repos.values()].reduce((n,r)=>n+r.selected.length,0),zones:zones.map(z=>({name:z.name,repo:z.repo,include:z.include,files:repos.get(z.repo).selected.filter(f=>owner(z.repo,f)[0]===z)})),skippedFiles:skipped,parserGaps};
- return {schema:'trace-boundary-v1',toolVersion:toolVersion(),configurationSha256:sha256(JSON.stringify(config)),status:integrity.some(r=>r.status==='FAIL')?'STOPPED_INTEGRITY_FAILURE':counts.UNKNOWN||parserGaps.length?'PARTIAL':'PASS',counts,findings,scope,readOnly:{status:integrity.every(r=>r.status==='PASS')?'PASS':'FAIL',repos:integrity},negativeConclusion:counts.VIOLATION===0?{text:'No configured violation observed in the reported scope; gaps and skips limit this observation.',fileCount:scope.fileCount,skippedFiles:skipped.length,unknownFindings:counts.UNKNOWN,parserGaps:parserGaps.length}:null,limitations:['Static lexical evidence only; markers are configured routing signals, not evaluated paths or proof of declaration validity.','Only Git tracked source files are scanned. The existing walker supplies same-repo static resolution; cross-repo computed paths use markers.','Single-assignment lexical bindings are traced backward up to eight hops, including enclosing captures; no cross-file or interprocedural dataflow. Conditional assignment, syntax aliases, destructuring, runtime mutation and full AST semantics are not resolved.','Python recognizes literal importlib and sys.path spellings; aliases and unsupported computations remain parser gaps. Templates are lexical marker signals; embedded expressions are not fully parsed.','Findings can support maintenance/check-card evidence at most needs-attention; existing broken counts are unchanged. No deletion or safety verdict is supplied.']};
+ return {schema:'trace-boundary-v1',toolVersion:toolVersion(),configurationSha256:sha256(JSON.stringify(config)),status:integrity.some(r=>r.status==='FAIL')?'STOPPED_INTEGRITY_FAILURE':counts.UNKNOWN||parserGaps.length?'PARTIAL':'PASS',counts,findings,display:displayGroups(findings,{limit:config.display?.maxGroupsPerCategory??20,productionFiles:config.productionFiles??[]}),scope,readOnly:{status:integrity.every(r=>r.status==='PASS')?'PASS':'FAIL',repos:integrity},negativeConclusion:counts.VIOLATION===0?{text:'No configured violation observed in the reported scope; gaps and skips limit this observation.',fileCount:scope.fileCount,skippedFiles:skipped.length,unknownFindings:counts.UNKNOWN,parserGaps:parserGaps.length}:null,limitations:['Static lexical evidence only; markers are configured routing signals, not evaluated paths or proof of declaration validity.','Only Git tracked source files are scanned. The existing walker supplies same-repo static resolution; cross-repo computed paths use markers.','Single-assignment lexical bindings are traced backward up to eight hops, including enclosing captures; one same-file named call level for caller arguments or a unique top-level helper return; no cross-file dataflow. Conditional assignment, syntax aliases, destructuring, runtime mutation and full AST semantics are not resolved.','Python recognizes literal importlib and sys.path spellings; aliases and unsupported computations remain parser gaps. Templates are lexical marker signals; embedded expressions are not fully parsed.','Findings can support maintenance/check-card evidence at most needs-attention; existing broken counts are unchanged. No deletion or safety verdict is supplied.']};
+}
+export function renderBoundaryMarkdown(result,jsonFile='boundary.json'){
+ return '# 邊界檢查\n\n'+Object.entries(result.counts).map(([k,v])=>k+': '+v).join(' / ')+'\n\n'+renderGroupsMarkdown(result.display??displayGroups(result.findings),{json:jsonFile})+'\n\nStatic marker evidence; runtimeVerified=false. Full scope, gaps and integrity are retained in JSON.\n';
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
  try{
   const args=process.argv.slice(2);if(args.length===1&&args[0]==='--help'){console.log('Usage: node boundary.mjs --config file [--out file]');process.exit(0);}
   if(args[0]!=='--config'||!args[1]||![2,4].includes(args.length)||args.length===4&&(args[2]!=='--out'||!args[3]))throw Error('Usage: node boundary.mjs --config file [--out file]');
   const config=JSON.parse(fs.readFileSync(noLinks(resolve(args[1])),'utf8')),validated=configuration(config),out=args[3]?noLinks(resolve(args[3])):null;
-  if(out&&(validated.zones.some(z=>within(z.repo,out))||fs.existsSync(out)))throw Error('Output must be new and outside every zone repo');
+  const summary=out?out+'.md':null;
+   if(out&&(validated.zones.some(z=>within(z.repo,out))||fs.existsSync(out)||fs.existsSync(noLinks(summary))))throw Error('Output must be new and outside every zone repo');
   const result=boundary(config);
-  if(out){noLinks(out);fs.mkdirSync(dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify(result,null,2)+'\n',{encoding:'utf8',flag:'wx'});console.log(JSON.stringify({schema:result.schema,status:result.status,counts:result.counts,outputs:{boundary:out}}));}
+  if(out){noLinks(out);fs.mkdirSync(dirname(out),{recursive:true});writeUTF8(out,JSON.stringify(result,null,2)+'\n',{exclusive:true});writeUTF8(summary,renderBoundaryMarkdown(result,out.split(/[\\/]/).at(-1)),{exclusive:true});console.log(JSON.stringify({schema:result.schema,status:result.status,counts:result.counts,outputs:{boundary:out,summary}}));}
   else console.log(JSON.stringify(result,null,2));
   if(result.readOnly.status==='FAIL')process.exitCode=2;
  }catch(e){console.error(JSON.stringify({status:'ERROR',message:e.message}));process.exitCode=1;}

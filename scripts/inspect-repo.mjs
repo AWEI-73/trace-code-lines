@@ -1,3 +1,4 @@
+if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node inspect-repo.mjs --repo repo --out directory');process.exit(0);}
 import fs from 'node:fs';
 import path from 'node:path';
 import {discoverEntries} from './discover-entries.mjs';

@@ -1,3 +1,4 @@
+import {displayGroups,renderGroups} from './display-groups.mjs';
 import {buildMaintenance,renderMaintenanceHTML} from './maintenance.mjs';
 // Human-only projection. Does not mutate the agent model or static maps.
 import fs from 'node:fs';
@@ -9,8 +10,8 @@ const plain=(s,fallback)=>{s=lex.aliases[s]??s;return typeof s==='string'&&s.tri
 const format=(s,args)=>s.replace(/\{(\w+)\}/g,(_,k)=>args[k]??'');
 const loc=x=>esc(x.file??x.path??'')+(Number.isInteger(x.line)&&x.line>0?':'+x.line:'');
 const detail=body=>'<details class="technical"><summary>'+t('detail')+'</summary><div class="detail-body">'+body+'</div></details>';
-const files=xs=>'<ul class="filelist">'+xs.map(p=>'<li><code>'+esc(p)+'</code></li>').join('')+'</ul>';
-const clues=(cs=[],ns=[])=>cs.map(c=>'<blockquote><b>'+esc(c.source)+'</b> <code>'+loc(c)+'</code><p>'+esc(c.text)+'</p></blockquote>').join('')+ns.map(n=>'<blockquote><b>'+t('inference')+'</b><p>'+esc(n.reason)+'</p><code>'+n.sources.map(esc).join(' / ')+'</code></blockquote>').join('');
+const files=xs=>'<ul class="filelist">'+xs.slice(0,3).map(p=>'<li><code>'+esc(p)+'</code></li>').join('')+'</ul>';
+const clues=(cs=[],ns=[])=>cs.slice(0,3).map(c=>'<blockquote><b>'+esc(c.source)+'</b> <code>'+loc(c)+'</code><p>'+esc(c.text)+'</p></blockquote>').join('')+ns.slice(0,3).map(n=>'<blockquote><b>'+t('inference')+'</b><p>'+esc(n.reason)+'</p><code>'+n.sources.map(esc).join(' / ')+'</code></blockquote>').join('');
 const blockName=(b,i)=>plain(b.name,t('genericBlock',{n:i+1}));
 export function humanIssues(r){
   const roots=new Set(r.roots.filter(x=>x.role==='production').map(x=>x.file)), grouped=new Map();
@@ -32,7 +33,7 @@ export function humanStats(r){
 }
 function issueCard(c){
  const copy=lex.issues[c.category]??lex.issues.limitation;
- const original=c.items.map(f=>'<section><p><b>'+t('position')+'</b> '+f.locations.map(loc).join(' / ')+'</p><p><b>'+t('target')+'</b> <code>'+esc(f.target)+'</code></p><p>'+esc(f.reason)+'</p>'+((f.witnesses??[]).length?'<p>'+t('witness')+' '+f.witnesses.map(loc).join(' / ')+'</p>':'')+clues(f.clues,f.notes)+'</section>').join('');
+ const original=c.items.slice(0,3).map(f=>'<section><p><b>'+t('position')+'</b> '+f.locations.slice(0,3).map(loc).join(' / ')+'</p><p><b>'+t('target')+'</b> <code>'+esc(f.target)+'</code></p><p>'+esc(f.reason)+'</p>'+((f.witnesses??[]).length?'<p>'+t('witness')+' '+f.witnesses.slice(0,3).map(loc).join(' / ')+'</p>':'')+clues(f.clues,f.notes)+'</section>').join('');
  return '<article class="issue card" data-category="'+c.category+'" id="'+c.id+'"><div class="card-content"><div class="kicker">'+t('targetCount',{n:c.targets.length})+'</div><h3>'+copy.name+'</h3><p>'+copy.description+'</p><p class="risk"><b>'+t('risk')+'：</b>'+copy.risk+'</p><p class="advice"><b>'+t('advice')+'：</b>'+copy.advice+'</p></div>'+detail(original)+'</article>';
 }
 function groupCard(g,r){
@@ -49,7 +50,7 @@ const interaction=String.raw`document.addEventListener('click',e=>{const a=e.tar
 function page(title,body,data='',interactive=false){
  return '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; script-src \'unsafe-inline\'; img-src data:; base-uri \'none\'; connect-src \'none\'"><title>'+esc(title)+'</title><style>'+css+'</style></head><body><main>'+body+'</main>'+data+(interactive?'<script>'+interaction+'</script>':'')+'</body></html>\n';
 }
-function limited(items,max,label,render){return items.slice(0,max).map(render).join('')+(items.length>max?'<details class="more"><summary>'+t(label,{n:items.length-max})+'</summary><div class="content">'+items.slice(max).map(render).join('')+'</div></details>':'');}
+function limited(items,max,label,render){return items.slice(0,20).map(render).join('')+(items.length>20?'<p><a href="health.json">\u5b8c\u6574\u8cc7\u6599\u53e6\u5217 '+(items.length-20)+' \u7d44</a></p>':'');}
 
 const moduleMapStyle=String.raw`<style>
 .module-tiles{display:none}.map-expanded[hidden]{display:none}.map-expanded{padding:14px 16px;background:var(--soft);border:1px solid var(--line);border-radius:9px;font-size:14px;overflow-wrap:anywhere;min-width:0}.map-expanded p:first-child{margin-top:0}.map-expanded p:last-child{margin-bottom:0}.map-expanded b{display:block}.map-related a{display:block;padding:8px 0;min-height:44px}.map-related a:focus-visible,.map-tile:focus-visible{outline:3px solid var(--purple);outline-offset:3px}.module-map a[aria-expanded=true] rect{stroke:var(--purple)!important;stroke-width:3}.map .tests{fill:var(--graybg)}.mapwrap .desktop-module{display:block}.issue:target{outline:3px solid var(--purple);outline-offset:2px;scroll-margin-top:16px}
@@ -108,7 +109,7 @@ function moduleMap(r,issues,compact=false){
   const clue=(n.b.clues??[]).map(c=>({...c,plain:plain(c.text.trim().replace(/^(?:#+|\/\/|\/\*|\*)\s*/,''),null)})).find(c=>c.plain);
   return clue?t('mapClue',{text:clue.plain}):lex.kinds[n.b.kind]?.description??t('mapNoClue');
  };
- const expanded=n=>'<p>'+esc(explanation(n))+'</p>'+relations(n,'uses')+relations(n,'usedBy')+'<p class="map-counts">'+(n.b.kind==='tests'?t('mapTestExcluded'):['production','testOnly','unused'].map(key=>t('mapCount'+key,{n:n.b[key].length})).join('\u3001')+(n.other?'\u3001'+t('mapUncounted',{n:n.other}):''))+'</p><p class="map-related"><b>'+t('mapRelated')+'</b>'+(n.cards.length?n.cards.map(c=>'<a href="#'+esc(c.id)+'" data-map-issue="'+esc(c.id)+'">'+esc((lex.issues[c.category]??lex.issues.limitation).name)+'</a>').join(''):t('mapNoIssues'))+'</p>';
+ const expanded=n=>'<p>'+esc(explanation(n))+'</p>'+relations(n,'uses')+relations(n,'usedBy')+'<p class="map-counts">'+(n.b.kind==='tests'?t('mapTestExcluded'):['production','testOnly','unused'].map(key=>t('mapCount'+key,{n:n.b[key].length})).join('\u3001')+(n.other?'\u3001'+t('mapUncounted',{n:n.other}):''))+'</p><p class="map-related"><b>'+t('mapRelated')+'</b>'+(n.cards.length?n.cards.slice(0,3).map(c=>'<a href="#health-issues" data-map-issue="health-issues">'+esc((lex.issues[c.category]??lex.issues.limitation).name)+'</a>').join(''):t('mapNoIssues'))+'</p>';
  if(compact){
   return '<div class="mobile-module module-tiles">'+groups.map((group,i)=>'<section class="map-zone" data-zone="'+zoneKeys[i]+'" style="--zone:var(--'+colors[zoneKeys[i]]+')"><h3>'+t(labels[i])+'\uff1a'+t('mapZoneCount',{n:group.length,files:group.reduce((sum,n)=>sum+n.total,0)})+'</h3><div class="map-tiles">'+group.map((n,index)=>{
    const order=Math.floor(index/2)*3,counts=[...n.states,...(n.other?[['other',n.other]]:[])],denominator=counts.reduce((sum,[,v])=>sum+v,0);
@@ -159,10 +160,11 @@ function renderLegacyHealth(r){
  const data='<script id="health-stats" type="application/json">'+JSON.stringify(r.stats).replaceAll('<','\\u003c')+'</script><script id="display-stats" type="application/json">'+JSON.stringify(s)+'</script>';
  let body='<div class="eyebrow">'+t('eyebrow')+'</div><h1>'+esc(title)+'</h1><p class="muted">'+t('subtitle')+'</p><div class="tiles">'+keys.map(k=>'<div class="tile" data-stat="'+k+'"><b>'+s[k]+'</b><span>'+t(k)+'</span></div>').join('')+'</div><div class="verdict">'+t('verdict',{files:s.productionFiles,broken:s.broken,odd:s.odd})+'</div>';
  body+='<h2>'+t('mapTitle')+'</h2><p class="muted">'+t('mapIntro')+'</p><div class="mapwrap">'+moduleMap(r,issues)+moduleMap(r,issues,true)+'<p class="legend">'+t('mapLegend')+'</p>'+detail('<h4>'+t('links')+'</h4><ul>'+r.links.map(l=>'<li>'+esc(r.blocks.find(b=>b.id===l.from)?.name)+' → '+esc(r.blocks.find(b=>b.id===l.to)?.name)+' : '+l.production+' / '+l.count+'</li>').join('')+'</ul>')+'<p class="muted">'+t('mapLimit')+'</p></div>';
- body+='<h2>'+t('issuesTitle')+'</h2><p class="muted">'+t('rawCount',{n:r.issues.length,cards:issues.length})+'</p>'+ (issues.length?limited(issues,6,'moreIssues',issueCard):'<p>'+t('noIssue')+'</p>');
- body+='<h2>'+t('groupsTitle')+'</h2><p class="muted">'+t('limitWarning')+'</p>'+'<div class="grid">'+limited(r.groups,6,'moreGroups',g=>groupCard(g,r))+'</div>';
+  body+='<h2 id="health-issues">'+t('issuesTitle')+'</h2>'+renderGroups(displayGroups(r.issues,{limit:r.display?.maxGroupsPerCategory??20,productionFiles:r.blocks.flatMap(b=>b.production)}));
+  body+='<h2>'+t('groupsTitle')+'</h2>'+renderGroups(displayGroups(r.groups.flatMap(g=>g.files.map(file=>({...g,file,files:undefined,locations:[{file,line:null}]}))),{limit:r.display?.maxGroupsPerCategory??20}));
+  body+='<p>依宣告排除：'+'<span data-stat="declaredExcluded"><b>'+(r.stats.declaredExcluded??0)+'</b></span> 檔；不列入沒人用。</p>';
  body+='<h2>'+t('modulesTitle')+'</h2><div class="grid">'+limited(r.blocks,8,'moreModules',b=>'<section class="module card" id="'+b.id+'"><div class="card-content"><h3>'+blockName(b,r.blocks.indexOf(b))+'</h3><p>'+lex.kinds[b.kind].name+' · '+t('moduleMeta',{n:b.programFiles.length})+'</p><p class="muted">'+t('countMeta',{p:b.production.length,t:b.testOnly.length,u:b.unused.length})+'</p></div>'+detail('<p>'+t('sourceName')+'：'+esc(b.name)+' · '+t('sourceType')+'：'+esc(b.kind)+'</p>'+files(b.files)+clues(b.clues,b.notes))+'</section>')+'</div>';
- body+='<h2>'+t('limitsTitle')+'</h2><p>'+t('limitsIntro',{n:r.limitations.length})+'</p>'+detail('<ul>'+r.limitations.map(x=>'<li><code>'+loc(x)+'</code> '+esc(x.reason)+'</li>').join('')+'</ul>');
+  body+='<h2>'+t('limitsTitle')+'</h2><p>'+t('limitsIntro',{n:r.limitations.length})+'</p>'+renderGroups(displayGroups(r.limitations,{limit:r.display?.maxGroupsPerCategory??20,productionFiles:r.blocks.flatMap(b=>b.production)}));
  body+='<footer>'+t('footer')+detail('<h4>'+t('scopeTitle')+'</h4><p>'+esc(r.title)+'<br>'+esc(r.repo)+'<br>'+esc(r.commit)+'<br>'+esc(r.toolVersion)+'<br>'+esc(r.configurationSha256)+'</p><h4>'+t('rawStats')+'</h4><pre>'+esc(JSON.stringify(r.stats,null,2))+'</pre>')+'</footer>';
  return page(title,body,data);
 }

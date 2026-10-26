@@ -27,4 +27,5 @@ export function discoverEntries(root){
  }
  scan(root);return {schema:'entry-inventory-v1',root,entries,documents,files,skipped,coverage:'Lexical candidates only. Agent reads README, SKILL and source, adds missed entries and explicit argument formats; computed registrations remain UNKNOWN.'};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)console.log(JSON.stringify(discoverEntries(path.resolve(process.argv[2])),null,2));
+if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node discover-entries.mjs repo');process.exit(0);}
+console.log(JSON.stringify(discoverEntries(path.resolve(process.argv[2])),null,2));}

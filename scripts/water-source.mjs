@@ -68,5 +68,7 @@ export async function waterSource(c,{enable=false}={}){
  save(path.join(c.outputRoot,'water-source.json'),report);return report;
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+ if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node water-source.mjs --config file [--enable]');process.exit(0);}
+
  try{const a=process.argv.slice(2),p=a[a.indexOf('--config')+1],r=await waterSource(JSON.parse(fs.readFileSync(p,'utf8')),{enable:a.includes('--enable')});console.log(JSON.stringify(r,null,2));if(r.status==='FAIL')process.exitCode=1;}catch(e){console.error(e.stack);process.exitCode=1;}
 }

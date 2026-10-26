@@ -13,3 +13,7 @@ declarations 每項有 id、description、kind、declared 與 implemented。每�
 runnability 不由 exit 0 推斷；納入 water-source 的機器判決與原始回傳狀態。removalTrials 每筆列 processStatus、candidateStatus 與所有 candidates，不能只展示外層 PASS。
 
 證據等級旁必須列 API 掛勾與 Python 子程序限制。公開包不含受查案例、私人來源或已安裝宣告。手機截圖用 capture-card.mjs，390 寬 iframe，等待字體、圖片與動畫完成，失敗留原因。
+
+## 1.21.0 閱讀摘要
+
+報告按「同判定、同原因、同檔案」合併，每類預設顯示 20 組，先列正式路線，再按件數排序。每組附件數、出現處數與前三個錨點；不確定按呼叫端合約、執行證據、觸發條件等缺口分小類。省略組數明列，完整清單只放 JSON，不改「壞了」計數與原判定。 體檢卡全量依據在 `check-card.json`，其他欄位的清單預覽最多三筆，並註明省略數。`--help` 不讀設定、不執行受查程式。

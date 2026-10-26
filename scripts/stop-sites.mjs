@@ -1,3 +1,4 @@
+import {displayGroups,renderGroups} from './display-groups.mjs';
 // Declaration comparison only. Lexical candidates never authorize a hard block.
 import {tokens,localFunctions,callArgs} from './language-static.mjs';
 import {sha256,readBounded} from './walker.mjs';
@@ -185,5 +186,5 @@ export function stopMaintenanceItems(comparison){
 }
 export function renderStopComparison(c,id='stop-site-comparison'){
  if(!c)return '';
- return '<section id="'+esc(id)+'"><h2>\u5ba3\u544a\u5c0d\u7167\uff1a\u963b\u64cb\u9ede</h2><p>'+(c.inventoryOnly?'\u6c92\u6709\u5ba3\u544a\u53ef\u5c0d\u7167\uff1b\u53ea\u5217\u6e05\u55ae\u3002':Object.entries(c.counts).map(([k,v])=>esc(stopLabels[k])+' '+v).join(' / '))+'</p><p>\u975c\u614b\u9589\u5305\u53ea\u662f\u6a94\u6848\u53ef\u9054\u4e0a\u754c\uff0c\u4e0d\u4ee3\u8868\u7ad9\u9ede\u5df2\u7d93\u57f7\u884c\u3002</p>'+c.sites.map(s=>'<details><summary>'+esc(s.label)+' '+esc(s.locator)+':'+s.line+'</summary><p>'+esc(s.reason)+' '+esc(s.missing.join(' '))+'</p><pre>'+esc(JSON.stringify({anchor:s.anchor,reasonCode:s.reasonCode,message:s.message,reach:s.reach,declarationAnchors:s.declarationAnchors,repairDirection:s.repairDirection,verification:s.verification,comparisonCommands:s.comparisonCommands,verificationMissing:s.verificationMissing},null,2))+'</pre></details>').join('')+'</section>';
+ return '<section id="'+esc(id)+'"><h2>宣告對照：阻擋點</h2><p>'+(c.inventoryOnly?'\u6c92\u6709\u5ba3\u544a\u53ef\u5c0d\u7167\uff1b\u50c5\u5217\u5019\u9078\u3002':'')+Object.entries(c.counts).map(([k,v])=>esc(stopLabels[k])+' '+v).join(' / ')+'</p><p>靜態閉包只是檔案可達上界，不代表站點已經執行。</p>'+renderGroups(displayGroups(c.sites),{labels:stopLabels,json:id.startsWith('card-')?'check-card.json':'health.json'})+'</section>';
 }

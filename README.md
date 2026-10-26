@@ -1,4 +1,4 @@
-# Trace Code Lines 1.20.0
+# Trace Code Lines 1.21.0
 
 [English](#english) · [繁體中文](#traditional-chinese)
 
@@ -12,6 +12,10 @@ Stop-site comparison is available under declaration checks. Add `stopSites.polic
 Reverse a map with `node scripts/reach.mjs --map map.json --target src/helper.mjs` (repeat `--target`, or use `--targets-file`). It reports roots by population, direct importers, lexical uses with snippet hashes, and fallback guard hints. Hints support agent review and never authorize deletion; stale maps become UNKNOWN. `derive-map` and `reach` emit parseable JSON on stdout; `derive-map` progress goes to stderr. With `--out`, the full JSON goes to a new file and stdout contains a compact JSON receipt with absolute `outputs` paths. See [reach](references/reach.md) and [runner](references/runner.md).
 
 Check dependency direction across repositories with `node scripts/boundary.mjs --config boundary.json [--out result.json]`. Configured zones and marker rules classify resolved static edges and lexical dynamic import/require/read/spawn paths as VIOLATION, DECLARED, ALLOWED or UNKNOWN. Every finding carries source anchors and hashes; unknown paths and skipped files remain visible. A declared marker is a routing signal, not proof of runtime safety. Findings support maintenance and check-card review at most as needs attention, without changing broken counts. See [boundary configuration and limits](references/boundary.md).
+
+Reports group the same verdict, reason and file, showing at most 20 groups per category by default. Production-route groups come first, then occurrence count. Each group shows item/occurrence totals and up to three anchors. Uncertain groups name the missing caller contract, execution evidence, condition or declaration. Omitted groups are counted; complete lists remain in JSON and broken counters retain their original meaning.
+
+All public CLIs support `--help` without a configuration. Report config accepts `unusedExclusions.conventionLoaded` globs, `staticDirectories` and `historyDirectories` as repo-relative directories. Matching unused candidates become declared exclusions with a separate count; declarations are not runtime evidence. Boundary follows one same-file named call level up to a unique caller argument or down to one top-level helper return. Multiple assignments, ambiguous callers and unsupported helpers retain UNKNOWN. `--out result.json` also writes a bounded `result.json.md`. See [report settings](references/maintenance.md) and [boundary](references/boundary.md).
 
 ### How it differs from maps and summaries
 
@@ -102,6 +106,10 @@ Static parsing is bounded. Computed imports, build configuration, complete synta
 
 <a id="traditional-chinese"></a>
 ## 繁體中文
+
+報告按「同判定、同原因、同檔案」合併，每類預設顯示 20 組，先列正式路線，再按件數排序。每組附件數、出現處數與前三個錨點；不確定按呼叫端合約、執行證據、觸發條件等缺口分小類。省略組數明列，完整清單只放 JSON，不改「壞了」計數與原判定。
+
+所有 CLI 支援 `--help`。`unusedExclusions` 可宣告 `conventionLoaded` glob、`staticDirectories` 與 `historyDirectories` 目錄；符合的沒人用候選改標「依宣告排除」並另列數量。boundary 追同檔呼叫端參數或 helper 回傳一層；多次指派、多呼叫端與不支援的回傳式仍保留 UNKNOWN。`--out result.json` 另寫 `result.json.md` 分組摘要。詳見[設定](references/maintenance.md)與[邊界](references/boundary.md)。
 
 Trace Code Lines **不把描述當成功**。查線流程要求每個結論對到程式位置或實際執行紀錄，並標明證據等級：**真實使用 ＞ 用替身的情境試跑 ＞ 測試跑過 ＞ 只讀程式**；agent 的敘述不算證據。獲授權的試跑只在隔離副本進行，付費服務與模型使用替身，子程序環境移除帳密，真實付費、登入與部署動作一律擋下。產出是給人看的維修單：合併相關觀測，標記為**壞了／要處理／沒問題／不確定**，並在證據足夠時附修法與驗證指令。
 
