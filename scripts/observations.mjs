@@ -2,14 +2,36 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {hash,anchor} from './cassette.mjs';
-export function coverageFiles(directory,root){
- const files=new Set(),evidence=[];
+// options.pathMaps: [{id?,installedRoot|pattern,to?:'',repo?,verify?:'sha256'|'none'}] map covered files under an installed copy
+//   (pattern: regex over the absolute '/'-separated path with a named group `rel`, for per-run temp install roots)
+//   back to repo paths; with sha256 (default) the installed and repo bytes must match, otherwise the row is a mismatch, not coverage.
+// options.repos: [{name,root}] additional repositories; their covered files are listed under coverage.repos[name].
+// Without options the result is the same as before (files inside root only).
+export function coverageFiles(directory,root,{pathMaps=[],repos=[]}={}){
+ const files=new Set(),evidence=[],mapped=[],mismatches=[],extra=Object.fromEntries(repos.map(r=>[r.name,new Set()]));
+ const within=(base,p)=>{const rel=path.relative(base,p);return rel&&!rel.startsWith('..')&&!path.isAbsolute(rel)?rel.replaceAll('\\','/'):null;};
+ const sameBytes=(a,b)=>{try{const x=hash(fs.readFileSync(a));return x===hash(fs.readFileSync(b))?x:false;}catch{return null;}};
+ const seenMap=new Set();
  for(const name of fs.readdirSync(directory).filter(n=>n.endsWith('.json'))){
   const p=path.join(directory,name),b=fs.readFileSync(p),d=JSON.parse(b);evidence.push({file:p,sha256:hash(b)});
   const rows=d.schema==='python-settrace-v1'?d.files.map(f=>({path:f.path,positive:f.lines.some(l=>l.count>0)})):(d.result??[]).filter(s=>s.url.startsWith('file:')).map(s=>({path:fileURLToPath(s.url),positive:s.functions.some(f=>f.ranges.some(r=>r.count>0))}));
-  for(const r of rows){const rel=path.relative(root,r.path);if(r.positive&&rel&&!rel.startsWith('..')&&!path.isAbsolute(rel))files.add(rel.replaceAll('\\','/'));}
+  for(const r of rows){if(!r.positive)continue;const rel=within(root,r.path);if(rel){files.add(rel);continue;}
+   let done=false;
+   for(const r2 of repos){const x=within(r2.root,r.path);if(x){extra[r2.name].add(x);done=true;break;}}
+   if(done)continue;
+   for(const [i,m] of pathMaps.entries()){const x=m.pattern?new RegExp(m.pattern,m.flags??'').exec(r.path.replaceAll('\\','/'))?.groups?.rel:m.installedRoot&&within(m.installedRoot,r.path);if(!x)continue;
+    const target=path.posix.join(m.to??'',x),repoRoot=m.repo?repos.find(q=>q.name===m.repo)?.root:root;if(!repoRoot)continue;
+    const key=r.path+'\0'+i;if(seenMap.has(key))break;seenMap.add(key);
+    const row={map:m.id??i,installed:r.path,file:target,...(m.repo?{repo:m.repo}:{})};
+    if(m.verify==='none'){(m.repo?extra[m.repo]:files).add(target);mapped.push({...row,verified:false});}
+    else{const h=sameBytes(r.path,path.join(repoRoot,target));if(h){(m.repo?extra[m.repo]:files).add(target);mapped.push({...row,verified:true,sha256:h});}else mismatches.push({...row,status:h===null?'REPO_FILE_MISSING':'HASH_MISMATCH'});}
+    break;}
+  }
  }
- return {files:[...files].sort(),evidence};
+ const out={files:[...files].sort(),evidence};
+ if(pathMaps.length)Object.assign(out,{mapped:mapped.sort((a,b)=>a.file.localeCompare(b.file)),mapMismatches:mismatches});
+ if(repos.length)out.repos=Object.fromEntries(Object.entries(extra).map(([k,v])=>[k,[...v].sort()]));
+ return out;
 }
 export function commandStatuses(stdout){
  const results=[];const inspect=(x,p='$')=>{if(!x||typeof x!=='object')return;for(const [k,v] of Object.entries(x)){if(/^(?:status|state|ready|ok|success)$/i.test(k)&&['string','boolean'].includes(typeof v))results.push({path:p+'.'+k,value:v});else if(v&&typeof v==='object')inspect(v,p+'.'+k);}};
@@ -38,7 +60,7 @@ export function judgeScenario(expect,observation,root,streams={}){
  if(!Array.isArray(expect)||!expect.length)return {status:'FAIL',checks:[],reason:'MACHINE_EXPECTATIONS_REQUIRED'};
  for(const e of expect){
   let ok=false,actual=null;
-  if(e.kind==='coverage'){actual=observation.coverage.files;ok=actual.includes(e.file);}
+  if(e.kind==='coverage'){actual=e.repo?observation.coverage.repos?.[e.repo]??[]:observation.coverage.files;ok=actual.includes(e.file);}
   else if(e.kind==='write'){actual=observation.writes.filter(w=>(w.paths??[]).some(p=>path.resolve(p)===path.resolve(root,e.file))&&w.snapshotEvidence?.length);ok=actual.length>0&&(!e.sha256||actual.some(w=>w.snapshotEvidence.some(s=>s.after?.sha256===e.sha256)));}
   else if(e.kind==='boundary'){actual=observation.events.filter(x=>x.kind==='cassette'&&x.phase==='success'&&x.key===e.key);ok=actual.length===(e.count??1);}
   else if(e.kind==='anchor'){actual=anchor(root,e);ok=actual.status==='PASS'&&observation.coverage.files.includes(e.file);}

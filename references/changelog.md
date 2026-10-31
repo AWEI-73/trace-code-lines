@@ -1,5 +1,11 @@
 # 版本記錄
 
+## 1.28.0 (2026-11-01)
+
+- water-source 新增 pathMaps：把安裝副本上的覆蓋對回 repo 檔，預設需 SHA-256 相同才計入，不同列 mapMismatches；installedRoot 支援 @HOME、@CLONE、@TEMP；隨機安裝位置可用 pattern（具名群組 rel）。
+- 新增 repos 清單：其他 repo 的覆蓋分列於 coverage.repos[name]，expected coverage 可加 repo；靜態跨 repo 仍用 boundary.mjs。未設定時不變。
+- 附 examples/water-installed-copy.json。擴充既有 self-test（G260）；不新增測試檔。
+
 ## 1.27.0 (2026-11-01)
 
 - derive-map 新增 declaredEdges：有錨點（檔案、行、expect、可選 SHA-256）的宣告邊，例如執行時才決定參數的 spawn／fork／execFile，可把目標及其靜態閉包併入該根，標為 DECLARED_* 且 runtimeVerified:false；錨點過期留 gap 不擴張，未設定時不變。

@@ -65,3 +65,12 @@ expected 另可寫：
 - `{configFile,pointer,sha256?,sha256Pointer?}`：每次執行前讀 JSON 設定檔，以 pointer 取程式路徑（相對路徑以設定檔目錄為基準），雜湊可直接給或由 `sha256Pointer` 取（可帶 `sha256:` 前綴）。
 
 解析與核對發生在啟動前；結果寫入該 attempt 的 `executables[]`。設定檔讀不到、pointer 不存在、程式不存在或雜湊不符，該次 FAIL（`EXECUTABLE_*`），不啟動、不放寬。
+
+## 安裝副本與多 repo 覆蓋
+
+程式常先安裝到別處（例如 `@HOME/...`）再從副本執行，覆蓋落在 clone 外而不計入。設定：
+
+- `pathMaps: [{id?, installedRoot | pattern, flags?, to?, repo?, verify?}]`：`installedRoot` 可用 `@HOME`、`@CLONE`、`@TEMP`；安裝位置每次不同（例如隨機暫存目錄）時改用 `pattern`，對以 `/` 分隔的絕對路徑比對，具名群組 `rel` 為相對路徑；覆蓋到的副本檔對回 `to/<相對路徑>`。預設 `verify:'sha256'`，副本與 repo 檔位元組相同才計入，列在 `coverage.mapped[]`（`verified:true`、`sha256`）；不同或 repo 無此檔列 `coverage.mapMismatches[]`，不計覆蓋。`verify:'none'` 只在無法比對時用，列為 `verified:false`。
+- `repos: [{name, root}]`：其他 repo 的覆蓋列在 `coverage.repos[name]`，不混入主 repo；expected 寫 `{kind:'coverage',repo:name,file}`。`pathMaps` 加 `repo` 可對回其他 repo。
+
+未設定時覆蓋結果與原本相同。靜態跨 repo 依賴方向仍用 boundary.mjs；本節只處理執行覆蓋。完整範例：examples/water-installed-copy.json。

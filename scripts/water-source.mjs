@@ -84,7 +84,8 @@ export async function waterSource(c,{enable=false}={}){
    const result=await runOnce({clone:c.clone,tempRoot:temp,isolationRoot:path.join(temp,'home'),outputDirectory:path.join(temp,'observation'),command,cwd:c.clone,
     resolvedWriteRoots:[c.clone,temp],executables:[process.execPath,...allowed.paths],pythonExecutables:c.pythonExecutables??[],environment:c.environment??{},
     timeoutMs:Math.min(s.timeoutMs??60000,300000),boundaries:s.boundaries??[],cassette:s.cassette,strictBoundaries:true},{enable:true});
-   const out=path.join(temp,'observation'),coverage=coverageFiles(path.join(out,'coverage'),c.clone);
+   const out=path.join(temp,'observation'),tokx=v=>String(v).replaceAll('@CLONE',c.clone).replaceAll('@HOME',home).replaceAll('@TEMP',temp),
+    coverage=coverageFiles(path.join(out,'coverage'),c.clone,{pathMaps:(c.pathMaps??[]).map(m=>({...m,...(m.installedRoot?{installedRoot:path.resolve(tokx(m.installedRoot))}:{})})),repos:(c.repos??[]).map(r=>({name:r.name,root:path.resolve(tokx(r.root))}))});
    if(c.sourceFiles){coverage.adapterFiles=coverage.files.filter(f=>!c.sourceFiles.includes(f));coverage.files=coverage.files.filter(f=>c.sourceFiles.includes(f));}
    if(c.pruneRaw===true||c.pruneRawCoverage===true)coverage.pruned=pruneRaw(path.join(out,'coverage'),coverage.evidence);
    const events=fs.readdirSync(path.join(out,'events')).filter(f=>f.endsWith('.jsonl')).flatMap(f=>fs.readFileSync(path.join(out,'events',f),'utf8').trim().split('\n').filter(Boolean).map(l=>JSON.parse(l)));
