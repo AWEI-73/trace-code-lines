@@ -1,5 +1,13 @@
 # 版本記錄
 
+## 1.25.0 (2026-11-01)
+
+- water-source 報告的 attempts 改為摘要列（次數、狀態、原因、檔案、SHA-256），完整觀察只存 attempt-N.json；修正大型情境 JSON.stringify RangeError 使報告為空。
+- 命令參數支援 @HOME，與 expected 檔案路徑使用同一隔離家目錄。
+- 新增 pruneRaw（覆蓋專用 pruneRawCoverage）：判定後刪除原始覆蓋與單次執行的原始追蹤檔，保留檔案清單、SHA-256 與位元組數；預設不刪。
+- 推斷錨點略過目錄參數（例如 @CLONE/out-dir），不再 EISDIR。
+- 擴充既有 self-test（G221）；不新增測試檔。
+
 ## 1.24.0 (2026-10-30)
 
 - 入口探索保留字面 MCP registerTool／tool 註冊名稱、檔案與行號；不將註解、字串或計算名稱當作已知工具。
