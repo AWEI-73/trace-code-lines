@@ -35,3 +35,11 @@ schema 為 boundary-cassette-v1，包含 anchors 與 calls。每筆 call：
 API 掛勾不是作業系統沙盒；Python audit 不能改寫子程序 argv，原生與未掛勾子程序不保證完整覆蓋。Windows 以已觀測 PID 清程序樹，再用 tasklist/netstat 查殘留；Linux 核對 /proc 的 TCP socket 與程序；macOS 使用 lsof。其他平台或缺工具、缺證據時保留 UNKNOWN。
 
 即使錄帶沒有外部呼叫，也會綁定啟動腳本與預期覆蓋檔的來源錨點。每次嘗試保留計畫與來源指紋；清理程序與監聽埠缺證據時，情境不標通過。單次執行的 status 在只有程序成功時是 UNKNOWN，processStatus 才是程序結果。
+
+## 報告大小與磁碟
+
+water-source.json 的 `attempts` 只放摘要列：`attempt`、`status`、`reason`、`file`（attempt-N.json）與其 `sha256`。完整觀察只寫一次：情境本身的 `observation`；達上限而本身沒有觀察時，最後一個有觀察的 attempt 列保留它。大型情境不再因重複內嵌觀察而觸發 `RangeError: Invalid string length`。
+
+命令參數中的 `@HOME` 換成隔離家目錄（`<temp>/home`），與 expected 檔案路徑相同。
+
+`pruneRawCoverage: true` 在覆蓋對應完成後刪除原始覆蓋檔，`observation.coverage.pruned` 記錄刪除檔數與位元組，`evidence[]` 仍保留每個原始檔的 SHA-256 與 `pruned: true`。預設不刪，需重新對應原始覆蓋時不要開。
