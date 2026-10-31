@@ -2,7 +2,7 @@
 
 ## 1.28.0 (2026-11-01)
 
-- water-source 新增 pathMaps：把安裝副本上的覆蓋對回 repo 檔，預設需 SHA-256 相同才計入，不同列 mapMismatches；installedRoot 支援 @HOME、@CLONE、@TEMP；隨機安裝位置可用 pattern（具名群組 rel）。
+- water-source 新增 pathMaps：把安裝副本上的覆蓋對回 repo 檔，預設需 SHA-256 相同才計入，不同列 mapMismatches；installedRoot 支援 @HOME、@CLONE、@TEMP；隨機安裝位置可用 pattern（具名群組 rel）；副本已刪除時以同次寫入紀錄的 SHA-256 核對。
 - 新增 repos 清單：其他 repo 的覆蓋分列於 coverage.repos[name]，expected coverage 可加 repo；靜態跨 repo 仍用 boundary.mjs。未設定時不變。
 - 附 examples/water-installed-copy.json。擴充既有 self-test（G260）；不新增測試檔。
 

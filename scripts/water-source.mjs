@@ -85,7 +85,8 @@ export async function waterSource(c,{enable=false}={}){
     resolvedWriteRoots:[c.clone,temp],executables:[process.execPath,...allowed.paths],pythonExecutables:c.pythonExecutables??[],environment:c.environment??{},
     timeoutMs:Math.min(s.timeoutMs??60000,300000),boundaries:s.boundaries??[],cassette:s.cassette,strictBoundaries:true},{enable:true});
    const out=path.join(temp,'observation'),tokx=v=>String(v).replaceAll('@CLONE',c.clone).replaceAll('@HOME',home).replaceAll('@TEMP',temp),
-    coverage=coverageFiles(path.join(out,'coverage'),c.clone,{pathMaps:(c.pathMaps??[]).map(m=>({...m,...(m.installedRoot?{installedRoot:path.resolve(tokx(m.installedRoot))}:{})})),repos:(c.repos??[]).map(r=>({name:r.name,root:path.resolve(tokx(r.root))}))});
+    writtenHashes=new Map((result.target.summary.writes??[]).flatMap(w=>w.snapshotEvidence??[]).filter(x=>x.after?.sha256).map(x=>[path.resolve(x.path),x.after.sha256])),
+    coverage=coverageFiles(path.join(out,'coverage'),c.clone,{writtenHashes,pathMaps:(c.pathMaps??[]).map(m=>({...m,...(m.installedRoot?{installedRoot:path.resolve(tokx(m.installedRoot))}:{})})),repos:(c.repos??[]).map(r=>({name:r.name,root:path.resolve(tokx(r.root))}))});
    if(c.sourceFiles){coverage.adapterFiles=coverage.files.filter(f=>!c.sourceFiles.includes(f));coverage.files=coverage.files.filter(f=>c.sourceFiles.includes(f));}
    if(c.pruneRaw===true||c.pruneRawCoverage===true)coverage.pruned=pruneRaw(path.join(out,'coverage'),coverage.evidence);
    const events=fs.readdirSync(path.join(out,'events')).filter(f=>f.endsWith('.jsonl')).flatMap(f=>fs.readFileSync(path.join(out,'events',f),'utf8').trim().split('\n').filter(Boolean).map(l=>JSON.parse(l)));

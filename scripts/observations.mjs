@@ -7,10 +7,11 @@ import {hash,anchor} from './cassette.mjs';
 //   back to repo paths; with sha256 (default) the installed and repo bytes must match, otherwise the row is a mismatch, not coverage.
 // options.repos: [{name,root}] additional repositories; their covered files are listed under coverage.repos[name].
 // Without options the result is the same as before (files inside root only).
-export function coverageFiles(directory,root,{pathMaps=[],repos=[]}={}){
+export function coverageFiles(directory,root,{pathMaps=[],repos=[],writtenHashes=new Map()}={}){
  const files=new Set(),evidence=[],mapped=[],mismatches=[],extra=Object.fromEntries(repos.map(r=>[r.name,new Set()]));
  const within=(base,p)=>{const rel=path.relative(base,p);return rel&&!rel.startsWith('..')&&!path.isAbsolute(rel)?rel.replaceAll('\\','/'):null;};
- const sameBytes=(a,b)=>{try{const x=hash(fs.readFileSync(a));return x===hash(fs.readFileSync(b))?x:false;}catch{return null;}};
+ // Installed copies are often deleted with their temp root before mapping; the run's own write snapshot (after-SHA-256) then stands in.
+ const installedHash=a=>{try{return {sha256:hash(fs.readFileSync(a)),verifiedBy:'installed-file'};}catch{}const w=writtenHashes.get(path.resolve(a));return w?{sha256:w,verifiedBy:'write-snapshot'}:null;};
  const seenMap=new Set();
  for(const name of fs.readdirSync(directory).filter(n=>n.endsWith('.json'))){
   const p=path.join(directory,name),b=fs.readFileSync(p),d=JSON.parse(b);evidence.push({file:p,sha256:hash(b)});
@@ -24,7 +25,10 @@ export function coverageFiles(directory,root,{pathMaps=[],repos=[]}={}){
     const key=r.path+'\0'+i;if(seenMap.has(key))break;seenMap.add(key);
     const row={map:m.id??i,installed:r.path,file:target,...(m.repo?{repo:m.repo}:{})};
     if(m.verify==='none'){(m.repo?extra[m.repo]:files).add(target);mapped.push({...row,verified:false});}
-    else{const h=sameBytes(r.path,path.join(repoRoot,target));if(h){(m.repo?extra[m.repo]:files).add(target);mapped.push({...row,verified:true,sha256:h});}else mismatches.push({...row,status:h===null?'REPO_FILE_MISSING':'HASH_MISMATCH'});}
+    else{const i2=installedHash(r.path);let repoHash=null;try{repoHash=hash(fs.readFileSync(path.join(repoRoot,target)));}catch{}
+     if(!i2)mismatches.push({...row,status:'INSTALLED_FILE_GONE'});else if(!repoHash)mismatches.push({...row,status:'REPO_FILE_MISSING'});
+     else if(i2.sha256===repoHash){(m.repo?extra[m.repo]:files).add(target);mapped.push({...row,verified:true,verifiedBy:i2.verifiedBy,sha256:repoHash});}
+     else mismatches.push({...row,status:'HASH_MISMATCH',installedSha256:i2.sha256,repoSha256:repoHash});}
     break;}
   }
  }

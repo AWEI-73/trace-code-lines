@@ -1467,6 +1467,9 @@ async function g160Checks(root){
    assert.deepEqual(cov.mapMismatches.map(m=>[m.file,m.status]),[['lib-b.mjs','HASH_MISMATCH']]);assert.deepEqual(cov.repos,{peer:['peer.mjs']});assert(!cov.files.includes('peer.mjs'));
    const byPattern=await waterSource({...config,outputRoot:join(base,'g260-pattern'),pathMaps:[{id:'any-run',pattern:'/installed/pkg/(?<rel>.+)$'}],repos:[{name:'peer',root:other}],scenarios:[sc]},{enable:true});
    assert.equal(byPattern.results[0].verdict.status,'PASS');assert.deepEqual(byPattern.results[0].observation.coverage.mapped.map(m=>[m.map,m.file]),[['any-run','lib-a.mjs']]);
+   put('install-gone.mjs',"import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} from 'node:url';\nconst dir=path.join(process.argv[2],'gone','pkg');fs.mkdirSync(dir,{recursive:true});fs.copyFileSync('lib-a.mjs',path.join(dir,'lib-a.mjs'));\nawait import(pathToFileURL(path.join(dir,'lib-a.mjs')).href);fs.rmSync(path.join(process.argv[2],'gone'),{recursive:true});console.log(JSON.stringify({status:'READY'}));\n");
+   const gone=await waterSource({...config,outputRoot:join(base,'g260-gone'),pathMaps:[{pattern:'/gone/pkg/(?<rel>.+)$'}],scenarios:[{...sc,id:'gone',command:['@NODE','@CLONE/install-gone.mjs','@HOME'],expected:[{kind:'coverage',file:'lib-a.mjs'}]}]},{enable:true});
+   assert.equal(gone.results[0].verdict.status,'PASS');assert.equal(gone.results[0].observation.coverage.mapped[0].verifiedBy,'write-snapshot');
   });
   await check('G221 @HOME is substituted in commands and raw coverage can be pruned after mapping',async()=>{
    put('home.mjs',"import fs from 'node:fs';import path from 'node:path';\nconst f=process.argv[2];if(f.includes('@HOME'))throw Error('token left');fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,'ok');\nconsole.log(JSON.stringify({status:'READY'}));\n");
