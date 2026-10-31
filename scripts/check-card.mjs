@@ -40,21 +40,22 @@ export function compareDeclarations(root,items=[]){
 export function buildCard(c,options={}){
  const allowed=['entries','inputs','outputs','sideEffects','cost','tools','runnability'];
  const fields=Object.fromEntries(allowed.map(k=>[k,c[k]??{status:'UNKNOWN'}]));
- const scenarios=c.water?.results??[];
+ const dev=c.water?.toolDev===true||c.water?.countsTowardVerdict===false,scenarios=dev?[]:c.water?.results??[];
  const cleanupUnknown=scenarios.length>0&&scenarios.some(r=>r.status==='UNKNOWN')&&scenarios.every(r=>r.status==='PASS'||r.status==='UNKNOWN'&&r.verdict?.status==='PASS'&&r.cassetteComplete===true&&r.cleanup?.status!=='PASS'&&r.cleanup?.status!=='FAIL');
  if(scenarios.some(r=>r.status==='FAIL'||r.cleanup?.status==='FAIL'))fields.runnability={...fields.runnability,status:'FAIL'};
  if(cleanupUnknown&&fields.runnability.status!=='FAIL')fields.runnability={...fields.runnability,status:'UNKNOWN',cleanupUnverified:true,description:'\u60c5\u5883\u901a\u904e\uff0c\u7a0b\u5e8f\u6e05\u7406\u7121\u6cd5\u5728\u6b64\u5e73\u53f0\u6838\u5c0d'};
  const walk=x=>{if(!x||typeof x!=='object')return;for(const k of Object.keys(x)){if(/^(?:deploymentId|operation|entryId|pathId|profileId|organizationId|instanceId|selector)$/i.test(k))throw Error('NON_GENERIC_CARD_FIELD '+k);walk(x[k]);}};walk(fields);
  return {...(c.deletionImpact?{deletionImpact:deletionImpact({...c.deletionImpact,repo:c.deletionImpact.repo??c.root,unusedExclusions:c.deletionImpact.unusedExclusions??c.unusedExclusions,display:c.deletionImpact.display??c.display},{base:options.base})}:{}),schema:'check-card-v1',title:c.title??'Repository check',...fields,declarations:compareDeclarations(c.root,c.declarations),
   ...(c.stopSites?{stopSites:compareStopSites({root:c.root,files:c.stopSites.files??[],config:c.stopSites,read:options.read,routes:c.stopSites.routes??[],water:c.maintenanceWater})}:{}),
-  evidenceLevel:c.water?.evidenceLevel??'STATIC_ONLY',waterSource:c.water?.source??'none',coveredFiles:c.water?.coveredFiles??[],additionalFlowFiles:c.water?.additionalFlowFiles??0,
+  ...(dev?{toolDev:{countsTowardVerdict:false,label:c.water.label??'TOOL_DEV: NOT counted toward any verdict',devStatus:c.water.devStatus??null,scenarios:(c.water.results??[]).map(r=>({id:r.id,status:r.status,countsTowardVerdict:false}))}}:{}),
+  evidenceLevel:dev?'STATIC_ONLY':c.water?.evidenceLevel??'STATIC_ONLY',waterSource:c.water?.source??'none',coveredFiles:c.water?.coveredFiles??[],additionalFlowFiles:c.water?.additionalFlowFiles??0,
   removalTrials:c.removalTrials??[],limits:c.limits??[],boundaries:{instrument:'API hooks, not an operating-system sandbox',python:'Python audit cannot rewrite child argv; child coverage may be incomplete',paidCalls:'Stand-ins only; never live',network:'Denied during execution',credentials:'Removed from child environment',externalActions:'Deployment, publishing, mail and production writes are forbidden'},
   evidence:c.evidence??[],extractionBasis:'Agent-read source with explicit anchors; coverage is observation, not business acceptance'};
 }
 const labels={entries:'入口',inputs:'輸入',outputs:'輸出',sideEffects:'副作用',cost:'會不會花錢',tools:'需要的工具',runnability:'能不能跑',declarations:'宣告對照',removalTrials:'拆除試驗',limits:'限制',boundaries:'邊界'};
 const levels={STATIC_ONLY:'只有靜態',TEST_EXECUTED:'測試跑過',AGENT_DRIVEN_STUBBED:'情境試跑（外部服務用替身）',REAL_USE:'真實使用'};
 export function renderCardMarkdown(c){
- const lines=['# '+c.title+'：體檢卡','','證據等級：'+(levels[c.evidenceLevel]??c.evidenceLevel)+'；觀測到 '+c.coveredFiles.length+' 個檔案，比只讀原碼多 '+c.additionalFlowFiles+' 個實跑檔案。','','儀器是在程式的 API 上掛記錄器，不是作業系統沙盒。Python 記錄器不能改寫子程序參數；該部分可能缺少覆蓋。',''];
+ const lines=['# '+c.title+'：體檢卡','',...(c.toolDev?['> **工具開發模式（--tool-dev）：以下試跑結果不計入任何判定 / NOT counted toward verdicts.** '+c.toolDev.label,'']:[]),'證據等級：'+(levels[c.evidenceLevel]??c.evidenceLevel)+'；觀測到 '+c.coveredFiles.length+' 個檔案，比只讀原碼多 '+c.additionalFlowFiles+' 個實跑檔案。','','儀器是在程式的 API 上掛記錄器，不是作業系統沙盒。Python 記錄器不能改寫子程序參數；該部分可能缺少覆蓋。',''];
  for(const [key,label] of Object.entries(labels).filter(([key])=>key!=='declarations')){lines.push('## '+label,'','~~~json',JSON.stringify(preview(c[key]),null,2),'~~~','');}
  lines.push(renderGroupsMarkdown(displayGroups(c.declarations),{json:'check-card.json'}));
  if(c.stopSites)lines.push('## \u963b\u64cb\u9ede\u5c0d\u7167','',renderGroupsMarkdown(displayGroups(c.stopSites.sites),{json:'check-card.json'}));

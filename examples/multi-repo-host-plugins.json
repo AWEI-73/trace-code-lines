@@ -1,0 +1,26 @@
+{
+  "_comment": "Example only: a host repo (Wayloom) that loads BUILD adapters from a separate profiles repo (Wayloom-profiles). Paths are placeholders; nothing here is built into the tool.",
+  "repo": "/path/to/TEMP/Wayloom",
+  "temp": "/path/to/TEMP",
+  "scratch": "/path/to/TEMP/scratch",
+  "roots": [{"path": "scripts/personal-entry.mjs", "reason": "entry child spawned by the MCP server"}],
+  "primaryRepoName": "wayloom",
+  "repos": [{"name": "profiles", "root": "/path/to/Wayloom-profiles", "reason": "profilesRoot given to install; BUILD adapters live here"}],
+  "declaredEdges": [
+    {"id": "kc-build-adapter", "kind": "subprocess",
+     "from": {"file": "scripts/lib/build-module-process.mjs", "line": 60, "expect": "join(installed.snapshotRoot,binding.path)"},
+     "to": [{"repo": "profiles", "configFile": "profiles/knowledge-curator/capability.json", "pointer": "/buildModule/adapter/path", "line": 103, "expect": "Unsupported route content action"}],
+     "basis": "binding.path comes from capability.json buildModule.adapter.path of the installed profile snapshot"}
+  ],
+  "crossRepoRules": {
+    "zones": [
+      {"name": "host", "repo": "wayloom", "include": ["scripts/**", "apps/**"]},
+      {"name": "profile-build", "repo": "profiles", "include": ["profiles/*/package/**"]},
+      {"name": "profile-other", "repo": "profiles", "include": ["profiles/**", "scripts/**"]}
+    ],
+    "rules": [
+      {"from": "host", "to": "profile-build", "allow": "declared", "markers": []},
+      {"from": "host", "to": "profile-other", "allow": false, "markers": []}
+    ]
+  }
+}

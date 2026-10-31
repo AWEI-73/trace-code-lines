@@ -1,5 +1,13 @@
 # 版本記錄
 
+## 1.29.0 (2026-11-01)
+
+- water-source 執行檔白名單新增只靠雜湊的項目：`{sha256, root?}`（root 可用 glob 與 @TEMP/@HOME/@CLONE），隨機暫存目錄裡的 harness 只要位元組 SHA-256 相符就允許；`{manifest, pointer?, sha256 | sha256Pointer, root?}` 在 spawn 當下讀情境產生的 manifest 取路徑。兩者都在 spawn 時由 recorder 核對實際位元組，事件記 `hashAllowlist.allowedBy`。
+- derive-map 支援 `repos`：其他 repo 以 `@名稱/路徑` 併入清單，跟著跨出 repo 的相對路徑、宣告的套件名稱與 declaredEdges（可寫 `{repo,file}` 或 `{repo,configFile,pointer,line?,expect?}`）走進去；跨 repo 邊標 `crossRepo`，用 boundary.mjs 的 zone/方向規則（`crossRepoRules`）分類，`crossRepo.diagrams` 輸出分 repo 的 Mermaid 圖，跨 repo 邊為虛線。規則解析移到 boundary-rules.mjs 共用。
+- `--tool-dev`（`waterSource(c,{toolDev:true})`）：改工具時解除三次上限；寫 dev-attempt-N.json 與 water-source.tool-dev.json，報告 status 為 NOT_COUNTED、每列 countsTowardVerdict:false，體檢卡顯示警示且不影響 runnability／證據等級，maintenance 拒收。正式 attempt 不受影響、仍是三次。
+- expected 新增 `{kind:'line', file, line, repo?, expect?}`：以 V8 區塊覆蓋（最內層範圍 count>0）判斷該行是否執行。recorder 在啟動 node/python 子程序時記下腳本 SHA-256（launch-snapshot），安裝副本被刪後仍可核對；pathMaps 的 `to` 可用 `$<群組名>` 引用 pattern 的具名群組。
+- 擴充既有 self-test（G290–G292、G290 multi-repo）；不新增測試檔。
+
 ## 1.28.0 (2026-11-01)
 
 - water-source 新增 pathMaps：把安裝副本上的覆蓋對回 repo 檔，預設需 SHA-256 相同才計入，不同列 mapMismatches；installedRoot 支援 @HOME、@CLONE、@TEMP；隨機安裝位置可用 pattern（具名群組 rel）；副本已刪除時以同次寫入紀錄的 SHA-256 核對。

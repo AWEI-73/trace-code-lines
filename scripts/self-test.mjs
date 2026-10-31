@@ -542,7 +542,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root)];
+  const addedChecks=[...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -1471,6 +1471,52 @@ async function g160Checks(root){
    const gone=await waterSource({...config,outputRoot:join(base,'g260-gone'),pathMaps:[{pattern:'/gone/pkg/(?<rel>.+)$'}],scenarios:[{...sc,id:'gone',command:['@NODE','@CLONE/install-gone.mjs','@HOME'],expected:[{kind:'coverage',file:'lib-a.mjs'}]}]},{enable:true});
    assert.equal(gone.results[0].verdict.status,'PASS');assert.equal(gone.results[0].observation.coverage.mapped[0].verifiedBy,'write-snapshot');
   });
+  await check('G290 hash-only allowlist admits a random temp executable by SHA-256 under a glob root, or via a scenario manifest',async()=>{
+   if(process.platform==='win32')return;
+   put('hashexe.mjs',"import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import cp from 'node:child_process';\nconst dir=fs.mkdtempSync(path.join(os.tmpdir(),'rnd-')),exe=path.join(dir,'tool.sh');\nfs.writeFileSync(exe,'#!/bin/sh\\necho TOOL_OK\\n');fs.chmodSync(exe,0o755);fs.writeFileSync(process.argv[2],JSON.stringify({tool:{path:exe}}));\nlet out='';try{out=cp.execFileSync(exe,[],{encoding:'utf8'});}catch(e){out='DENIED '+e.code;}\nconsole.log(JSON.stringify({status:out.includes('TOOL_OK')?'READY':'DENIED'}));\n");
+   const H=sha256(Buffer.from('#!/bin/sh\necho TOOL_OK\n')),sc=want=>({id:'hashexe',request:{purpose:'hash allowlist'},prerequisites:[],command:['@NODE','@CLONE/hashexe.mjs','@HOME/tool-manifest.json'],expected:[{kind:'coverage',file:'hashexe.mjs'},{kind:'status',path:'$.status',value:want}]});
+   const run=async(name,executables,want)=>{const r=await waterSource({...config,outputRoot:join(base,'g290-'+name),executables,scenarios:[sc(want)]},{enable:true});assert.equal(r.results[0].verdict.status,'PASS',name+' '+JSON.stringify(r.results[0].verdict.checks));return r.results[0];};
+   await run('none',[],'DENIED');
+   const ok=await run('hash',[{sha256:H,root:'@TEMP/**'}],'READY');
+   const ev=ok.observation.events.find(e=>e.kind==='process'&&e.phase==='attempt'&&e.hashAllowlist);assert.equal(ev.hashAllowlist.allowedBy,'sha256');assert.equal(ev.decision,'ALLOW');
+   assert.deepEqual(ok.executables.map(x=>[x.source,x.status]),[['hash-only','DEFERRED_TO_SPAWN']]);
+   await run('wrong-root',[{sha256:H,root:'@CLONE/**'}],'DENIED');
+   await run('wrong-hash',[{sha256:'0'.repeat(64)}],'DENIED');
+   const m=await run('manifest',[{manifest:'@HOME/tool-manifest.json',pointer:'/tool/path',sha256:H,root:'@TEMP/**'}],'READY');
+   assert.equal(m.observation.events.find(e=>e.hashAllowlist?.allowedBy).hashAllowlist.allowedBy,'manifest');
+   await run('manifest-wrong-hash',[{manifest:'@HOME/tool-manifest.json',pointer:'/tool/path',sha256:'f'.repeat(64)}],'DENIED');
+   assert.equal(resolveExecutables([{sha256:'abc'}],{clone,home:base}).error,'EXECUTABLE_HASH_INVALID');
+   assert.equal(resolveExecutables([{manifest:'@HOME/m.json'}],{clone,home:base}).error,'EXECUTABLE_MANIFEST_HASH_REQUIRED');
+   assert.deepEqual(resolveExecutables([{sha256:'SHA256:'+H.toUpperCase(),root:'@TEMP/x/**'}],{clone,home:base,temp:'/t'}).hashes,[{sha256:H,root:'/t/x/**'}]);
+  });
+  await check('G291 --tool-dev lifts the three-attempt limit but its results never count and never touch counted attempts',async()=>{
+   const c={...config,outputRoot:join(base,'g291'),scenarios:[{id:'blocked',request:{purpose:'retry bound'},prerequisites:[],command:['clasp','push'],expected:[{kind:'coverage',file:'api.mjs'}]}]};
+   for(let i=0;i<3;i++)await waterSource(c,{enable:true});
+   const counted=fs.readFileSync(join(base,'g291/water-source.json'));
+   assert.equal((await waterSource(c,{enable:true})).results[0].reason,'ATTEMPT_LIMIT');
+   const dev=await waterSource(c,{enable:true,toolDev:true}),row=dev.results[0];
+   assert.equal(dev.status,'NOT_COUNTED');assert.equal(dev.countsTowardVerdict,false);assert.equal(dev.toolDev,true);assert.match(dev.label,/NOT counted/);
+   assert.equal(row.attempt,1);assert.equal(row.toolDev,true);assert.equal(row.countsTowardVerdict,false);assert.notEqual(row.reason,'ATTEMPT_LIMIT');
+   assert(fs.existsSync(join(base,'g291/blocked/dev-attempt-1.json')));assert(fs.existsSync(join(base,'g291/water-source.tool-dev.json')));
+   assert.equal((await waterSource(c,{enable:true,toolDev:true})).results[0].attempt,2);
+   const again=await waterSource(c,{enable:true});assert.equal(again.results[0].reason,'ATTEMPT_LIMIT');assert.equal(again.results[0].attempts.length,3);
+   assert.equal(fs.readdirSync(join(base,'g291/blocked')).filter(f=>/^attempt-\d+\.json$/.test(f)).length,3);assert(!counted.equals(Buffer.alloc(0)));
+   const card=buildCard({root:clone,water:{...dev,results:[{...dev.results[0],status:'FAIL'}]},runnability:{status:'PASS'}});
+   assert.equal(card.runnability.status,'PASS');assert.equal(card.evidenceLevel,'STATIC_ONLY');assert.equal(card.toolDev.countsTowardVerdict,false);assert.equal(card.toolDev.scenarios[0].countsTowardVerdict,false);
+   assert.match(renderCardMarkdown(card),/NOT counted toward verdicts/);
+  });
+  await check('G292 line expectations read V8 block coverage; launch snapshots verify deleted copies; pathMaps to reuses named groups',async()=>{
+   put('line.mjs',"const x=process.argv.length>99;\nif(x){\n console.log('never');\n}\nconsole.log(JSON.stringify({status:'READY'}));\n");
+   const lr=await waterSource({...config,outputRoot:join(base,'g292-line'),scenarios:[{id:'line',request:{purpose:'line'},prerequisites:[],command:['@NODE','@CLONE/line.mjs'],expected:[{kind:'line',file:'line.mjs',line:5,expect:'READY'},{kind:'status',path:'$.status',value:'READY'}]}]},{enable:true});
+   assert.equal(lr.results[0].verdict.status,'PASS',JSON.stringify(lr.results[0].verdict.checks));
+   const miss=await waterSource({...config,outputRoot:join(base,'g292-miss'),scenarios:[{id:'line',request:{purpose:'line'},prerequisites:[],command:['@NODE','@CLONE/line.mjs'],expected:[{kind:'line',file:'line.mjs',line:3}]}]},{enable:true});
+   assert.equal(miss.results[0].verdict.checks[0].status,'FAIL');assert.equal(miss.results[0].verdict.checks[0].actual.status,'NOT_EXECUTED');
+   fs.mkdirSync(join(clone,'pkgx'),{recursive:true});put('pkgx/tool.mjs',"export const t=1;\nconsole.log('tool ran');\n");
+   put('launch.mjs',"import fs from 'node:fs';import path from 'node:path';import cp from 'node:child_process';\nconst dir=path.join(process.argv[2],'inst','run-'+process.pid,'pkgx');fs.mkdirSync(dir,{recursive:true});\nconst copy=path.join(dir,'tool.mjs');fs.copyFileSync('pkgx/tool.mjs',copy);cp.spawnSync(process.execPath,[copy],{stdio:'ignore'});\nfs.rmSync(path.join(process.argv[2],'inst'),{recursive:true,force:true});console.log(JSON.stringify({status:'READY'}));\n");
+   const r=await waterSource({...config,outputRoot:join(base,'g292-launch'),pathMaps:[{id:'run',pattern:'/inst/[^/]+/(?<pkg>[^/]+)/(?<rel>.+)$',to:'$<pkg>'}],scenarios:[{id:'launch',request:{purpose:'launch snapshot'},prerequisites:[],command:['@NODE','@CLONE/launch.mjs','@HOME'],expected:[{kind:'coverage',file:'pkgx/tool.mjs'},{kind:'line',file:'pkgx/tool.mjs',line:2}]}]},{enable:true});
+   const cov=r.results[0].observation.coverage;assert.equal(r.results[0].verdict.status,'PASS',JSON.stringify([r.results[0].verdict.checks,cov.mapMismatches]));
+   assert.deepEqual(cov.mapped.map(m=>[m.file,m.verified,m.verifiedBy]),[['pkgx/tool.mjs',true,'launch-snapshot']]);assert.equal(cov.lines[0].status,'EXECUTED');
+  });
   await check('G221 @HOME is substituted in commands and raw coverage can be pruned after mapping',async()=>{
    put('home.mjs',"import fs from 'node:fs';import path from 'node:path';\nconst f=process.argv[2];if(f.includes('@HOME'))throw Error('token left');fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,'ok');\nconsole.log(JSON.stringify({status:'READY'}));\n");
    const r=await waterSource({...config,outputRoot:join(base,'g221-home'),pruneRaw:true,scenarios:[{id:'home',request:{purpose:'home token'},prerequisites:[],command:['@NODE','@CLONE/home.mjs','@HOME/state/x.txt'],expected:[{kind:'coverage',file:'home.mjs'},{kind:'write',file:'@HOME/state/x.txt'},{kind:'status',path:'$.status',value:'READY'}]}]},{enable:true});
@@ -2067,5 +2113,37 @@ async function g250Checks(root){
  const stale=analyze({...base,declaredEdges:[{...edge,from:{...edge.from,expect:'fork('}},{...edge,id:'missing',to:['absent.mjs']}]});
  assert(!stale.closures[0].files.includes('worker.mjs'));assert.deepEqual(stale.declaredEdges.gaps.map(g=>[g.id,g.code]),[['spawn-worker','DECLARED_EDGE_ANCHOR_STALE'],['missing','DECLARED_EDGE_ANCHOR_STALE']]);
  checks.push('G250 anchored declared subprocess edges expand the closure with labels; stale anchors stay gaps');
+ return checks;
+}
+
+async function g290Checks(root){
+ const checks=[],mk=(name,files)=>{const r=join(root,name);fs.mkdirSync(r,{recursive:true});for(const [p,b] of Object.entries(files)){fs.mkdirSync(join(r,p,'..'),{recursive:true});fs.writeFileSync(join(r,p),b);}
+  const git=args=>{const x=spawnSync('git',['-C',r,...args],{encoding:'utf8',windowsHide:true,env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}});assert.equal(x.status,0,x.stderr);};
+  git(['init']);git(['add','.']);git(['-c','user.name=Fixture','-c','user.email=fixture.invalid','-c','core.hooksPath='+root,'-c','commit.gpgsign=false','commit','-m','G290 fixture']);return r;};
+ const host=mk('g290-host',{'main.mjs':"import '../g290-plug/lib/x.mjs';\nimport y from 'plugpkg/lib/y.mjs';\nimport {readFileSync} from 'node:fs';\nconst cap=JSON.parse(readFileSync(process.argv[2],'utf8'));\nimport('./lib/run.mjs');\n",'lib/run.mjs':"export const run=1;\n"});
+ const plug=mk('g290-plug',{'package.json':'{"name":"plugpkg"}\n','lib/x.mjs':"import './z.mjs';\n",'lib/y.mjs':"export default 1;\n",'lib/z.mjs':"export const z=1;\n",'plug/cap.json':'{"adapter":{"path":"adapter.mjs"}}\n','plug/adapter.mjs':"export function f(a){\n if(a==='x')return 1;\n throw Error('Unsupported action: '+a);\n}\n"});
+ const scratch=join(root,'g290-scratch');fs.mkdirSync(scratch);
+ const edge={id:'plug',kind:'subprocess',from:{file:'main.mjs',line:4,expect:'readFileSync(process.argv[2]'},to:[{repo:'plug',configFile:'plug/cap.json',pointer:'/adapter/path',line:3,expect:'Unsupported action'}],basis:'adapter path read from cap.json at run time'};
+ const cfg={repo:host,temp,scratch,roots:[{path:'main.mjs',reason:'entry'}],classification:{rules:[],fallback:'source'},primaryRepoName:'host',repos:[{name:'plug',root:plug,package:'plugpkg'}],declaredEdges:[edge],
+  crossRepoRules:{zones:[{name:'host',repo:'host',include:['**']},{name:'plugins',repo:'plug',include:['plug/**']},{name:'plib',repo:'plug',include:['lib/**','package.json']}],rules:[{from:'host',to:'plugins',allow:'declared',markers:[]},{from:'host',to:'plib',allow:false,markers:[]}]}};
+ const plain=analyze({...cfg,repos:undefined,declaredEdges:undefined,crossRepoRules:undefined});
+ assert.equal(plain.crossRepo,undefined);assert(!plain.closures[0].files.some(f=>f.startsWith('@')));
+ checks.push('G290 without repos derive-map output keeps single-repo files and no crossRepo block');
+ const r=analyze(cfg),c=r.closures[0];
+ assert.deepEqual(c.files,['@plug/lib/x.mjs','@plug/lib/y.mjs','@plug/lib/z.mjs','@plug/plug/adapter.mjs','lib/run.mjs','main.mjs']);
+ assert.deepEqual(c.repoFiles,{host:['lib/run.mjs','main.mjs'],plug:['lib/x.mjs','lib/y.mjs','lib/z.mjs','plug/adapter.mjs']});
+ assert.deepEqual(r.crossRepo.edges.map(e=>[e.kind,e.from.file+':'+e.from.line,e.to.repo+':'+e.to.file,e.classification]).sort(),[['CROSS_REPO_IMPORT','main.mjs:1','plug:lib/x.mjs','VIOLATION'],['CROSS_REPO_PACKAGE','main.mjs:2','plug:lib/y.mjs','VIOLATION'],['DECLARED_SUBPROCESS','main.mjs:4','plug:plug/adapter.mjs','DECLARED']]);
+ assert.deepEqual(r.crossRepo.counts,{VIOLATION:2,DECLARED:1,ALLOWED:0,UNKNOWN:0});
+ checks.push('G290 multi-repo derive-map follows relative paths, package names and declared JSON-pointer edges into other repos');
+ const d=r.crossRepo.edges.find(e=>e.kind==='DECLARED_SUBPROCESS');assert.deepEqual([d.via[0].targetAnchor.line,d.via[0].targetAnchor.text,d.via[0].value],[3,"throw Error('Unsupported action: '+a);",'adapter.mjs']);assert.equal(d.runtimeVerified,false);
+ assert(c.edges.some(e=>e.crossRepo?.to==='plug'&&e.crossRepo.from==='host'));assert.match(r.crossRepo.diagrams['main.mjs'],/subgraph [^\n]*repo: plug[\s\S]*-\. "cross-repo DECLARED :4" \.->/);
+ assert.equal(r.readOnly.status,'PASS');assert.deepEqual(r.readOnly.extraReposChanged,[]);assert(r.zeroCoverageCandidates.every(z=>!z.path.startsWith('@')));
+ checks.push('G290 cross-repo edges are labelled in the map and Mermaid diagram, classified with boundary zone rules, target lines anchored');
+ const noRules=analyze({...cfg,crossRepoRules:undefined});assert(noRules.crossRepo.edges.every(e=>e.classification==='UNKNOWN'&&e.reason==='NO_CROSS_REPO_RULES'));
+ const stale=analyze({...cfg,declaredEdges:[{...edge,to:[{...edge.to[0],expect:'gone'}]},{...edge,id:'bad-repo',to:[{repo:'nope',file:'x.mjs'}]}]});
+ assert.deepEqual(stale.declaredEdges.gaps.map(g=>[g.id,g.code]),[['plug','DECLARED_EDGE_ANCHOR_STALE'],['bad-repo','DECLARED_EDGE_ANCHOR_STALE']]);assert(!stale.closures[0].files.includes('@plug/plug/adapter.mjs'));
+ assert.throws(()=>analyze({...cfg,repos:[{name:'plug',root:host}]}),/overlap/);assert.throws(()=>analyze({...cfg,repos:[{name:'host',root:plug}]}),/unique/);
+ fs.writeFileSync(join(plug,'dirty.txt'),'x');assert.throws(()=>analyze(cfg),/not clean/);fs.rmSync(join(plug,'dirty.txt'));
+ checks.push('G290 stale target anchors, unknown repos, overlapping or dirty extra repos are refused; no rules means UNKNOWN');
  return checks;
 }

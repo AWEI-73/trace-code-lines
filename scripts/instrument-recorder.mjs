@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import cp from 'node:child_process';
+import crypto from 'node:crypto';
 import net from 'node:net';
 import tls from 'node:tls';
 import {syncBuiltinESMExports} from 'node:module';
@@ -109,6 +110,25 @@ function pythonArgs(argv){
  if(i>=argv.length)return argv;
  return [...argv.slice(0,i),c.pythonWrapper,'--out',c.coverageDirectory,'--config',cfgFile,'--',...argv.slice(i)];
 }
+// Hash-only allowlist: {sha256,root?} allows any resolved executable whose bytes match, optionally only under a glob root.
+// {manifest,pointer?,sha256Pointer?,sha256?,root?} reads a scenario-generated JSON manifest at spawn time; the file's
+// actual bytes must still match the hash, so a manifest can name a random temp path but cannot widen the hash set.
+const globRe=g=>new RegExp('^'+String(g).replaceAll('\\','/').split(/(\*\*\/?|\*|\?)/).map(t=>t==='**'||t==='**/'?'.*':t==='*'?'[^/]*':t==='?'?'[^/]':t.replace(/[.+^${}()|[\]\\]/g,'\\$&')).join('')+'$',process.platform==='win32'?'i':'');
+const ptr=(doc,p)=>{let v=doc;for(const k of String(p??'').split('/').slice(1).map(x=>x.replaceAll('~1','/').replaceAll('~0','~'))){if(v==null||!(k in Object(v)))return undefined;v=v[k];}return v;};
+const norm=h=>String(h??'').toLowerCase().replace(/^sha256:/,'');
+function hashAllowed(resolved){
+ const entries=c.executableHashes??[];if(!entries.length)return null;
+ let actual;try{const st=original.stat(resolved);if(!st.isFile())return null;actual=crypto.createHash('sha256').update(fs.readFileSync(resolved)).digest('hex');}catch{return null;}
+ const under=root=>!root||globRe(root).test(path.resolve(resolved).replaceAll('\\','/'));
+ for(const e of entries){
+  if(e.manifest){let doc;try{doc=JSON.parse(fs.readFileSync(e.manifest,'utf8'));}catch{continue;}
+   const named=e.pointer?ptr(doc,e.pointer):null,expected=e.sha256Pointer?ptr(doc,e.sha256Pointer):e.sha256;
+   if(named&&key(path.isAbsolute(named)?named:path.resolve(path.dirname(e.manifest),named))!==key(resolved))continue;
+   if(expected&&norm(expected)===actual&&under(e.root))return {allowedBy:'manifest',manifest:e.manifest,sha256:actual,root:e.root??null};continue;}
+  if(e.sha256&&norm(e.sha256)===actual&&under(e.root))return {allowedBy:'sha256',sha256:actual,root:e.root??null};
+ }
+ return {allowedBy:null,sha256:actual};
+}
 function child(exe,argv,options,api){
  options={...options};const resolved=resolveExe(exe,options);
  if(generic?.hasSubprocess(exe,argv)){
@@ -127,8 +147,9 @@ function child(exe,argv,options,api){
   return {exe:c.nodeExecutable,argv:[c.boundaryStub],options:{...options,env},event};
  }
  const created=ownExecutable(resolved);
- const allowed=(c.executables.some(x=>key(x)===key(resolved))||created)&&!options.shell&&!(c.denyCommandPatterns??[]).some(p=>new RegExp(p,'i').test([resolved,...argv].join(' ')));
- const event=start('process',api,{argv:[exe,...argv],resolvedExecutable:resolved,createdExecutable:created,childCwd:options.cwd??process.cwd()},allowed);
+ const byPath=c.executables.some(x=>key(x)===key(resolved)),byHash=byPath||created?null:hashAllowed(resolved);
+ const allowed=(byPath||created||!!byHash?.allowedBy)&&!options.shell&&!(c.denyCommandPatterns??[]).some(p=>new RegExp(p,'i').test([resolved,...argv].join(' ')));
+ const event=start('process',api,{argv:[exe,...argv],resolvedExecutable:resolved,createdExecutable:created,childCwd:options.cwd??process.cwd(),...(byHash?{hashAllowlist:byHash}:{})},allowed);
  const isNode=key(resolved)===key(c.nodeExecutable),isPython=c.pythonExecutables.some(p=>key(p)===key(resolved))||(created&&/^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$/i.test(path.basename(resolved)));
  if(isNode||isPython){
  const env={...(options.env??process.env)},option='--import='+pathToFileURL(c.recorder).href;
@@ -137,7 +158,9 @@ function child(exe,argv,options,api){
  env.PYTHONDONTWRITEBYTECODE='1';options.env=env;
  if(isPython&&c.wrapPythonChildren)argv=pythonArgs(argv);
  }
- emit({...event,phase:'prepared',effectiveArgv:[resolved,...argv],instrumented:isNode||(isPython&&argv.includes(c.pythonWrapper))});
+ // Script bytes at launch: lets coverage of a temp copy be hash-verified after the copy is deleted.
+ let launched=null;if(isNode||isPython){const script=argv.find(a=>typeof a==='string'&&!a.startsWith('-')&&a!==c.pythonWrapper);if(script)try{const p=path.resolve(options.cwd??process.cwd(),script),st=original.stat(p);if(st.isFile()&&st.size<=8*1024*1024)launched={scriptPath:p,scriptSha256:crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')};}catch{}}
+ emit({...event,phase:'prepared',effectiveArgv:[resolved,...argv],instrumented:isNode||(isPython&&argv.includes(c.pythonWrapper)),...(launched??{})});
  return {exe:resolved,argv,options,event};
 }
 const nativeSpawn=cp.ChildProcess.prototype.spawn;

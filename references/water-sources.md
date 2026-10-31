@@ -74,3 +74,20 @@ expected 另可寫：
 - `repos: [{name, root}]`：其他 repo 的覆蓋列在 `coverage.repos[name]`，不混入主 repo；expected 寫 `{kind:'coverage',repo:name,file}`。`pathMaps` 加 `repo` 可對回其他 repo。
 
 未設定時覆蓋結果與原本相同。靜態跨 repo 依賴方向仍用 boundary.mjs；本節只處理執行覆蓋。完整範例：examples/water-installed-copy.json。
+
+## 只靠雜湊的白名單與情境 manifest（1.29.0）
+
+harness 常被情境複製到每次不同的暫存目錄，路徑無法事先寫進 `executables`。可改寫：
+
+- `{sha256, root?}`：任何被啟動的檔案，只要位元組 SHA-256 相符（且路徑符合 `root` glob，例如 `@TEMP/**`）就允許。
+- `{manifest, pointer?, sha256 | sha256Pointer, root?}`：spawn 當下讀情境寫出的 JSON manifest，`pointer` 指到的路徑須等於被啟動的檔案；雜湊由設定給（`sha256`）或由 manifest 給（`sha256Pointer`，屬情境自報，結果列標 `scenario-manifest`）。
+
+兩者都延到 spawn 時由 recorder 讀實際位元組核對，attempt 的 `executables[]` 記 `DEFERRED_TO_SPAWN`，process 事件記 `hashAllowlist`（`allowedBy: sha256 | manifest`、實際 SHA-256、root）。不符就照常 DENY，不放寬路徑白名單。範例：examples/water-hash-allowlist.json。
+
+## 單行執行與啟動快照
+
+`{kind:'line', file, line, repo?, expect?}` 以 V8 區塊覆蓋判斷該行是否執行（最內層範圍 count>0；Python 用逐行計數）。這是區塊粒度：同一區塊內的行一起算。recorder 啟動 node/python 子程序時記下腳本 SHA-256，副本事後被刪也可用 `verifiedBy: launch-snapshot` 核對 pathMaps；`to` 可寫 `$<群組名>` 引用 pattern 的具名群組。
+
+## 工具開發模式（--tool-dev）
+
+`node water-source.mjs --config c.json --enable --tool-dev`：只在修改本工具時使用。解除三次上限，但寫入 `dev-attempt-N.json`、`dev-run-N/` 與 `water-source.tool-dev.json`，報告 `status: NOT_COUNTED`、`countsTowardVerdict: false`、`label` 說明不計入；正式 attempt 檔不讀不寫，上限仍是三次。體檢卡收到這種報告只列 `toolDev` 警示，不改 runnability 與證據等級；maintenance 直接拒收（`TOOL_DEV_RESULTS_NOT_COUNTED`）。
