@@ -42,4 +42,4 @@ water-source.json 的 `attempts` 只放摘要列：`attempt`、`status`、`reaso
 
 命令參數中的 `@HOME` 換成隔離家目錄（`<temp>/home`），與 expected 檔案路徑相同。
 
-`pruneRawCoverage: true` 在覆蓋對應完成後刪除原始覆蓋檔，`observation.coverage.pruned` 記錄刪除檔數與位元組，`evidence[]` 仍保留每個原始檔的 SHA-256 與 `pruned: true`。預設不刪，需重新對應原始覆蓋時不要開。
+`pruneRaw: true`（只刪覆蓋可用舊名 `pruneRawCoverage: true`）在覆蓋對應完成後刪除原始覆蓋檔，`observation.coverage.pruned` 記錄刪除檔數與位元組，`evidence[]` 仍保留每個原始檔的 SHA-256 與 `pruned: true`。`pruneRaw` 另在 attempt 判定後刪除該次執行的 events 目錄、instrument-collect.json、observation.result.json 與 observation.packed，`prunedRaw[]` 記錄路徑、檔數、位元組與內容 SHA-256；判定用的 events 仍在 attempt-N.json。預設不刪，需重新對應或重讀原始追蹤時不要開。

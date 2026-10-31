@@ -1428,8 +1428,9 @@ async function g160Checks(root){
   });
   await check('G221 @HOME is substituted in commands and raw coverage can be pruned after mapping',async()=>{
    put('home.mjs',"import fs from 'node:fs';import path from 'node:path';\nconst f=process.argv[2];if(f.includes('@HOME'))throw Error('token left');fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,'ok');\nconsole.log(JSON.stringify({status:'READY'}));\n");
-   const r=await waterSource({...config,outputRoot:join(base,'g221-home'),pruneRawCoverage:true,scenarios:[{id:'home',request:{purpose:'home token'},prerequisites:[],command:['@NODE','@CLONE/home.mjs','@HOME/state/x.txt'],expected:[{kind:'coverage',file:'home.mjs'},{kind:'write',file:'@HOME/state/x.txt'},{kind:'status',path:'$.status',value:'READY'}]}]},{enable:true});
+   const r=await waterSource({...config,outputRoot:join(base,'g221-home'),pruneRaw:true,scenarios:[{id:'home',request:{purpose:'home token'},prerequisites:[],command:['@NODE','@CLONE/home.mjs','@HOME/state/x.txt'],expected:[{kind:'coverage',file:'home.mjs'},{kind:'write',file:'@HOME/state/x.txt'},{kind:'status',path:'$.status',value:'READY'}]}]},{enable:true});
    assertWater(r);const cov=r.results[0].observation.coverage;assert(cov.pruned.files>0);assert(cov.pruned.bytes>0);assert(cov.evidence.every(e=>e.pruned&&!fs.existsSync(e.file)&&/^[a-f0-9]{64}$/.test(e.sha256)));assert(cov.files.includes('home.mjs'));
+   const raw=r.results[0].prunedRaw;assert(raw.length>0);assert(raw.every(x=>!fs.existsSync(x.path)&&/^[a-f0-9]{64}$/.test(x.sha256)));assert(r.results[0].observation.events.length>0);
   });
 return checks;
 }
