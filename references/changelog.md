@@ -1,5 +1,12 @@
 # 版本記錄
 
+## 1.26.0 (2026-11-01)
+
+- water-source 每次執行保存 stdout、stderr 與結束碼證據（路徑、SHA-256、位元組、尾段），放在 observation.output。
+- expected 新增 output（文字包含／正則／absent）、json（stdout、stderr 或檔案的 JSON pointer 值或存在）、exit（指定結束碼）；未列 exit 時仍要求 0，原有判定不變。
+- executables 除路徑字串外，可寫 {path,sha256} 或 {configFile,pointer,sha256Pointer}：啟動前從設定檔解析並核對 SHA-256，不符或解析不到即該次 FAIL，不擴大允許清單。
+- 擴充既有 self-test（G222）；不新增測試檔。
+
 ## 1.25.0 (2026-11-01)
 
 - water-source 報告的 attempts 改為摘要列（次數、狀態、原因、檔案、SHA-256），完整觀察只存 attempt-N.json；修正大型情境 JSON.stringify RangeError 使報告為空。

@@ -43,3 +43,25 @@ water-source.json 的 `attempts` 只放摘要列：`attempt`、`status`、`reaso
 命令參數中的 `@HOME` 換成隔離家目錄（`<temp>/home`），與 expected 檔案路徑相同。
 
 `pruneRaw: true`（只刪覆蓋可用舊名 `pruneRawCoverage: true`）在覆蓋對應完成後刪除原始覆蓋檔，`observation.coverage.pruned` 記錄刪除檔數與位元組，`evidence[]` 仍保留每個原始檔的 SHA-256 與 `pruned: true`。`pruneRaw` 另在 attempt 判定後刪除該次執行的 events 目錄、instrument-collect.json、observation.result.json 與 observation.packed，`prunedRaw[]` 記錄路徑、檔數、位元組與內容 SHA-256；判定用的 events 仍在 attempt-N.json。預設不刪，需重新對應或重讀原始追蹤時不要開。
+
+## 輸出證據與輸出判定
+
+每次執行在 `observation.output` 記錄 `exitCode` 與 `stdout`／`stderr` 的 `{path,sha256,bytes,tail}`（tail 為最後 4000 位元組）。
+
+expected 另可寫：
+
+- `{kind:'output',stream?:'stdout'|'stderr',contains?|pattern?,flags?,absent?}`：文字包含或正則；`absent:true` 表示不可出現。
+- `{kind:'json',source?:'stdout'|'stderr'|檔案,pointer,value?|exists?}`：整段或最後一行可解析的 JSON，以 RFC 6901 pointer 取值後比對；檔案可用 `@CLONE`、`@HOME`。
+- `{kind:'exit',code}`：要求指定結束碼；有這項時不再另要求 0。
+
+這三種都不算見證，仍需至少一個 coverage、write、boundary 或 anchor。
+
+## 執行時解析的外部程式允許清單
+
+`executables` 每項可為：
+
+- 路徑字串：與原本相同。
+- `{path,sha256}`：固定路徑並核對雜湊。
+- `{configFile,pointer,sha256?,sha256Pointer?}`：每次執行前讀 JSON 設定檔，以 pointer 取程式路徑（相對路徑以設定檔目錄為基準），雜湊可直接給或由 `sha256Pointer` 取（可帶 `sha256:` 前綴）。
+
+解析與核對發生在啟動前；結果寫入該 attempt 的 `executables[]`。設定檔讀不到、pointer 不存在、程式不存在或雜湊不符，該次 FAIL（`EXECUTABLE_*`），不啟動、不放寬。

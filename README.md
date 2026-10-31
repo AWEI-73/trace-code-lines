@@ -1,4 +1,4 @@
-# Trace Code Lines 1.25.0
+# Trace Code Lines 1.26.0
 
 [English](#english) · [繁體中文](#traditional-chinese)
 

@@ -28,7 +28,12 @@ export function classifyTests(stdout,stderr,denied=[]){
  const python=text.match(/Ran (\d+) tests? in /),tap=text.match(/# pass (\d+)/),pythonOk=!!python&&/^OK(?:\s|$)/m.test(text),skipped=Number(text.match(/skipped=(\d+)/)?.[1]??0);
  return {framework:tap?'TAP':python?'unittest':'UNKNOWN',environmentDenied:rows.filter(r=>r.classification==='ENVIRONMENT_DENIED').length,productFailures:rows.filter(r=>r.classification==='PRODUCT_FAILURE').length,cancelled:Number(text.match(/# cancelled (\d+)/)?.[1]??0),passed:tap?Number(tap[1]):pythonOk?Number(python[1])-skipped:null,denialEvents:denied.length,rows};
 }
-export function judgeScenario(expect,observation,root){
+// RFC 6901 JSON pointer; returns {found,value}.
+export function jsonPointer(doc,pointer=''){if(pointer==='')return {found:true,value:doc};let v=doc;for(const raw of pointer.replace(/^\//,'').split('/')){const k=raw.replaceAll('~1','/').replaceAll('~0','~');if(v===null||typeof v!=='object'||!Object.hasOwn(v,k))return {found:false};v=v[k];}return {found:true,value:v};}
+// Whole text as JSON, else the last line that parses.
+export function parseJsonText(text){try{return {ok:true,value:JSON.parse(text)};}catch{}for(const line of String(text).split(/\r?\n/).reverse()){if(!line.trim())continue;try{return {ok:true,value:JSON.parse(line)};}catch{}}return {ok:false};}
+const deepEqual=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+export function judgeScenario(expect,observation,root,streams={}){
  const checks=[];
  if(!Array.isArray(expect)||!expect.length)return {status:'FAIL',checks:[],reason:'MACHINE_EXPECTATIONS_REQUIRED'};
  for(const e of expect){
@@ -38,8 +43,13 @@ export function judgeScenario(expect,observation,root){
   else if(e.kind==='boundary'){actual=observation.events.filter(x=>x.kind==='cassette'&&x.phase==='success'&&x.key===e.key);ok=actual.length===(e.count??1);}
   else if(e.kind==='anchor'){actual=anchor(root,e);ok=actual.status==='PASS'&&observation.coverage.files.includes(e.file);}
   else if(e.kind==='status'){actual=observation.statuses.filter(s=>s.path===e.path);ok=actual.some(s=>s.value===e.value);}
+  else if(e.kind==='output'){const text=streams[e.stream??'stdout'];if(typeof text!=='string'){actual={reason:'STREAM_UNAVAILABLE'};}else{const hit=e.pattern!==undefined?new RegExp(e.pattern,e.flags??'').test(text):text.includes(e.contains??'');actual={stream:e.stream??'stdout',matched:hit,bytes:Buffer.byteLength(text)};ok=e.absent===true?!hit:hit;}}
+  else if(e.kind==='json'){const src=e.source??'stdout';let text;if(src==='stdout'||src==='stderr')text=streams[src];else{try{text=fs.readFileSync(path.resolve(root,src),'utf8');}catch{}}
+   const doc=typeof text==='string'?parseJsonText(text):{ok:false};if(!doc.ok)actual={reason:'JSON_UNAVAILABLE',source:src};else{const at=jsonPointer(doc.value,e.pointer??'');actual={source:src,pointer:e.pointer??'',found:at.found,value:at.value};ok=Object.hasOwn(e,'value')?at.found&&deepEqual(at.value,e.value):e.exists===false?!at.found:at.found;}}
+  else if(e.kind==='exit'){actual=observation.exitCode;ok=actual===e.code;}
   checks.push({expected:e,status:ok?'PASS':'FAIL',actual});
  }
  const witness=expect.some(e=>['coverage','write','boundary','anchor'].includes(e.kind));
- return {status:checks.every(c=>c.status==='PASS')&&witness&&observation.exitCode===0?'PASS':'FAIL',checks,exitCode:observation.exitCode,witness};
+ const exitOk=expect.some(e=>e.kind==='exit')?true:observation.exitCode===0;
+ return {status:checks.every(c=>c.status==='PASS')&&witness&&exitOk?'PASS':'FAIL',checks,exitCode:observation.exitCode,witness};
 }

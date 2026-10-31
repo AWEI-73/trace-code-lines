@@ -7,7 +7,7 @@ import {scanStopSites,readStopPolicy,compareStopSites,stopMaintenanceItems,rende
 import {failureRows,clusterFailures,projectSite,relativeCommand} from './maintenance-failures.mjs';
 import {groupMaintenance,buildMaintenance,loadMaintenanceWater,renderMaintenanceHTML,renderMaintenanceMarkdown} from './maintenance.mjs';
 import {requestKey,preflight,commandPolicy} from './cassette.mjs';
-import {waterSource,scenarioStatus,waterStatus} from './water-source.mjs';
+import {waterSource,scenarioStatus,waterStatus,resolveExecutables} from './water-source.mjs';
 import {judgeScenario,commandStatuses,classifyTests} from './observations.mjs';
 import {compareDeclarations,buildCard,writeCard,renderCardSection,renderCardMarkdown} from './check-card.mjs';
 import {rebaseLinks,runReport} from './report.mjs';
@@ -1425,6 +1425,34 @@ async function g160Checks(root){
    const row=r.results[0].attempts.at(-1);assert.equal(row.observation,undefined);assert.match(row.sha256,/^[a-f0-9]{64}$/);assert(fs.existsSync(row.file));
    const text=fs.readFileSync(join(base,'g221-summary/water-source.json'),'utf8');assert.equal(text.split('"events"').length-1,1);
    const retry=await waterSource({...config,outputRoot:join(base,'retry'),scenarios:[{id:'blocked',request:{purpose:'retry bound'},prerequisites:[],command:['clasp','push'],expected:[{kind:'coverage',file:'api.mjs'}]}]},{enable:true});assert.equal(retry.results[0].attempts.length,3);assert(retry.results[0].attempts.every(a=>a.sha256&&a.file));
+  });
+  await check('G222 stdout stderr and exit code are kept and expected can assert text and JSON fields',async()=>{
+   put('out.mjs',"console.log('hello plain');console.error('warn line');console.log(JSON.stringify({result:{count:2,names:['a','b']},status:'READY'}));process.exitCode=3;\n");
+   const base1={id:'out',request:{purpose:'output assertions'},prerequisites:[],command:['@NODE','@CLONE/out.mjs']};
+   const good=[{kind:'coverage',file:'out.mjs'},{kind:'exit',code:3},{kind:'output',contains:'hello plain'},{kind:'output',stream:'stderr',pattern:'^warn',flags:'m'},{kind:'output',contains:'secret',absent:true},{kind:'json',pointer:'/result/count',value:2},{kind:'json',pointer:'/result/names',value:['a','b']},{kind:'json',pointer:'/missing',exists:false}];
+   const r=await waterSource({...config,outputRoot:join(base,'g222-out'),scenarios:[{...base1,expected:good}]},{enable:true});
+   const x=r.results[0];assert.equal(x.verdict.status,'PASS',JSON.stringify(x.verdict.checks.filter(k=>k.status!=='PASS')));
+   const o=x.observation.output;assert.equal(o.exitCode,3);assert.match(o.stdout.tail,/hello plain/);assert.match(o.stderr.tail,/warn line/);assert.match(o.stdout.sha256,/^[a-f0-9]{64}$/);assert(o.stdout.bytes>0);assert(o.stdout.path&&fs.existsSync(o.stdout.path));
+   const bad=await waterSource({...config,outputRoot:join(base,'g222-bad'),scenarios:[{...base1,expected:[{kind:'coverage',file:'out.mjs'},{kind:'json',pointer:'/result/count',value:5}]}]},{enable:true});
+   assert.equal(bad.results[0].verdict.status,'FAIL');assert.equal(bad.results[0].verdict.checks.filter(k=>k.status==='FAIL').length,2-1);
+   assert.equal(judgeScenario([{kind:'coverage',file:'out.mjs'}],x.observation,clone).status,'FAIL');
+  });
+  await check('G222 allowlisted executables resolve from a config path and must match its SHA-256',async()=>{
+   put('tool.sh','#!/bin/sh\necho tool-ok\n');fs.chmodSync(join(clone,'tool.sh'),0o755);
+   const digest=sha256(fs.readFileSync(join(clone,'tool.sh')));
+   put('tools.json',JSON.stringify({tools:{runner:{bin:'tool.sh',sha256:digest}}}));
+   put('use-tool.mjs',"import cp from 'node:child_process';import fs from 'node:fs';const t=JSON.parse(fs.readFileSync('tools.json','utf8')).tools.runner.bin;const r=cp.spawnSync('./'+t,[],{encoding:'utf8'});console.log(JSON.stringify({status:r.stdout.trim()==='tool-ok'?'READY':'NO'}));\n");
+   const entry={configFile:'@CLONE/tools.json',pointer:'/tools/runner/bin',sha256Pointer:'/tools/runner/sha256'};
+   const sc={id:'tool',request:{purpose:'config allowlist'},prerequisites:[],command:['@NODE','@CLONE/use-tool.mjs'],expected:[{kind:'coverage',file:'use-tool.mjs'},{kind:'status',path:'$.status',value:'READY'}]};
+   if(process.platform!=='win32'){
+    const r=await waterSource({...config,executables:[entry],outputRoot:join(base,'g222-tool'),scenarios:[sc]},{enable:true});
+    assert.equal(r.results[0].verdict?.status,'PASS',JSON.stringify(r.results[0].reason??r.results[0].verdict));assert.equal(r.results[0].executables[0].status,'PASS');assert.equal(r.results[0].executables[0].sha256,digest);
+   }
+   put('tools.json',JSON.stringify({tools:{runner:{bin:'tool.sh',sha256:'0'.repeat(64)}}}));
+   const m=await waterSource({...config,executables:[entry],outputRoot:join(base,'g222-mismatch'),scenarios:[sc]},{enable:true});
+   assert.equal(m.results[0].status,'FAIL');assert.match(m.results[0].reason,/^EXECUTABLE_HASH_MISMATCH/);assert.equal(m.results[0].executables[0].status,'HASH_MISMATCH');
+   assert.match(resolveExecutables([{configFile:'@CLONE/absent.json',pointer:'/x'}],{clone,home:base}).error,/UNREADABLE/);
+   assert.deepEqual(resolveExecutables(['/bin/sh'],{clone,home:base}).paths,['/bin/sh']);
   });
   await check('G221 @HOME is substituted in commands and raw coverage can be pruned after mapping',async()=>{
    put('home.mjs',"import fs from 'node:fs';import path from 'node:path';\nconst f=process.argv[2];if(f.includes('@HOME'))throw Error('token left');fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,'ok');\nconsole.log(JSON.stringify({status:'READY'}));\n");

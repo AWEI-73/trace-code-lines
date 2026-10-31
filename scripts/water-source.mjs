@@ -5,7 +5,7 @@ import {pathToFileURL} from 'node:url';
 import {runOnce} from './run-once.mjs';
 import {inside,noLinks} from './instrument.mjs';
 import {hash,preflight,commandPolicy} from './cassette.mjs';
-import {coverageFiles,judgeScenario,commandStatuses,classifyTests} from './observations.mjs';
+import {coverageFiles,judgeScenario,commandStatuses,classifyTests,jsonPointer} from './observations.mjs';
 const save=(p,v)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n','utf8');};
 // Report rows keep each attempt's identity and file hash; full observations stay in attempt-N.json.
 // Only an attempt-limited result that has no observation of its own keeps its last observed attempt inline.
@@ -19,6 +19,28 @@ export function attemptSummaries(attempts,dir,keepObservation=false){
 export function pruneRaw(directory,evidence){let files=0,bytes=0;for(const e of evidence){if(!e.file.startsWith(directory+path.sep))continue;try{bytes+=fs.statSync(e.file).size;fs.rmSync(e.file);files++;e.pruned=true;}catch{}}return {files,bytes,kept:'mapped file list and raw SHA-256 only'};}
 // pruneRaw also drops per-run raw trace files once the attempt file holds the judged observation (events are kept there).
 export function pruneRunFiles(paths){const rows=[];for(const p of paths){if(!fs.existsSync(p))continue;const files=fs.statSync(p).isDirectory()?fs.readdirSync(p,{recursive:true}).map(f=>path.join(p,f)).filter(f=>fs.statSync(f).isFile()):[p];let bytes=0;const h=crypto.createHash('sha256');for(const f of files.sort()){const b=fs.readFileSync(f);bytes+=b.length;h.update(f.slice(p.length)+'\0').update(b);}fs.rmSync(p,{recursive:true,force:true});rows.push({path:p,files:files.length,bytes,sha256:h.digest('hex')});}return rows;}
+// Stdout/stderr kept as evidence: the log path, SHA-256, byte count and a short tail.
+export function streamEvidence(file,text,tail=4000){const b=Buffer.from(text??'','utf8');return {path:fs.existsSync(file)?file:null,sha256:hash(b),bytes:b.length,tail:b.length>tail?b.subarray(b.length-tail).toString('utf8'):b.toString('utf8')};}
+// Allowlist entries: a path string (unchanged behaviour), {path,sha256}, or
+// {configFile,pointer,sha256?,sha256Pointer?} read from a JSON config at run time. Tokens @CLONE and @HOME are expanded.
+// Hashes are checked right before launch; a mismatch or an unresolved entry fails the attempt instead of widening the allowlist.
+export function resolveExecutables(entries,{clone,home}){
+ const tok=v=>String(v).replaceAll('@CLONE',clone).replaceAll('@HOME',home),rows=[],paths=[];
+ for(const e of entries){
+  if(typeof e==='string'){paths.push(e);rows.push({path:e,source:'literal'});continue;}
+  let file=e.path?tok(e.path):null,expected=e.sha256??null,source='literal';
+  if(e.configFile){source=tok(e.configFile);let doc;try{doc=JSON.parse(fs.readFileSync(source,'utf8'));}catch(x){return {rows,paths,error:'EXECUTABLE_CONFIG_UNREADABLE: '+source};}
+   const at=jsonPointer(doc,e.pointer??'');if(!at.found||typeof at.value!=='string')return {rows,paths,error:'EXECUTABLE_POINTER_UNRESOLVED: '+(e.pointer??'')};
+   file=path.isAbsolute(at.value)?at.value:path.resolve(path.dirname(source),at.value);
+   if(e.sha256Pointer){const h=jsonPointer(doc,e.sha256Pointer);if(!h.found)return {rows,paths,error:'EXECUTABLE_HASH_POINTER_UNRESOLVED: '+e.sha256Pointer};expected=h.value;}}
+  if(!file)return {rows,paths,error:'EXECUTABLE_ENTRY_INVALID'};
+  let actual=null;try{actual=hash(fs.readFileSync(file));}catch{return {rows,paths,error:'EXECUTABLE_MISSING: '+file};}
+  const row={path:file,source,sha256:actual,expectedSha256:expected,status:expected&&String(expected).toLowerCase().replace(/^sha256:/,'')!==actual?'HASH_MISMATCH':'PASS'};rows.push(row);
+  if(row.status!=='PASS')return {rows,paths,error:'EXECUTABLE_HASH_MISMATCH: '+file};
+  paths.push(file);
+ }
+ return {rows,paths};
+}
 export function scenarioStatus(verdict,complete,cleanup){
  if(verdict.status!=='PASS'||!complete||cleanup?.status==='FAIL')return 'FAIL';
  return cleanup?.status==='PASS'?'PASS':'UNKNOWN';
@@ -58,16 +80,19 @@ export async function waterSource(c,{enable=false}={}){
   try{
    const home=path.join(temp,'home'),command=s.command.map(x=>x==='@NODE'?process.execPath:x.replaceAll('@CLONE',c.clone).replaceAll('@HOME',home));
    if(command[0]!==process.execPath)throw Error('NODE_LAUNCHER_REQUIRED');
+   const allowed=resolveExecutables(c.executables??[],{clone:c.clone,home});r.executables=allowed.rows;if(allowed.error)throw Error(allowed.error);
    const result=await runOnce({clone:c.clone,tempRoot:temp,isolationRoot:path.join(temp,'home'),outputDirectory:path.join(temp,'observation'),command,cwd:c.clone,
-    resolvedWriteRoots:[c.clone,temp],executables:[process.execPath,...(c.executables??[])],pythonExecutables:c.pythonExecutables??[],environment:c.environment??{},
+    resolvedWriteRoots:[c.clone,temp],executables:[process.execPath,...allowed.paths],pythonExecutables:c.pythonExecutables??[],environment:c.environment??{},
     timeoutMs:Math.min(s.timeoutMs??60000,300000),boundaries:s.boundaries??[],cassette:s.cassette,strictBoundaries:true},{enable:true});
    const out=path.join(temp,'observation'),coverage=coverageFiles(path.join(out,'coverage'),c.clone);
    if(c.sourceFiles){coverage.adapterFiles=coverage.files.filter(f=>!c.sourceFiles.includes(f));coverage.files=coverage.files.filter(f=>c.sourceFiles.includes(f));}
    if(c.pruneRaw===true||c.pruneRawCoverage===true)coverage.pruned=pruneRaw(path.join(out,'coverage'),coverage.evidence);
    const events=fs.readdirSync(path.join(out,'events')).filter(f=>f.endsWith('.jsonl')).flatMap(f=>fs.readFileSync(path.join(out,'events',f),'utf8').trim().split('\n').filter(Boolean).map(l=>JSON.parse(l)));
    const observation={coverage,writes:result.target.summary.writes,events,statuses:commandStatuses(result.target.stdout),exitCode:result.target.exitCode};
-   const expectations=s.expected.map(e=>({...e,...(e.file?{file:e.file.replaceAll('@HOME',home)}:{})}));
-   const verdict=judgeScenario(expectations,observation,c.clone);
+   const expectations=s.expected.map(e=>({...e,...(e.file?{file:e.file.replaceAll('@HOME',home)}:{}),...(e.source&&!['stdout','stderr'].includes(e.source)?{source:e.source.replaceAll('@HOME',home).replaceAll('@CLONE',c.clone)}:{})}));
+   const streams={stdout:result.target.stdout??'',stderr:result.target.stderr??''};
+   observation.output={exitCode:result.target.exitCode,stdout:streamEvidence(path.join(out,'stdout.log'),streams.stdout),stderr:streamEvidence(path.join(out,'stderr.log'),streams.stderr)};
+   const verdict=judgeScenario(expectations,observation,c.clone,streams);
    const calls=events.filter(e=>e.kind==='cassette'&&e.phase==='success').sort((a,b)=>a.index-b.index).map((e,i)=>({sequence:i,kind:e.requestKind,request:e.request,key:e.key,response:e.response,source:e.source,paid:e.paid,live:false}));
    const complete=!s.cassette||calls.length===s.cassette.calls.length;
    Object.assign(r,{status:scenarioStatus(verdict,complete,result.target.summary.cleanup),executed:true,verdict,cassetteComplete:complete,observation,evidence:out+'.result.json',
