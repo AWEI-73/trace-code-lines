@@ -1,6 +1,6 @@
 ---
 name: trace-code-lines
-version: 1.21.0
+version: 1.24.0
 description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，交付可追到證據的體檢卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
 
@@ -10,11 +10,17 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 
 ## 預設路徑
 
-1. **確認正在讀哪份**：讀 README、SKILL.md 與版本指標；多層設定用 `version-chain.mjs`。hash 不冒充 Git commit。需要時讀 [runner](references/runner.md)。
+先跑 `audit.mjs --init <repo> --out <config>`，補 questions 與授權 recordRoots；再跑 `audit.mjs --config <config>` 一次產卡。見[audit](references/audit.md)；下列五步保留供細查。
+
+刪除題先納題目根，合併同輪 import 邊並列數字摘要；只截其餘根，缺邊明列 UNKNOWN。
+
+1. **確認正在讀哪份**：讀 README、SKILL.md 與版本指標；多層設定用 `version-chain.mjs`。hash 不冒充 Git commit。
 2. **找入口並讀碼**：`discover-entries.mjs <repo>` 列出命令列、網頁路由、匯出函式、技能腳本、MCP 工具、GAS API 候選。agent 逐一讀 README 與原碼，補漏、確認參數與輸出，保留搜尋範圍；清冊不是完整性保證。
 3. **靜態查線**：`derive-map.mjs --config <file>` 產出閉包與終點候選。設定與原碼必須綁到同一快照；不從檔名猜功能。需要時讀 [runner](references/runner.md)、[evidence](references/evidence.md)。
 4. **宣告與實作對照**：agent 從 README、SKILL.md 與註解抽出宣告，每項附文件與原碼兩邊錨點。分類為「說了沒做」「做了沒說」「流程對不上」；找不到證據寫 UNKNOWN。負面結論需可重跑的搜尋範圍。格式見 [體檢卡](references/check-card.md)。
 阻擋點亦屬宣告對照：提供政策清單與 reason／關鍵字表，分底線、要處理、不確定；無宣告只列清單，防呆與混合條件不硬判。設定、錨點與限制見[阻擋點](references/stop-sites.md)。
+
+刪檔或改名時跑 `deletion-impact.mjs --config <file>`，把已安裝產物與紀錄列為留存根；見[刪除影響](references/deletion-impact.md)。
 
 5. **交付**：`report.mjs --config <file>` 產出原有健檢；再用 `check-card.mjs --config <file>` 寫入 check-card.md、check-card.json 與健檢 HTML 的新增章節。卡片列入口、輸入、輸出、副作用、費用、工具、能否執行及宣告對照。快速靜態入口與安裝方法見 [README](README.md)。
 
@@ -49,4 +55,4 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 
 ## 版本
 
-目前版本：1.21.0（2026-10-26）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.24.0（2026-10-30）。歷史見 [changelog](references/changelog.md)。

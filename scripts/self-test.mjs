@@ -1,3 +1,5 @@
+import {deletionImpact,renderDeletionMarkdown,renderDeletionHTML,retainedAdvice} from './deletion-impact.mjs';
+import {initAudit,runAudit,auditVerdict,renderAudit} from './audit.mjs';
 import {displayGroups,renderGroups,renderGroupsMarkdown,evidenceNeeds} from './display-groups.mjs';
 import {boundary,pathSites} from './boundary.mjs';
 import {reach,importUses} from './reach.mjs';
@@ -7,8 +9,8 @@ import {groupMaintenance,buildMaintenance,loadMaintenanceWater,renderMaintenance
 import {requestKey,preflight,commandPolicy} from './cassette.mjs';
 import {waterSource,scenarioStatus,waterStatus} from './water-source.mjs';
 import {judgeScenario,commandStatuses,classifyTests} from './observations.mjs';
-import {compareDeclarations,buildCard,renderCardSection,renderCardMarkdown} from './check-card.mjs';
-import {rebaseLinks} from './report.mjs';
+import {compareDeclarations,buildCard,writeCard,renderCardSection,renderCardMarkdown} from './check-card.mjs';
+import {rebaseLinks,runReport} from './report.mjs';
 import {checkRoutes,candidateRoutes} from './route-map.mjs';
 import {layoutRoutes,renderRouteMap} from './route-map-html.mjs';
 import vm from 'node:vm';
@@ -38,7 +40,7 @@ import {pathToFileURL} from 'node:url';
 import fs from 'node:fs';
 import {join,resolve,relative,isAbsolute} from 'node:path';
 import {walk,sha256} from './walker.mjs';
-import {classify,compareSets,analyze} from './derive-map.mjs';
+import {classify,compareSets,analyze,parseConfigJSON} from './derive-map.mjs';
 import {languageEdges,writerCandidates,tokens,localFunctions,sameFileLiteralReturn} from './language-static.mjs';
 import {removalTrial} from './removal-trial.mjs';
 import assert from 'node:assert/strict';
@@ -46,6 +48,7 @@ import {gapReconcile,gapSummary} from './gap-reconcile.mjs';
 import {attachInferenceLayer,inferenceIdentity,gapIdentity,legacyGapIdentity} from './inference-layer.mjs';
 import {normalizeGap,gapList} from './gap-shape.mjs';
 import {toolVersion} from './derive-map.mjs';
+import {discoverEntries} from './discover-entries.mjs';
 
 if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node self-test.mjs (equal external TEMP/TMP required)');process.exit(0);}
 process.on('uncaughtException',e=>{console.error(process.env.TRACE_TEST_STACK?e.stack:e.message);process.exitCode=1;});
@@ -61,6 +64,10 @@ const files={
   'escape.mjs':"import '../outside.mjs';\n"
 };
 try {
+  if(process.env.TRACE_G240_ONLY){console.log(JSON.stringify({status:'PASS',checks:await g240Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G232_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g232Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G231_ONLY){console.log(JSON.stringify({status:'PASS',checks:await g231Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G220_ONLY){console.log(JSON.stringify({status:'PASS',checks:g220Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G200_ONLY){console.log(JSON.stringify({status:'PASS',checks:g200Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G190_ONLY){console.log(JSON.stringify({status:'PASS',checks:g190Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G180_ONLY){console.log(JSON.stringify({status:'PASS',checks:g180Checks()}));process.exit(0);}
@@ -535,7 +542,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8'))];
+  const addedChecks=[...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -545,7 +552,7 @@ try {
 }
 
 async function g7Checks(root,only){
-  const checks=[...g210Checks(root),...g200Checks(root),...g190Checks(root),...g180Checks(),...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
+  const checks=[...await g232Checks(root),...await g231Checks(root),...g220Checks(root),...g210Checks(root),...g200Checks(root),...g190Checks(root),...g180Checks(),...g170Checks(root),...await g160Checks(root),...g153Checks(),...g152Checks(),...g151Checks(),...g150Checks(),...g121Checks(root),...g13Checks(root),...g14Checks(root),...g141Checks(root)],old=process.env.TRACE_BASELINE_SKILL;
   const baseline=old?await import(pathToFileURL(join(old,'scripts/language-static.mjs')).href):null;
   const oldInference=old?await import(pathToFileURL(join(old,'scripts/inference-layer.mjs')).href):null;
   const oldReconcile=old?await import(pathToFileURL(join(old,'scripts/gap-reconcile.mjs')).href):null;
@@ -1727,5 +1734,251 @@ function g210Checks(root){
  check('check-card unknown subcategories distinguish missing sides from bad anchors',()=>{const rows=[{category:'UNKNOWN',status:'UNKNOWN',declared:{status:'UNKNOWN',reason:'MISSING_SIDE'},implemented:{status:'PASS'}},{category:'UNKNOWN',status:'UNKNOWN',declared:{status:'UNKNOWN',anchor:{status:'FAIL'}},implemented:{status:'PASS'}}];const d=displayGroups(rows);assert.equal(d.groups,2);assert.equal(Object.keys(d.categories[0].needs).length,2);});
  const publicCLIs=['boundary','boundary-stub','capture-card','check-card','classify-records','coverage-reconcile','derive-map','discover-entries','export-profile','gap-reconcile','inspect-repo','instrument','language-self-test','reach','record-census','removal-trial','report','route-map','route-skeletons','run-once','scan-empty-catch','self-test','trace-one-job','version-chain','water-source'];
  for(const name of publicCLIs)check('CLI help exits zero without configuration: '+name,()=>{const r=spawnSync(process.execPath,[fileURLToPath(new URL('./'+name+'.mjs',import.meta.url)),'--help'],{encoding:'utf8'});assert.equal(r.status,0,name+': '+r.stderr);assert.match(r.stdout,/Usage:/);assert.equal(r.stderr,'');});
+ return checks;
+}
+
+async function g231Checks(root){
+ const checks=[],check=async(name,fn)=>{await fn();checks.push('G231 '+name);};
+ const area=join(root,'audit-round'),repo=join(area,'repo'),records=join(area,'records'),output=join(area,'output');fs.mkdirSync(repo,{recursive:true});fs.mkdirSync(records);
+ const put=(r,p,s)=>{const f=join(r,p);fs.mkdirSync(join(f,'..'),{recursive:true});fs.writeFileSync(f,s,'utf8');return f;};
+ put(repo,'entry.mjs',"export const value=1;\nif(process.argv.includes('--run')) console.log(value);\n");put(repo,'package.json',JSON.stringify({version:'0.0.1'}));
+ put(repo,'tests/good.test.mjs',"import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport {value} from '../entry.mjs';\ntest('good',()=>assert.equal(value,1));\n");
+ put(repo,'tests/bad.test.mjs',"import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('deliberate failure',()=>assert.equal(1,2));\n");
+ put(repo,'tests/write.test.mjs',"import test from 'node:test';\nimport fs from 'node:fs';\ntest('writes only clone',()=>fs.writeFileSync('entry.mjs','changed clone'));\n");
+ put(records,'events.jsonl','{"kind":"first","n":1}\n{"kind":"second","n":2}\n');put(records,'snapshot.json','[\n {"kind":"first","n":3}\n]\n');
+ const git=args=>{const r=spawnSync('git',['-C',repo,...args],{encoding:'utf8',windowsHide:true,env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+ git(['init']);git(['config','core.autocrlf','false']);git(['add','.']);git(['-c','user.name=Fixture','-c','user.email=fixture.invalid','-c','core.hooksPath='+area,'-c','commit.gpgsign=false','commit','-m','audit fixture']);
+ const configFile=join(area,'audit-config.json');
+ await check('init reuses discovery for entries versions map roots tests and root candidates',()=>{const r=initAudit(repo,configFile),c=JSON.parse(fs.readFileSync(configFile));assert.equal(r.status,'PASS');assert(c.discovery.entries.length);assert(c.discovery.versionPointers.includes('package.json'));assert(c.mapRoots.length);assert.equal(c.discovery.tests.length,3);assert.deepEqual(c.questions,[]);assert.deepEqual(c.recordRoots,[]);});
+ const before=sha256(fs.readFileSync(join(repo,'entry.mjs'))),config={repo,pins:{head:git(['rev-parse','HEAD'])},writeRoot:output,mapRoots:[{path:'entry.mjs'}],recordRoots:[{label:'retained',path:records},{label:'missing',path:join(area,'absent')}],questions:[{id:'bad',ask:'Does the assertion pass?',anchors:['entry.mjs'],tests:['tests/bad.test.mjs']},{id:'static',ask:'Is the feature operating?',anchors:['entry.mjs']},{id:'mixed',ask:'Count retained kinds',records:[{root:'retained',fields:['n']}]},{id:'missing',ask:'Count missing records',records:[{root:'missing'}]},{id:'write',ask:'Can the existing test write?',tests:['tests/write.test.mjs']},{id:'good',ask:'Does the value assertion pass?',tests:['tests/good.test.mjs']}]};
+ config.questions.push({id:'zero',ask:'Was a declared trigger retained?',anchors:['entry.mjs'],records:[{root:'retained',fields:['n'],trigger:{kind:'never'}}]});
+ fs.writeFileSync(configFile,JSON.stringify(config));const r=await runAudit(configFile),q=id=>r.questions.find(q=>q.id===id);
+ await check('one round includes observed failing tests in card and existing report',()=>{assert.equal(q('bad').verdict,'FAIL');assert.equal(q('bad').tests[0].summaryFail,1);assert(fs.readFileSync(join(output,'audit.md'),'utf8').includes('FAIL'));assert(r.report);const report=JSON.parse(fs.readFileSync(r.report));assert.equal(report.testEvidence.failed,1);assert(fs.readFileSync(join(r.report,'../report.md'),'utf8').includes('deliberate failure'));assert(fs.readFileSync(join(r.report,'../health.html'),'utf8').includes('deliberate failure'));});
+ await check('JSON and JSONL automatically normalize and group mixed kinds',()=>{const c=q('mixed').records[0];assert.deepEqual(c.files.map(f=>f.format).sort(),['JSON','JSONL']);assert.equal(c.totals.parsedEvents,3);assert.equal(c.kindCounts['"first"'],2);assert.equal(c.kindCounts['"second"'],1);assert.equal(q('mixed').verdict,'UNKNOWN');});
+ await check('missing authorized record root is UNKNOWN',()=>{assert.equal(q('missing').verdict,'UNKNOWN');assert(q('missing').records[0].gaps.some(g=>g.code==='RECORD_ROOT_MISSING'));});
+ await check('static anchors map and exit zero cannot establish operation',()=>{assert.equal(q('static').verdict,'UNKNOWN');assert.equal(auditVerdict({tests:[{exitCode:0,classification:{passed:null},summaryFail:null}]}).verdict,'UNKNOWN');});
+ await check('isolated existing tests preserve source hashes and remove clones',()=>{assert.equal(sha256(fs.readFileSync(join(repo,'entry.mjs'))),before);assert.equal(git(['status','--porcelain']),'');assert.equal(r.readOnly.status,'PASS');for(const q of r.questions)for(const t of q.tests)assert(!fs.existsSync(join(t.resultFile,'../clone')));});
+ await check('positive verdict is scoped to actual passing assertions',()=>{assert.equal(q('good').verdict,'PASS');assert.equal(q('good').tests[0].classification.passed,1);assert(q('good').scope.includes('test assertions'));});
+ await check('zero explicit triggers only establish non-observation in the retained population',()=>{assert.equal(q('zero').verdict,'\u53ea\u5b58\u5728\u6c92\u89f8\u767c');assert.equal(q('zero').records[0].totals.triggerEvents,0);assert(q('zero').scope.includes('not proof of global non-use'));});
+ await check('Markdown bounds gap groups and keeps complete JSON data',()=>{const c=structuredClone(r),row=c.questions.find(q=>q.id==='mixed');row.records[0].gaps=Array.from({length:100},(_,i)=>({code:'GAP_'+i}));const before=JSON.stringify(c),text=renderAudit(c);assert(text.includes('GAP_19'));assert(!text.includes('GAP_99'));assert(text.includes('omittedGaps'));assert.equal(JSON.stringify(c),before);});
+ await check('limits explicitly retain skipped questions and tests',async()=>{const f=join(area,'limited.json');fs.writeFileSync(f,JSON.stringify({...config,writeRoot:join(area,'limited'),limits:{maxQuestions:1,maxTests:1},questions:[{id:'bounded',ask:'limited tests',tests:['tests/good.test.mjs','tests/bad.test.mjs']},config.questions[1]]}));const c=await runAudit(f);assert.equal(c.questions[0].verdict,'UNKNOWN');assert(c.questions[0].gaps.some(g=>g.code==='MAX_TESTS'));assert(c.questions[1].gaps.some(g=>g.code==='MAX_QUESTIONS'));});
+ await check('record limits list the omitted population',async()=>{const f=join(area,'bounded-records.json');fs.writeFileSync(f,JSON.stringify({...config,writeRoot:join(area,'bounded-records'),mapRoots:[],limits:{maxRecords:1},questions:[config.questions[2]]}));const c=await runAudit(f);assert(c.questions[0].records[0].gaps.some(g=>g.code==='MAX_RECORDS'));assert.equal(c.questions[0].verdict,'UNKNOWN');});
+ await check('source pins and output boundaries are enforced before execution',async()=>{for(const patch of [{pins:{head:'0'.repeat(40)},writeRoot:join(area,'wrong-pin')},{writeRoot:join(repo,'bad-output')}]){const f=join(area,'invalid.json');fs.writeFileSync(f,JSON.stringify({...config,...patch}));await assert.rejects(()=>runAudit(f));}assert(!fs.existsSync(join(repo,'bad-output')));});
+ await check('audit help needs no config',()=>{const r=spawnSync(process.execPath,[fileURLToPath(new URL('./audit.mjs',import.meta.url)),'--help'],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);assert(r.stdout.includes('--init'));});
+ return checks;
+}
+function g220Checks(root){
+ const checks=[],check=(name,fn)=>{fn();checks.push('G220 '+name);};
+ const area=join(root,'g220'),repo=join(area,'repo'),retained=join(area,'retained'),out=join(area,'report');
+ const put=(base,p,s)=>{const f=join(base,p);fs.mkdirSync(resolve(f,'..'),{recursive:true});writeUTF8(f,s);};
+ const target='src/old.mjs';
+ put(repo,'entry.mjs','export const value="src/old.mjs";\n');
+ put(repo,'archive/record.mjs','src/old.mjs\n');put(repo,'record.odd','src/old.mjs\n');
+ put(retained,'installed/list.odd',Array(5).fill(target).join('\n')+'\n');
+ put(retained,'receipts/record.json',JSON.stringify({path:'src\\old.mjs'})+'\n');
+ const config={repo,paths:[target],retainedRoots:[{path:retained,label:'installed'}],unusedExclusions:{historyDirectories:['archive/'],staticDirectories:['static'],conventionLoaded:['**/record.odd']}};
+ const result=deletionImpact(config),item=result.items[0];
+ check('retained manifests and receipts are found regardless of extension',()=>{assert.equal(item.status,'NEEDS_ATTENTION');assert.equal(item.reason,retainedAdvice);assert.equal(item.retained[0].fileCount,2);assert.equal(item.retained[0].occurrences,6);});
+ check('repository occurrences retain program data and declared history classes',()=>{assert.equal(item.repo.program[0].file,'entry.mjs');assert.equal(item.repo.data[0].file,'record.odd');assert.equal(item.repo.history[0].file,'archive/record.mjs');assert(item.repo.data[0].declaredExclusions.some(r=>r.kind==='conventionLoaded'));});
+ check('all locations and hashes remain in JSON while anchors are capped at three',()=>{const f=item.retained[0].files.find(f=>f.file.endsWith('list.odd'));assert.equal(f.locations.length,5);assert.equal(f.anchors.length,3);assert.equal(f.sourceSha256,sha256(fs.readFileSync(join(retained,f.file))));assert(f.locations.every(a=>a.snippetSha256===sha256(target)));});
+ check('absent literal reference is scoped absence and never deletion approval',()=>{const r=deletionImpact({...config,paths:['src/absent.mjs']});assert.equal(r.items[0].status,'NO_RETAINED_MATCH');assert.equal(r.items[0].retained.length,0);assert.equal(r.stats.limitExceeded,false);});
+ check('undeclared retained roots explicitly remain UNKNOWN',()=>{const r=deletionImpact({...config,retainedRoots:[]});assert.equal(r.status,'UNKNOWN');assert(r.gaps.includes('RETAINED_ROOTS_NOT_DECLARED'));});
+ check('missing retained root is visible rather than a negative result',()=>{const r=deletionImpact({...config,retainedRoots:[{path:join(area,'missing'),label:'missing'}]});assert.equal(r.status,'UNKNOWN');assert.equal(r.scopes[0].skipped[0].reason,'ROOT_MISSING');});
+ check('single file byte limit reports exactly which file was skipped',()=>{const r=deletionImpact({...config,limits:{maxFileBytes:1}});assert(r.stats.limitExceeded);assert.equal(r.items[0].status,'UNKNOWN');assert(r.scopes[0].skipped.some(s=>s.file==='installed/list.odd'&&s.reason==='MAX_FILE_BYTES'));});
+ check('total byte budget is enforced across all scopes',()=>{const r=deletionImpact({...config,limits:{maxTotalBytes:10}});assert(r.stats.bytesRead<=10);assert(r.stats.limitExceeded);assert(r.scopes.some(s=>s.skipped.some(k=>k.reason==='MAX_TOTAL_BYTES')));});
+ check('file and directory enumeration limits disclose remaining scope',()=>{for(const limits of [{maxFiles:1},{maxEntries:1}]){const r=deletionImpact({...config,limits});assert(r.stats.limitExceeded);assert(r.scopes.some(s=>s.status==='UNKNOWN'));}assert(deletionImpact({...config,limits:{maxFiles:1}}).stats.filesRead<=1);});
+ check('match budget discloses incomplete matching without silent truncation',()=>{const r=deletionImpact({...config,limits:{maxMatches:1}});assert.equal(r.stats.matches,1);assert(r.stats.limitExceeded);assert(r.scopes.some(s=>s.skipped.some(k=>k.reason==='MAX_MATCHES')));});
+ check('binary and invalid UTF8 files are skipped explicitly',()=>{const bin=join(retained,'binary.bin'),bad=join(retained,'invalid.bin');fs.writeFileSync(bin,Buffer.from([0,65]));fs.writeFileSync(bad,Buffer.from([255]));try{const r=deletionImpact(config);assert(r.scopes[0].skipped.some(s=>s.reason==='BINARY_FILE'));assert(r.scopes[0].skipped.some(s=>s.reason==='BINARY_OR_NON_UTF8'));}finally{fs.unlinkSync(bin);fs.unlinkSync(bad);}});
+ check('declared exclude globs are disclosed and do not hide omission',()=>{const r=deletionImpact({...config,exclude:['installed/**']});assert.equal(r.items[0].retained[0].fileCount,1);assert(r.scopes[0].skipped.some(s=>s.file==='installed/list.odd'&&s.reason==='DECLARED_EXCLUSION'));});
+ check('symlink directories and declared symlink roots are never followed',()=>{const other=join(area,'outside'),link=join(retained,'link');put(other,'hidden.json',target);fs.symlinkSync(other,link,process.platform==='win32'?'junction':'dir');try{const r=deletionImpact(config);assert(!r.items[0].retained[0].files.some(f=>f.file.startsWith('link/')));assert(r.scopes[0].skipped.some(s=>s.file==='link'&&s.reason==='SYMLINK_NOT_FOLLOWED'));const rr=deletionImpact({...config,retainedRoots:[{path:link,label:'linked'}]});assert.equal(rr.status,'UNKNOWN');assert.equal(rr.scopes[0].skipped[0].reason,'SYMLINK_REFERENCE');}finally{fs.unlinkSync(link);}});
+ check('invalid selections limits roots and declarations are rejected',()=>{for(const c of [{...config,gitRange:'a..b'},{...config,paths:undefined},{...config,paths:['../escape']},{...config,limits:{maxFileBytes:0}},{...config,unusedExclusions:{unknown:[]}},{...config,retainedRoots:[{path:repo,label:'inside'}]},{...config,retainedRoots:[{path:retained,label:'same'},{path:retained,label:'duplicate'}]}])assert.throws(()=>deletionImpact(c));});
+ check('retained scanning is read only and records exact read byte counts',()=>{const before=fs.readFileSync(join(retained,'installed/list.odd')),stat=fs.statSync(join(retained,'installed/list.odd'));const r=deletionImpact(config);assert.deepEqual(fs.readFileSync(join(retained,'installed/list.odd')),before);assert.equal(fs.statSync(join(retained,'installed/list.odd')).mtimeMs,stat.mtimeMs);assert.equal(r.stats.filesRead,5);assert.equal(r.stats.bytesRead,[join(repo,'entry.mjs'),join(repo,'archive/record.mjs'),join(repo,'record.odd'),join(retained,'installed/list.odd'),join(retained,'receipts/record.json')].reduce((n,f)=>n+fs.statSync(f).size,0));});
+ const git=args=>{const r=spawnSync('git',['-C',repo,...args],{encoding:'utf8',windowsHide:true,env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+ git(['init']);git(['config','core.autocrlf','false']);put(repo,'delete.txt','deleted content\n');put(repo,'rename.txt','unique content for rename\n');git(['add','.']);git(['-c','user.name=Synthetic','-c','user.email=synthetic.invalid','-c','commit.gpgsign=false','commit','-m','before']);const before=git(['rev-parse','HEAD']);
+ fs.unlinkSync(join(repo,'delete.txt'));fs.renameSync(join(repo,'rename.txt'),join(repo,'renamed.txt'));git(['add','-A']);git(['-c','user.name=Synthetic','-c','user.email=synthetic.invalid','-c','commit.gpgsign=false','commit','-m','after']);const after=git(['rev-parse','HEAD']);
+ check('gitRange extracts deleted paths and the old side of renames',()=>{const r=deletionImpact({...config,paths:undefined,gitRange:before+'..'+after});assert.deepEqual(r.items.map(i=>[i.path,i.change,i.renamedTo]),[['delete.txt','DELETED',undefined],['rename.txt','RENAMED','renamed.txt']]);});
+ check('gitRange rejects option injection and malformed ranges',()=>{for(const range of ['--help..HEAD','HEAD...HEAD','HEAD..HEAD..HEAD','missing..HEAD'])assert.throws(()=>deletionImpact({...config,paths:undefined,gitRange:range}));});
+ check('help is self contained and stdout is full parseable JSON',()=>{const script=fileURLToPath(new URL('./deletion-impact.mjs',import.meta.url)),cfg=join(area,'deletion.json');writeUTF8(cfg,JSON.stringify(config));const help=spawnSync(process.execPath,[script,'--help'],{encoding:'utf8'});assert.equal(help.status,0);assert.match(help.stdout,/Usage:/);const r=spawnSync(process.execPath,[script,'--config',cfg],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).items[0].retained[0].occurrences,6);});
+ check('display limits group by retained root and file with full JSON',()=>{const many=join(area,'many');for(let i=0;i<25;i++)put(many,'r'+i+'/manifest.json',target);const r=deletionImpact({...config,retainedRoots:[{path:many,label:'many'}]});const g=r.groups[0].retained[0].display;assert.equal(g.groups,25);assert.equal(g.shown,20);assert.equal(g.categories[0].omitted,5);assert.equal(r.items[0].retained[0].files.length,25);const h=renderDeletionHTML(r),md=renderDeletionMarkdown(r);assert.equal((h.match(/class="display-group"/g)||[]).length,23);assert(h.includes('health.json'));assert(md.includes('JSON'));});
+ check('check-card integrates a new section while keeping prior verdict fields',()=>{const a=buildCard({root:repo}),b=buildCard({root:repo,deletionImpact:config});const section=b.deletionImpact;delete b.deletionImpact;assert.deepEqual(b,a);b.deletionImpact=section;assert(renderCardSection(b).includes('card-deletion-impact'));assert(renderCardMarkdown(b).includes(retainedAdvice));});
+ const map={repo,head:after,toolVersion:'synthetic',readOnly:{status:'PASS'},roots:[{path:'entry.mjs'}],closures:[{root:'entry.mjs',files:['entry.mjs'],edges:[],gaps:[]}],limitations:[],command:{bin:'node',args:['synthetic']}};
+ const mapFile=join(area,'map.json'),cfg=join(area,'report.json');writeUTF8(mapFile,JSON.stringify(map));
+ check('report CLI integration adds only a chapter and preserves complete verdicts',()=>{writeUTF8(cfg,JSON.stringify({maps:[{path:mapFile,role:'production'}],outDir:out}));runReport(cfg);const a=JSON.parse(fs.readFileSync(join(out,'health.json'),'utf8'));writeUTF8(cfg,JSON.stringify({maps:[{path:mapFile,role:'production'}],outDir:out,deletionImpact:config}));runReport(cfg);const b=JSON.parse(fs.readFileSync(join(out,'health.json'),'utf8'));assert(b.deletionImpact.items[0].retained.length);delete b.deletionImpact;delete a.configurationSha256;delete b.configurationSha256;assert.deepEqual(b,a);assert(fs.readFileSync(join(out,'health.html'),'utf8').includes('id="deletion-impact"'));});
+
+ check('check-card writes the integrated chapter outside inspected roots',()=>{const dest=join(area,'card');const c=writeCard({root:repo,deletionImpact:config},dest);assert.equal(c.deletionImpact.items[0].status,'NEEDS_ATTENTION');assert(JSON.parse(fs.readFileSync(join(dest,'check-card.json'),'utf8')).deletionImpact);assert(fs.readFileSync(join(dest,'check-card.md'),'utf8').includes(retainedAdvice));assert(fs.readFileSync(join(dest,'health.html'),'utf8').includes('card-deletion-impact'));});
+ check('check-card refuses retained output and symlink output ancestors',()=>{assert.throws(()=>writeCard({root:repo,deletionImpact:config},join(retained,'illegal-card')),/overlaps/);const link=join(area,'output-link');fs.symlinkSync(retained,link,process.platform==='win32'?'junction':'dir');try{assert.throws(()=>writeCard({root:repo,deletionImpact:config},link),/Links/);assert(!fs.existsSync(join(retained,'check-card.json')));}finally{fs.unlinkSync(link);}});
+ check('report outputs cannot overlap read only retained roots',()=>{writeUTF8(cfg,JSON.stringify({maps:[{path:mapFile}],outDir:join(retained,'illegal'),deletionImpact:config}));assert.throws(()=>runReport(cfg),/overlaps/);assert(!fs.existsSync(join(retained,'illegal')));});
+ return checks;
+}
+
+async function g232Checks(root){
+ const checks=[],check=(name,fn)=>{fn();checks.push('G232 '+name);};
+ const area=join(root,'audit-imports'),repo=join(area,'repo'),retained=join(area,'retained');fs.mkdirSync(repo,{recursive:true});fs.mkdirSync(retained);
+ const put=(r,p,s)=>{const f=join(r,p);fs.mkdirSync(join(f,'..'),{recursive:true});fs.writeFileSync(f,s,'utf8');return f;};
+ put(repo,'symbol-only.mjs','export const uniqueAnchorToken=1;\n');
+ put(repo,'src/deleted.mjs','export const value=7;\n');put(repo,'src/folder/index.js','module.exports=7;\n');put(repo,'src/text-only.mjs','export const text=1;\n');put(repo,'src/noedge.mjs','export default 0;\n');
+ put(repo,'src/relative.mjs',"import {value} from './deleted.mjs';\n");
+ put(repo,'src/extensionless.mjs',"import {value} from './deleted';\n");
+ put(repo,'src/index-user.mjs',"import value from './folder';\n");
+ put(repo,'src/require.cjs',"const value=require('./deleted.mjs');\nconst folder=require('./folder');\n");
+ put(repo,'same-line.mjs',"import './src/deleted.mjs'; const label='src/deleted.mjs';\n");
+ put(repo,'multiline.mjs',"import {\n value\n} from './src/deleted.mjs';\n");
+ put(repo,'fullpath.mjs',"import './src/deleted.mjs';\n");
+ put(repo,'strings.mjs',"const a='src/deleted.mjs src/deleted.mjs';\nconst b='src/text-only.mjs';\n");
+ put(repo,'tests/literal.test.mjs',"const target='src/deleted.mjs';\n");
+ put(repo,'tests/use.test.mjs',"import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport {value} from '../src/deleted.mjs';\ntest('value remains',()=>assert.equal(value,7));\n");
+ const required=Array.from({length:12},(_,i)=>'anchors/a'+i+'.mjs'),entries=Array.from({length:12},(_,i)=>'entries/e'+i+'.mjs');
+ for(const f of [...required,...entries])put(repo,f,'export default 1;\n');
+ put(retained,'one.json',JSON.stringify(['src/deleted.mjs','src/folder/index.js']));put(retained,'two.json',JSON.stringify(['src/deleted.mjs']));
+ const git=args=>{const r=spawnSync('git',['-C',repo,...args],{encoding:'utf8',windowsHide:true,env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+ git(['init']);git(['config','core.autocrlf','false']);git(['add','.']);git(['-c','user.name=Fixture','-c','user.email=fixture.invalid','-c','core.hooksPath='+area,'-c','commit.gpgsign=false','commit','-m','import fixture']);
+ const config={repo,pins:{head:git(['rev-parse','HEAD'])},writeRoot:join(area,'output'),mapRoots:entries.map(path=>({path})),recordRoots:[{label:'retained',path:retained}],limits:{maxMapRoots:8},questions:[{id:'remove',ask:'Who imports this file?',deletePaths:['src/deleted.mjs'],tests:['tests/use.test.mjs'],anchors:[...required,{symbol:'uniqueAnchorToken'}]},{id:'index',ask:'Who imports the index?',deletePaths:['src/folder/index.js']},{id:'strings',ask:'Only a string?',deletePaths:['src/text-only.mjs']},{id:'none',ask:'No edge?',deletePaths:['src/noedge.mjs']},{id:'both',ask:'Unique totals?',deletePaths:['src/deleted.mjs','src/folder/index.js']}]};
+ const file=put(area,'config.json',JSON.stringify(config)),r=await runAudit(file),q=id=>r.questions.find(q=>q.id===id),item=id=>q(id).deletion.items[0],imports=id=>item(id).imports;
+ const mapCommand=r.commands.find(c=>c.step==='derive-map'),map=JSON.parse(fs.readFileSync(mapCommand.command.at(-1))),markdown=fs.readFileSync(join(config.writeRoot,'audit.md'),'utf8');
+ check('relative importer outside selected forward closures is reported with location',()=>{assert(imports('remove').some(e=>e.path==='src/relative.mjs'&&e.line===1));assert(!map.closures.some(c=>c.files.includes('src/relative.mjs')));});
+ check('extensionless import resolves to deleted target',()=>assert(imports('remove').some(e=>e.path==='src/extensionless.mjs'&&e.specifier==='./deleted')));
+ check('index import and require resolve to index target',()=>{assert(imports('index').some(e=>e.path==='src/index-user.mjs'));assert(imports('index').some(e=>e.path==='src/require.cjs'));});
+ check('require keeps operation and file line',()=>assert(imports('remove').some(e=>e.path==='src/require.cjs'&&e.operation==='require'&&e.line===1)));
+ check('literal-only path has zero imports and explicit no-map-edge evidence',()=>{assert.equal(imports('strings').length,0);assert.equal(item('strings').importEvidence.status,'NO_MAP_EDGE');assert.equal(q('strings').deletion.summary.stringReferences,1);assert(markdown.includes('No import or require edge'));});
+ check('question roots after ninth and beyond root limit are all retained',()=>{assert(required.every(path=>map.roots.some(r=>r.path===path)));assert(map.roots.length>8);for(const p of ['src/deleted.mjs','src/folder/index.js','src/text-only.mjs','src/noedge.mjs','tests/use.test.mjs'])assert(map.roots.some(r=>r.path===p));assert.equal(r.mapSelection.omittedRoots.length,12);assert(entries.every(path=>r.skipped.some(s=>s.path===path&&s.reason==='MAX_MAP_ROOTS')));});
+ check('symbol-only anchors resolved to files also become mandatory map roots',()=>{assert(map.roots.some(r=>r.path==='symbol-only.mjs'));assert(q('remove').anchors.some(a=>a.file==='symbol-only.mjs'&&a.status==='PASS'));});
+ check('each deletion summary matches full JSON and first Markdown line',()=>{for(const row of r.questions){const n=row.deletion.summary;const line='被 '+n.programImports+' 個程式 import、'+n.stringReferences+' 處字串引用、'+n.tests+' 個測試、留存物 '+n.retainedFiles+' 檔';assert(markdown.includes('## '+row.id+': '+row.ask+'\n\n'+line));}assert.deepEqual(q('remove').deletion.summary,{programImports:6,stringReferences:4,tests:2,retainedFiles:2});});
+ check('import declarations do not double count as path strings',()=>{assert(!item('remove').stringReferences.program.some(f=>f.file==='fullpath.mjs'));assert(item('remove').repo.program.some(f=>f.file==='fullpath.mjs'));});
+ check('same-line independent string remains counted outside import token',()=>{const f=item('remove').stringReferences.program.find(f=>f.file==='same-line.mjs');assert.equal(f.count,1);assert.equal(item('remove').repo.program.find(f=>f.file==='same-line.mjs').count,2);});
+ check('multiline import specifier is not counted as a separate path string',()=>{assert(imports('remove').some(e=>e.path==='multiline.mjs'&&e.line===1));assert(!item('remove').stringReferences.program.some(f=>f.file==='multiline.mjs'));});
+ check('tests have separate import locators and distinct test counts',()=>{assert(imports('remove').some(e=>e.path==='tests/use.test.mjs'&&e.isTest&&e.line===3));assert(markdown.includes('測試 import tests/use.test.mjs:3'));assert(markdown.includes('程式 import src/relative.mjs:1'));assert.equal(q('remove').tests[0].exitCode,0);});
+ check('summary deduplicates programs tests and retained files across targets',()=>assert.deepEqual(q('both').deletion.summary,{programImports:7,stringReferences:4,tests:2,retainedFiles:2}));
+ check('imports are bound to the same-run map and direct inventory',()=>{for(const row of r.questions)for(const i of row.deletion.items){assert.equal(i.importEvidence.map.sha256,sha256(fs.readFileSync(i.importEvidence.map.path)));for(const e of i.imports)assert(map.incomingImports.edges.some(m=>m.path===e.path&&m.line===e.line&&m.targets.includes(i.path)));}assert.equal(r.readOnly.status,'PASS');assert.equal(git(['status','--porcelain']),'');});
+ check('no edge remains explicit and deletion never becomes a passing verdict',()=>{assert.equal(item('none').importEvidence.status,'NO_MAP_EDGE');assert(r.questions.every(q=>q.verdict==='UNKNOWN'));assert.equal(q('none').deletion.summary.programImports,0);});
+ put(area,'one-root-config.json',JSON.stringify({...config,writeRoot:join(area,'one-root-output'),questions:[{id:'one',ask:'one',deletePaths:['src/deleted.mjs']}]}));
+ const c=await runAudit(join(area,'one-root-config.json'));
+ check('remaining root slots obey limit without omitting the question target',()=>{assert.equal(c.mapSelection.selectedRoots.length,8);assert.equal(c.mapSelection.selectedRoots[0].path,'src/deleted.mjs');assert.equal(c.mapSelection.omittedRoots.length,5);});
+ put(repo,'src/deleted.mjs','export const value=8;\n');
+ const dirtyFile=put(area,'dirty-config.json',JSON.stringify({...config,writeRoot:join(area,'dirty-output'),questions:[{id:'dirty',ask:'Missing map?',deletePaths:['src/deleted.mjs']}]}));
+ const dirty=await runAudit(dirtyFile);
+ check('missing same-run map is explicit instead of silent string fallback',()=>{assert.equal(dirty.questions[0].deletion.items[0].importEvidence.status,'MAP_UNAVAILABLE');assert(renderAudit(dirty).includes('MAP_UNAVAILABLE'));assert.equal(dirty.questions[0].verdict,'UNKNOWN');});
+ const limitedFile=put(area,'limited-config.json',JSON.stringify({...config,writeRoot:join(area,'limited-output'),limits:{maxQuestions:1},questions:[config.questions[2],config.questions[3]]}));
+ const limited=await runAudit(limitedFile);
+ check('skipped deletion question still has observed numeric summary and explicit not-run status',()=>{const row=limited.questions[1];assert.equal(row.deletion.summaryStatus,'NOT_RUN');assert.deepEqual(row.deletion.summary,{programImports:0,stringReferences:0,tests:0,retainedFiles:0});assert(renderAudit(limited).includes('NOT_RUN'));});
+ return checks;
+}
+
+async function g240Checks(root){
+ const checks=[],repo=join(root,'g240');fs.mkdirSync(repo,{recursive:true});
+ fs.writeFileSync(join(repo,'mcp.ts'),`// server.registerTool("comment", {});
+const text = 'server.tool("text", {})';
+server.registerTool(
+ "prepare", {}, handler);
+server.tool('legacy', {}, handler);
+registerTool("direct", {}, handler);
+server.registerTool(computed, {}, handler);
+`);
+ const m=discoverEntries(repo).entries.filter(e=>e.kind==='mcp-tool');
+ assert.deepEqual(m.map(e=>[e.name,e.anchor.line]),[['prepare',3],['legacy',5],['direct',6]]);
+ checks.push('G240 MCP literal registrations retain names and lines; comments strings and computed names excluded');
+ fs.writeFileSync(join(repo,'large.bin'),'x'.repeat(4096));
+ const git=args=>{const r=spawnSync('git',['-C',repo,...args],{encoding:'utf8',windowsHide:true,env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+ git(['init']);git(['add','.']);git(['-c','user.name=Fixture','-c','user.email=fixture.invalid','-c','core.hooksPath='+root,'-c','commit.gpgsign=false','commit','-m','G240 fixture']);
+ const config={repo,mapRoots:['mcp.ts'],questions:[{id:'static',ask:'Static only'}],recordRoots:[],writeRoot:join(root,'g240-blocked'),limits:{maxFileBytes:1024}};
+ const cfg=join(root,'g240-audit.json');fs.writeFileSync(cfg,JSON.stringify(config));
+ const blocked=await runAudit(cfg);assert.equal(blocked.mapDiagnostics.basis,'INCOMPLETE_SOURCE');
+ assert(blocked.mapDiagnostics.gaps.some(g=>g.file==='large.bin'&&g.limits.some(l=>l.name==='maxFileBytes'&&l.observed===4096&&l.limit===1024)));
+ assert.match(renderAudit(blocked),/large.bin/);assert.match(blocked.mapDiagnostics.nextStep,/limits/);
+ checks.push('G240 audit explains budget-blocked map with exact file and required limit');
+ config.limits.maxFileBytes=8192;config.writeRoot=join(root,'g240-mapped');fs.writeFileSync(cfg,JSON.stringify(config));
+ const mapped=await runAudit(cfg);assert.equal(mapped.mapDiagnostics.status,'PASS');
+ assert.equal(mapped.mapDiagnostics.artifact.sha256,sha256(fs.readFileSync(mapped.mapDiagnostics.artifact.path)));
+ assert.deepEqual(mapped.mapDiagnostics.selectedRoots,['mcp.ts']);assert.equal(mapped.questions[0].verdict,'UNKNOWN');
+ checks.push('G240 audit string roots produce same-run map after budget repair without promoting static evidence');
+ const scratch=join(root,'g240-scratch');fs.mkdirSync(scratch);
+ const defaultMap=analyze({repo,temp:process.env.TEMP,scratch,roots:['mcp.ts']});
+ assert.equal(defaultMap.classification.usedDefault,true);assert.equal(defaultMap.classification.fallback,'unclassified');
+ assert.equal(defaultMap.populationStats.unclassified.total,2);
+ assert.throws(()=>analyze({repo,temp:process.env.TEMP,scratch,roots:['mcp.ts'],classification:{rules:[]}}),/classification rules/);
+ checks.push('G240 omitted classification uses disclosed default; incomplete explicit classification still fails');
+ assert.throws(()=>parseConfigJSON('{\n "repo": "C:\\work"\n}','broken.json'),/broken.json: JSON parse failed at line 2, column \d+.*Windows paths.*escaped backslashes/s);
+ assert.throws(()=>parseConfigJSON('{\n "repo": 1,\n}'),/line 3, column 1/);
+ for(const bad of ['undefined','NaN','True'])assert.throws(()=>parseConfigJSON('{\n "repo": '+bad+'\n}'),/line 2, column 10/);
+ assert.throws(()=>parseConfigJSON('['.repeat(1500)+'undefined'+']'.repeat(1500)),/line 1, column 1501/);
+ checks.push('G240 malformed config reports line column and Windows path escaping');
+ const programs=languageEdges('launch.ts',`import {spawn,execFile} from 'node:child_process';
+import {execa as run} from 'execa';
+import * as proc from 'execa';
+spawn('render-core.exe', computedArgs);
+execFile('ffmpeg', ['-version']);
+run('cargo', ['build']);
+proc.execa('git', ['status']);
+spawn(executable, args);
+`,{rows:new Map(),read:()=>''});
+ assert.deepEqual(programs.edges.filter(e=>e.kind==='EXTERNAL_COMMAND').map(e=>e.program),['render-core.exe','ffmpeg','cargo','git']);
+ assert(programs.edges.filter(e=>e.kind==='EXTERNAL_COMMAND').every(e=>e.external&&e.runtimeVerified===false&&e.targets.length===0));
+ assert(programs.gaps.some(g=>g.code==='SUBPROCESS_TARGET_UNKNOWN'&&g.line===8));
+ assert.equal(languageEdges('local.ts',"function execa(){};execa('fake');",{rows:new Map(),read:()=>''}).edges.length,0);
+ checks.push('G240 JS literal spawn execFile and imported execa retain external-program edges; computed executable remains gap');
+ const rust={
+  'rs/Cargo.toml':'[package]\nname = "sample"\n[dependencies]\nserde = "1"\n',
+  'rs/src/lib.rs':`pub mod a;
+pub mod tree;
+mod absent;
+mod ambiguous;
+#[path = "elsewhere.rs"] mod redirected;
+#[cfg(windows)] mod platform;
+mod inline { mod hidden; use super::a::Thing; }
+use crate::a::Thing;
+use self::tree::leaf::Item;
+use super::escape;
+use std::io;
+use mystery::Thing;
+use crate::a::{Thing, Other};
+include!("generated.rs");
+const RAW: &str = r##"mod raw_fake; use crate::raw_fake;"##;
+/* outer /* nested */ mod comment_fake; */
+pub fn lifetime<'a>(x: &'a str) -> &'static str { "ok" }
+`,
+  'rs/src/a.rs':'pub mod child;\npub struct Thing;\nuse super::tree::leaf::Item;\nuse self::child::Thing;\n',
+  'rs/src/a/child.rs':'pub struct Thing;\nuse crate::a::Thing;\n',
+  'rs/src/tree/mod.rs':'pub mod leaf;\n',
+  'rs/src/tree/leaf.rs':'pub struct Item;\nuse super::super::a::Thing;\n',
+  'rs/src/platform.rs':'pub struct Platform;\n',
+  'rs/src/ambiguous.rs':'','rs/src/ambiguous/mod.rs':'','rs/src/std.rs':'','rs/src/mystery.rs':''
+ };
+ const rsRows=new Map();for(const [p,s] of Object.entries(rust)){fs.mkdirSync(join(repo,p,'..'),{recursive:true});fs.writeFileSync(join(repo,p),s);rsRows.set(p,{path:p,sha256:sha256(s)});}
+ const rs=walk(repo,['rs/src/lib.rs'],rsRows);
+ assert.deepEqual(rs.files.map(f=>f.path).sort(),['rs/src/a.rs','rs/src/a/child.rs','rs/src/lib.rs','rs/src/platform.rs','rs/src/tree/leaf.rs','rs/src/tree/mod.rs']);
+ assert(rs.edges.some(e=>e.path==='rs/src/a.rs'&&e.specifier==='self::child::Thing'&&e.targets.includes('rs/src/a/child.rs')));
+ assert(rs.edges.some(e=>e.path==='rs/src/tree/leaf.rs'&&e.specifier==='super::super::a::Thing'&&e.targets.includes('rs/src/a.rs')));
+ assert(rs.edges.some(e=>e.path==='rs/src/lib.rs'&&e.specifier==='crate::a::Thing'&&e.targets.includes('rs/src/a.rs')));
+ assert(rs.external.some(e=>e.crate==='std'));assert(rs.edges.every(e=>e.candidate&&e.runtimeVerified===false));
+ checks.push('G240 Rust file module layouts and crate self super imports enter closure without external same-name files');
+ for(const code of ['RUST_MODULE_MISSING','RUST_MODULE_AMBIGUOUS','RUST_MODULE_ATTRIBUTE_UNSUPPORTED','RUST_CFG_UNEVALUATED','RUST_INLINE_MODULE_UNSUPPORTED','RUST_USE_ROOT_UNKNOWN','RUST_SUPER_OUTSIDE_CRATE','RUST_USE_UNSUPPORTED','RUST_INCLUDE_UNSUPPORTED'])assert(rs.gaps.some(g=>g.code===code&&g.line),code);
+ assert(!rs.edges.some(e=>/fake|hidden/.test(e.specifier)));assert(!rs.gaps.some(g=>/fake/.test(JSON.stringify(g))));
+ git(['add','rs']);git(['-c','user.name=Fixture','-c','user.email=fixture.invalid','-c','core.hooksPath='+root,'-c','commit.gpgsign=false','commit','-m','Rust fixture']);
+ const rsMap=analyze({repo,temp:process.env.TEMP,scratch,roots:['rs/src/lib.rs']});assert.equal(rsMap.closures[0].parserScope,'STATIC_LEXICAL');
+ checks.push('G240 Rust unsupported missing ambiguous cfg and scope gaps remain visible; comments raw strings and lifetimes do not create imports');
+ const route={schema:'routes-v1',title:'測試路線',stations:[{id:'a',name:'受理需求',file:'main.mjs',block:'入口',inferred:false},{id:'b',name:'保存資料',file:'target.mjs',block:'資料',inferred:false}],routes:[{id:'r',name:'保存路線',description:'呼叫保存程式。',hops:[{from:'a',to:'b',action:'交給保存程式',anchor:{file:'main.mjs',line:2,expect:'run()'}}]}]};
+ const edge={path:'main.mjs',line:1,kind:'STATIC_IMPORT',specifier:'./target.mjs',targets:['target.mjs']},maps=[{closures:[{edges:[edge]}]}];
+ const check=(source,target='export function go() {}',input=route,ms=maps)=>checkRoutes(input,ms,p=>p==='main.mjs'?source:target);
+ const source="import {go as run} from './target.mjs';\nrun();\n";
+ assert.equal(check(source).routes[0].hops[0].manual,false);assert.equal(check(source).runtimeVerified,false);
+ const namespace=structuredClone(route);namespace.routes[0].hops[0].anchor.expect='ns.go()';
+ assert.equal(check("import * as ns from './target.mjs';\nns.go();",undefined,namespace).routes[0].hops[0].manual,false);
+ checks.push('G240 route alias and namespace calls require same import pair and target value export');
+ assert.equal(check(source,'export function other() {}').routes[0].hops[0].manual,true);
+ assert.equal(check(source,"const text='export'\nfunction go() {}").routes[0].hops[0].manual,true);
+ assert.equal(check(source,'export type go = () => void;').routes[0].hops[0].manual,true);
+ assert.equal(check(source,'declare const go: () => void; export {go};').routes[0].hops[0].manual,true);
+ assert.equal(check(source,'const x = function go() {}; export {go};').routes[0].hops[0].manual,true);
+ assert.equal(check(source,"const text='{';\nexport function go() {}").routes[0].hops[0].manual,false);
+ assert.equal(check("import {go as run} from './target.mjs';\nconst text='run()';").routes[0].hops[0].manual,true);
+ for(const body of ['class A { method(run) { run(); } }','try {} catch(run) { run(); }','{ const {run}=obj; run(); }'])assert.equal(check("import {go as run} from './target.mjs';\n"+body).routes[0].hops[0].manual,true,body);
+ const typed=[{closures:[{edges:[{...edge,typeOnly:true}]}]}];assert.equal(check(source,undefined,route,typed).routes[0].hops[0].manual,true);
+ checks.push('G240 route refuses missing exports strings type-only imports and method catch destructuring shadows');
+ const wrong=structuredClone(route);wrong.routes[0].hops[0].anchor.expect='wrong';
+ assert.equal(check(source,undefined,wrong).routes.length,0);assert(check(source,undefined,wrong).rejected[0].reasons.includes('ANCHOR_MISMATCH:0'));
+ const adjacent=structuredClone(route);adjacent.routes[0].hops[0].anchor.expect='notify()';
+ assert.equal(check("import {go as run} from './target.mjs';\nnotify();\nrun();",undefined,adjacent).routes[0].hops[0].manual,true);
+ const exact=structuredClone(route);exact.routes[0].hops[0].anchor={file:'main.mjs',line:1,expect:'import'};
+ assert.equal(check(source,undefined,exact).routes[0].hops[0].manual,false);
+ checks.push('G240 route rejects mismatched anchors and adjacent-line borrowing while preserving exact map sites');
  return checks;
 }

@@ -10,6 +10,20 @@
 - 明確 const／let／var 宣告為函式的局部 require，在所屬大括號範圍內排除；這不是完整作用域／型別分析。
 - 支援 TS／TSX／JSX、.js 類副檔名替代、無副檔名與 index；tsconfig／jsconfig 的 baseUrl、paths 與 repo 內相對 extends 已支援。不處理 package exports/imports、任意 alias、bundler 設定、套件 extends、安裝樹解析或原生 addon。
 
+## Rust（1.24.0）
+
+- 使用獨立詞法掃描，略過一般／raw／byte 字串、字元、lifetime、行註解與巢狀區塊註解，保留原始行號；不執行 Cargo、rustc 或目標程式。
+- 明選 main.rs 與 lib.rs 時各自是獨立 crate 根，沿 Rust 邊傳遞根上下文；單獨選其他 .rs 時只在祖先尋找 lib.rs／main.rs，無已宣告模組關係時留 RUST_MODULE_CONTEXT_UNKNOWN。未找到根留 RUST_CRATE_ROOT_UNKNOWN。不從 TypeScript 呼叫或執行檔名稱推導 Rust 根。
+- mod x; 在 crate 根與 mod.rs 的目錄尋找 x.rs／x/mod.rs；一般 a.rs 的子模組在 a/ 下找。兩者皆有留歧義 gap，皆無留缺檔 gap。模組樹只由實際 mod 宣告建立，任意同名 .rs 不構成 import 證據。
+- 支援非 grouped／glob 的 use crate::、self::、super::（可連續多層），以及目前模組已宣告的裸模組／item。以最後一個已宣告模組檔案為目標；單一 item suffix 可對照該檔頂層宣告，其他 suffix 保留 RUST_ITEM_UNVERIFIED。as alias 可讀取，但不追蹤後續別名使用或 re-export 鏈。
+- std／core／alloc 及最近 Cargo.toml 中可辨識的簡單 dependency key／package name 列 EXTERNAL_CRATE，不讀外部套件。裸根無法證明為已宣告本地名稱或已知外部 crate 時留 RUST_USE_ROOT_UNKNOWN，不猜本地路徑。main.rs 的同套件 library 名稱也不自動連到 lib.rs。
+- grouped／glob imports、#[path]／#[cfg_attr] 改路徑、include 巨集及未展開自訂巨集均留帶行號 gap；一般非依賴標準巨集只略過 token tree。inline module 整塊略過並留 gap，不把其中 self／super 誤套外層。block-local mod 不解析。
+- cfg 不求值：可解析 mod 採保守聯集，附 conditions 與 RUST_CFG_UNEVALUATED；所有 Rust 邊皆為 candidate:true、runtimeVerified:false，不能當實際編譯或執行證明。模組索引上限為 2048 檔、64 層及 16 MiB，超限明列 RUST_SCAN_LIMIT。
+
+## JavaScript 外部程式
+
+JS／TS 的 `spawn`、`execFile`（含 Sync）與已匯入 execa 的字面執行檔沿用 `EXTERNAL_COMMAND` 邊及 externalDependencies，保存程式名稱、行號與 runtimeVerified:false。Node／Python 腳本仍走原 SUBPROCESS_ARG；計算執行檔仍列缺口。不追蹤跨函式參數，也不從二進位名稱推導 Rust 原碼。execa 支援 ESM default、named alias、namespace.execa 及直接 require 綁定；一般別名、遮蔽或跨檔資料流未完整解析。
+
 ## Python
 
 - import a.b、from .x import y、from ..pkg import z、逗號多項、括號跨行與反斜線續行皆支援；yield from／raise from 不當成 import；載入可解析的父套件 __init__.py。

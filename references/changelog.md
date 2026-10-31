@@ -1,5 +1,33 @@
 # 版本記錄
 
+## 1.24.0 (2026-10-30)
+
+- 入口探索保留字面 MCP registerTool／tool 註冊名稱、檔案與行號；不將註解、字串或計算名稱當作已知工具。
+- Audit 支援字串 mapRoots，明列來源預算、髒污、無根與產圖錯誤及補法；成功圖附同輪讀回收據。來源母體 gate 與執行證據判定不變，外部 JSON 收據沿用 recordRoots。
+- derive-map 省略 classification 時使用明示的單一預設分類；JSON 解析失敗附行、欄與 Windows 路徑提示。
+- 新增輕量 Rust mod／use crate、self、super 靜態掃描；不支援語法、cfg、找不到或歧義皆留 gap。JS spawn／execFile／execa 的字面外部執行檔新增外部程式邊，變數與 binary/source 綁定仍 UNKNOWN。
+- 路線段可用同檔對的 import、錨點呼叫及目標 value export 證據確認為靜態實線；錨點不符、疑似遮蔽與缺證據不升級。仍不代表實際執行。
+- 案例加入既有 self-test；不新增測試檔，不實作以函式為根的閉包。
+
+## 1.23.1 (2026-10-28)
+
+- Audit 刪除題合併同輪 map 的 import/require 邊，附檔:行，與字串引用分開；無邊或無 map 明列。
+- 題目相關根全數優先，其餘入口才套上限，略過清單保留。
+- 每個刪除題附繁中數字摘要，JSON 保留全量與原判定。同步英中 audit 參考；不新增測試檔。
+
+## 1.23.0 (2026-10-28)
+
+- Add audit --init/--config orchestration, one evidence card, bounded mixed JSON/JSONL census, isolated existing tests and readback.
+- Add observed test failures to report Markdown/HTML/JSON without changing existing static verdicts.
+- Default to the two-call audit workflow; retain detailed five-step usage.
+
+
+## 1.22.0（2026-10-27）
+
+- 新增 `deletion-impact.mjs --config`：在 repo 與宣告只讀留存根搜尋刪除／改名路徑，保留全量 JSON與有上限的分組章節。
+- 留存命中一律要處理；缺根、symlink、超限與讀取缺口明列，不推論相容性或故障。
+- 接入 report／check-card，既有判定不變；補英中設定說明與合成回歸檢查。
+
 ## 1.21.0（2026-10-26）
 
 - 報告按「同判定、同原因、同檔案」合併，每類預設顯示 20 組，先列正式路線，再按件數排序。每組附件數、出現處數與前三個錨點；不確定按呼叫端合約、執行證據、觸發條件等缺口分小類。省略組數明列，完整清單只放 JSON，不改「壞了」計數與原判定。

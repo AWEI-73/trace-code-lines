@@ -1,3 +1,5 @@
+import {deletionImpact,renderDeletionMarkdown,renderDeletionHTML} from './deletion-impact.mjs';
+import {classifyTests} from './observations.mjs';
 import {compareStopSites} from './stop-sites.mjs';
 import {buildMaintenance,loadMaintenanceWater,renderMaintenanceMarkdown} from './maintenance.mjs';
 // Offline source-bound health and on-demand flow reports; no target code execution.
@@ -189,8 +191,21 @@ export function buildReport(inputs,config={},options={}){
   report.maintenance=buildMaintenance(report,{decisions:config.maintenanceDecisions??[],water:config.maintenanceWater,edges:allEdges,routes:maps.flatMap(m=>m.closures),rerunPrerequisites:config.maintenance?.rerunPrerequisites??[],read:get});
   if(report.maintenance.waterProvided)report.conclusion='\u5df2\u63a5\u5165\u8a66\u8dd1\u7d50\u679c\uff1b\u9010\u4ef6\u898b\u7dad\u4fee\u55ae\uff0c\u8dd1\u904e\u4e0d\u7b49\u65bc\u9a57\u6536\u901a\u904e\u3002';
   report.sourceReads=[...new Map([...cache].map(([file,body])=>({file,sha256:sha256(body)})).concat(report.stopSites?.sourceReads??[]).map(s=>[s.file,s])).values()];
+  if(config.testEvidenceData)report.testEvidence=testEvidenceChapter(config.testEvidenceData,repo,head);
   return report;
 }
+export function testEvidenceChapter(bundle,repo,head){
+ if(bundle?.schema!=='trace-audit-tests-v1'||path.resolve(bundle.source?.repo??'')!==path.resolve(repo)||bundle.source?.head!==head||!Array.isArray(bundle.runs))throw Error('Test evidence source binding mismatch');
+ const runs=bundle.runs.map(r=>{
+  if(typeof r.stdout!=='string'||typeof r.stderr!=='string'||!Array.isArray(r.command)||!Object.hasOwn(r,'exitCode'))throw Error('Test transcripts and command/exit code required');
+  const classification=classifyTests(r.stdout,r.stderr,r.denied??[]);
+  const failed=r.stdout.match(/^# fail (\d+)/m),tests=r.stdout.match(/^# tests (\d+)/m);
+  return {file:r.file,command:r.command,exitCode:r.exitCode,classification,summaryFail:failed?Number(failed[1]):null,tests:tests?Number(tests[1]):null,resultFile:r.resultFile??null,stdoutSha256:sha256(r.stdout),stderrSha256:sha256(r.stderr),status:classification.rows.length||failed&&Number(failed[1])>0?'FAIL':r.exitCode===0&&classification.passed>0&&!classification.cancelled&&!classification.denialEvents?'PASS':'UNKNOWN'};
+ });
+ return {schema:'trace-report-tests-v1',source:bundle.source,runs,failed:runs.reduce((n,r)=>n+(r.summaryFail??r.classification.rows.length),0),limitation:'Observed test results only. Existing static verdicts and counters are unchanged; passing tests do not certify real use or the natural-language claim.'};
+}
+function testMarkdown(r){if(!r.testEvidence)return '';return '\n## \u672c\u8f2a\u6e2c\u8a66\u8b49\u64da\n\n'+r.testEvidence.runs.map(t=>'- '+t.status+' | '+t.file+' | exit='+t.exitCode+' | fail='+t.summaryFail+'\n\n'+t.classification.rows.map(f=>'  - '+f.classification+': '+f.name+'\n').join('')).join('\n')+'\n'+r.testEvidence.limitation+'\n';}
+function testHTML(r){return r.testEvidence?'<section><h2>\u672c\u8f2a\u6e2c\u8a66\u8b49\u64da</h2><pre>'+esc(testMarkdown(r))+'</pre></section>':'';}
 export function checkFlow(flow,map,read){
   validateMainFlow(flow);
   if(!flow||!Array.isArray(flow.steps)||!Array.isArray(flow.arrows))throw Error('flow.steps/arrows required');
@@ -208,7 +223,7 @@ export function checkFlow(flow,map,read){
   return {...flow,repo:map.repo,commit:map.head,steps,status:steps.every(s=>s.check.status==='PASS')?'PASS':'FAIL',pass:steps.filter(s=>s.check.status==='PASS').length,fail:steps.filter(s=>s.check.status==='FAIL').length};
 }
 
-export const renderHealth=renderHumanHealth;
+export const renderHealth=r=>renderHumanHealth(r).replace('</main>',renderDeletionHTML(r.deletionImpact)+testHTML(r)+'</main>');
 function itemMD(f){
   let out='- '+md((f.locations??[{file:f.file,line:f.line}]).map(loc).join('\u3001'))+' | \u985e\u5225\uff1a'+md(names[f.category]??f.category)+' | \u4f86\u6e90\uff1a'+md(f.source??'\u67e5\u7dda')+' | '+md(f.reason??f.target??'')+'\n';
   if(f.target)out+='  - \u76ee\u6a19\uff1a'+md(f.target)+'\n';
@@ -242,7 +257,7 @@ export function renderLegacyMarkdown(r,{outputDirectory}={}){
 }
 export function renderMarkdown(r,options={}){
  const sheet=r.maintenance??buildMaintenance(r);
- return renderMaintenanceMarkdown(sheet)+'\n[\u5b8c\u6574\u6280\u8853\u8cc7\u6599](health.json)\n';
+ return renderMaintenanceMarkdown(sheet)+renderDeletionMarkdown(r.deletionImpact)+testMarkdown(r)+'\n[\u5b8c\u6574\u6280\u8853\u8cc7\u6599](health.json)\n';
 }
 export const renderFlow=renderHumanFlow;
 export function writeUTF8(file,body,{exclusive=false}={}){
@@ -258,17 +273,21 @@ export function runReport(configFile){
   if(!inputs.length)throw Error('maps required');
   const repo=noLinks(path.resolve(inputs[0].map.repo)),out=noLinks(path.resolve(base,config.outDir??'report'));
   const outputs=['health.html','report.md','health.json','report-receipt.json',...(config.flow?['flow.html','flow-checked.json']:[])].map(f=>path.join(out,f));
-  const inputPaths=[absolute,...inputs.map(i=>i.path),...[config.notes,config.flow,config.maintenance?.decisions].filter(Boolean).map(p=>path.resolve(base,p)),...(config.maintenance?.waterSources??[]).flatMap(x=>[x.report,x.config,x.snapshot].map(r=>path.resolve(base,r.path)))];
+  const inputPaths=[absolute,...inputs.map(i=>i.path),...[config.notes,config.flow,config.maintenance?.decisions,config.testEvidence?.path].filter(Boolean).map(p=>path.resolve(base,p)),...(config.maintenance?.waterSources??[]).flatMap(x=>[x.report,x.config,x.snapshot].map(r=>path.resolve(base,r.path)))];
   if(inside(repo,out)||outputs.some(p=>inputPaths.some(i=>path.resolve(p)===path.resolve(i))))throw Error('Output overlaps source/input');
   for(const p of outputs)noLinks(p);
   const git=args=>execFileSync('git',['-C',repo,...args],{encoding:'utf8',env:{...process.env,GIT_OPTIONAL_LOCKS:'0'},windowsHide:true});
   const head=git(['rev-parse','HEAD']).trim(),status=git(['status','--porcelain']);if(status||inputs.some(i=>i.map.head!==head))throw Error('Source snapshot changed');
   if(config.notes)config.notesData=JSON.parse(fs.readFileSync(path.resolve(base,config.notes),'utf8'));
+  if(config.testEvidence){const bytes=fs.readFileSync(noLinks(path.resolve(base,config.testEvidence.path)));if(!config.testEvidence.sha256||sha256(bytes)!==config.testEvidence.sha256)throw Error('Test evidence hash mismatch');config.testEvidenceData=JSON.parse(bytes);}
   config.configurationSha256=sha256(raw);config.commands=[...inputs.map(i=>i.map.command),{bin:process.execPath,args:[process.argv[1],'--config',absolute]}];
   const maintenance=config.maintenance??{};
   if(maintenance.decisions)config.maintenanceDecisions=JSON.parse(fs.readFileSync(noLinks(path.resolve(base,maintenance.decisions)),'utf8'));
   config.maintenanceWater=loadMaintenanceWater(maintenance.waterSources,base,repo);
+  if(config.deletionImpact)for(const r of config.deletionImpact.retainedRoots??[]){const root=path.resolve(base,r.path);if(inside(root,out)||inside(out,root))throw Error('Output overlaps read-only retained root');}
   const report=buildReport(inputs,config);
+  if(config.deletionImpact)report.deletionImpact=deletionImpact({...config.deletionImpact,repo,unusedExclusions:config.deletionImpact.unusedExclusions??config.unusedExclusions,display:config.deletionImpact.display??config.display},{base});
+  if(report.deletionImpact&&report.deletionImpact.scopes.some(s=>inside(s.root,out)||inside(out,s.root)))throw Error('Output overlaps read-only deletion scope');
   let flow;
   if(config.flow){const value=JSON.parse(fs.readFileSync(path.resolve(base,config.flow),'utf8'));const sourceMap=inputs.find(i=>i.role!=='tests'&&i.map.closures.some(c=>c.root===value.routeRoot))?.map;if(!sourceMap)throw Error('Flow root is not a production route');flow=checkFlow(value,sourceMap,p=>readBounded(repo,p).toString('utf8'));}
   for(const row of report.sourceReads)if(sha256(readBounded(repo,row.file))!==row.sha256)throw Error('Source changed during report');

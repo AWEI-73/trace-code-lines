@@ -1,4 +1,4 @@
-# Trace Code Lines 1.21.0
+# Trace Code Lines 1.24.0
 
 [English](#english) · [繁體中文](#traditional-chinese)
 
@@ -16,6 +16,8 @@ Check dependency direction across repositories with `node scripts/boundary.mjs -
 Reports group the same verdict, reason and file, showing at most 20 groups per category by default. Production-route groups come first, then occurrence count. Each group shows item/occurrence totals and up to three anchors. Uncertain groups name the missing caller contract, execution evidence, condition or declaration. Omitted groups are counted; complete lists remain in JSON and broken counters retain their original meaning.
 
 All public CLIs support `--help` without a configuration. Report config accepts `unusedExclusions.conventionLoaded` globs, `staticDirectories` and `historyDirectories` as repo-relative directories. Matching unused candidates become declared exclusions with a separate count; declarations are not runtime evidence. Boundary follows one same-file named call level up to a unique caller argument or down to one top-level helper return. Multiple assignments, ambiguous callers and unsupported helpers retain UNKNOWN. `--out result.json` also writes a bounded `result.json.md`. See [report settings](references/maintenance.md) and [boundary](references/boundary.md).
+
+Before deleting or renaming files, use `node scripts/deletion-impact.mjs --config file` and declare installed products and records as read-only retained roots outside the repo. Full JSON lists repository program/data/history references and retained references by root/file; report and check-card add a bounded chapter. A retained hit always needs attention and runtime acceptance evidence; missing roots and incomplete scans remain UNKNOWN. See [deletion impact](references/deletion-impact.en.md).
 
 ### How it differs from maps and summaries
 
@@ -35,6 +37,8 @@ Extract the release ZIP and place the **entire** `trace-code-lines` directory in
 Start a new conversation in the project you want to inspect. Keep `SKILL.md`, `scripts/`, `references/` and `assets/` together.
 
 ### Use
+
+Start with `node scripts/audit.mjs --init <repo> --out <config>`, fill questions and authorized record roots, then `node scripts/audit.mjs --config <config>`. One card binds static findings, retained counts and isolated existing-test results; missing execution evidence stays UNKNOWN. See [audit](references/audit.en.md).
 
 Ask the agent:
 
@@ -107,6 +111,8 @@ Static parsing is bounded. Computed imports, build configuration, complete synta
 <a id="traditional-chinese"></a>
 ## 繁體中文
 
+刪檔或改名前跑 `deletion-impact.mjs --config file`，把已安裝產物與紀錄列為 repo 外只讀留存根。repo 引用分程式／資料／歷史，留存引用依根／檔分組；命中一律要處理，缺根或不完整掃描保留 UNKNOWN，不推論新版能否接受。報告與體檢卡可加新章節。詳見[刪除影響](references/deletion-impact.md)。
+
 報告按「同判定、同原因、同檔案」合併，每類預設顯示 20 組，先列正式路線，再按件數排序。每組附件數、出現處數與前三個錨點；不確定按呼叫端合約、執行證據、觸發條件等缺口分小類。省略組數明列，完整清單只放 JSON，不改「壞了」計數與原判定。
 
 所有 CLI 支援 `--help`。`unusedExclusions` 可宣告 `conventionLoaded` glob、`staticDirectories` 與 `historyDirectories` 目錄；符合的沒人用候選改標「依宣告排除」並另列數量。boundary 追同檔呼叫端參數或 helper 回傳一層；多次指派、多呼叫端與不支援的回傳式仍保留 UNKNOWN。`--out result.json` 另寫 `result.json.md` 分組摘要。詳見[設定](references/maintenance.md)與[邊界](references/boundary.md)。
@@ -137,6 +143,8 @@ Trace Code Lines **不把描述當成功**。查線流程要求每個結論對�
 在要檢查的專案開啟新對話。請將 `SKILL.md`、`scripts/`、`references/` 與 `assets/` 保持在同一份技能目錄內。
 
 ### 使用方式
+
+先 `audit.mjs --init <repo> --out <config>`，補 questions 與授權紀錄根，再 `audit.mjs --config <config>`。一張卡收齊靜態、紀錄與隔離既有測試；缺執行證據留 UNKNOWN。見[audit](references/audit.md)。
 
 可以對 agent 說：
 

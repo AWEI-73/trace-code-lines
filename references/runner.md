@@ -24,6 +24,9 @@ calibration、每根 gaps 與 readOnly；UNCALIBRATED/PARTIAL 不能當校準 PA
 
 ## Config（JSON）
 
+`classification` 可省略；省略時全部歸入 `unclassified`，輸出的 `classification.usedDefault` 為 true，並保留實際規則。若明確提供分類設定，仍須包含 rules 與非空 fallback。
+JSON 語法錯誤會附設定檔、行與欄；Windows 路徑請用 `/` 或 JSON 中的 `\\`。
+
 ```json
 {
   "repo": "/absolute/read-only-repo",

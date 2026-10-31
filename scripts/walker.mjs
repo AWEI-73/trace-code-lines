@@ -8,6 +8,7 @@ import {isBuiltin} from 'node:module';
 import {languageEdges,jsSupplementalEdges,tokens} from './language-static.mjs';
 import {jsResolver} from './js-resolution.mjs';
 import {jsDataReadEdges,dataReadCodeFile} from './js-data-reads.mjs';
+import {rustEdges} from './rust-static.mjs';
 export const sha256=b=>createHash('sha256').update(b).digest('hex');
 const fail=(code,message)=>{throw Object.assign(new Error(message),{code});};
 export function safeName(name){
@@ -101,9 +102,10 @@ export function walk(coreRoot,roots,rows,options={}){
   const frameworkGraph=options.frameworkGraph??buildFrameworkGraph(rows,read,options);
   const pending=[...roots],gaps=gapList(),files=[],edges=[],external=[],seen=new Set(),dataReadFiles=new Set(),dataReadComputedSamples=[];let total=0,dataReadComputed=0;
   const gap=(code,path,detail)=>gaps.push({code,path,detail});
+  const rustCrates=new Map(roots.filter(p=>/(?:^|\/)(?:main|lib)\.rs$/.test(p)).map(p=>[p,p]));
 // BEGIN PRESERVED LOOP
   while(pending.length){
-    const path=pending.pop();if(seen.has(path))continue;seen.add(path);
+    const path=pending.pop();if(seen.has(path)||options.directOnly&&!roots.includes(path))continue;seen.add(path);
     if(!rows.has(path)){gap('CORE_PIN_CLOSURE_MISSING',path,'Static reader dependency is absent from the pin');continue;}
     let bytes;try{bytes=read(path);}catch{gap('CORE_PIN_FILE_UNREADABLE',path,'Pinned reader is not a readable bounded regular file');continue;}
     total+=bytes.length;if(total>16*1024*1024){gap('CORE_PIN_SIZE',path,'Reader closure exceeds 16 MiB');break;}
@@ -125,6 +127,12 @@ export function walk(coreRoot,roots,rows,options={}){
 if(/\.(?:md|ps1|sh|yml|yaml)$/.test(path)){
       const parsed=textReferences(path,bytes.toString('utf8'),rows,options.pythonSourceRoots??['.','src']);
       gaps.push(...parsed.gaps);edges.push(...parsed.edges);pending.push(...parsed.targets);continue;
+    }
+    if(path.endsWith('.rs')){
+      const parsed=rustEdges(path,bytes.toString('utf8'),{rows,read:p=>read(p).toString('utf8'),crateRoot:rustCrates.get(path),resolutionCache:options.resolutionCache});
+      gaps.push(...parsed.gaps);edges.push(...parsed.edges);external.push(...parsed.external);
+      for(const target of parsed.targets){if(parsed.crateRoot&&!rustCrates.has(target))rustCrates.set(target,parsed.crateRoot);pending.push(target);}
+      continue;
     }
     if(/\.(?:py|cjs|mjs|js|ts|tsx|jsx|mts|cts|gs)$/.test(path)) {
       const key=path+':'+actual;

@@ -1,3 +1,5 @@
+import {noLinks} from './walker.mjs';
+import {deletionImpact,renderDeletionMarkdown,renderDeletionHTML} from './deletion-impact.mjs';
 import {displayGroups,renderGroups,renderGroupsMarkdown,preview} from './display-groups.mjs';
 import {compareStopSites,renderStopComparison} from './stop-sites.mjs';
 import fs from 'node:fs';
@@ -43,7 +45,7 @@ export function buildCard(c,options={}){
  if(scenarios.some(r=>r.status==='FAIL'||r.cleanup?.status==='FAIL'))fields.runnability={...fields.runnability,status:'FAIL'};
  if(cleanupUnknown&&fields.runnability.status!=='FAIL')fields.runnability={...fields.runnability,status:'UNKNOWN',cleanupUnverified:true,description:'\u60c5\u5883\u901a\u904e\uff0c\u7a0b\u5e8f\u6e05\u7406\u7121\u6cd5\u5728\u6b64\u5e73\u53f0\u6838\u5c0d'};
  const walk=x=>{if(!x||typeof x!=='object')return;for(const k of Object.keys(x)){if(/^(?:deploymentId|operation|entryId|pathId|profileId|organizationId|instanceId|selector)$/i.test(k))throw Error('NON_GENERIC_CARD_FIELD '+k);walk(x[k]);}};walk(fields);
- return {schema:'check-card-v1',title:c.title??'Repository check',...fields,declarations:compareDeclarations(c.root,c.declarations),
+ return {...(c.deletionImpact?{deletionImpact:deletionImpact({...c.deletionImpact,repo:c.deletionImpact.repo??c.root,unusedExclusions:c.deletionImpact.unusedExclusions??c.unusedExclusions,display:c.deletionImpact.display??c.display},{base:options.base})}:{}),schema:'check-card-v1',title:c.title??'Repository check',...fields,declarations:compareDeclarations(c.root,c.declarations),
   ...(c.stopSites?{stopSites:compareStopSites({root:c.root,files:c.stopSites.files??[],config:c.stopSites,read:options.read,routes:c.stopSites.routes??[],water:c.maintenanceWater})}:{}),
   evidenceLevel:c.water?.evidenceLevel??'STATIC_ONLY',waterSource:c.water?.source??'none',coveredFiles:c.water?.coveredFiles??[],additionalFlowFiles:c.water?.additionalFlowFiles??0,
   removalTrials:c.removalTrials??[],limits:c.limits??[],boundaries:{instrument:'API hooks, not an operating-system sandbox',python:'Python audit cannot rewrite child argv; child coverage may be incomplete',paidCalls:'Stand-ins only; never live',network:'Denied during execution',credentials:'Removed from child environment',externalActions:'Deployment, publishing, mail and production writes are forbidden'},
@@ -56,6 +58,7 @@ export function renderCardMarkdown(c){
  for(const [key,label] of Object.entries(labels).filter(([key])=>key!=='declarations')){lines.push('## '+label,'','~~~json',JSON.stringify(preview(c[key]),null,2),'~~~','');}
  lines.push(renderGroupsMarkdown(displayGroups(c.declarations),{json:'check-card.json'}));
  if(c.stopSites)lines.push('## \u963b\u64cb\u9ede\u5c0d\u7167','',renderGroupsMarkdown(displayGroups(c.stopSites.sites),{json:'check-card.json'}));
+ lines.push(renderDeletionMarkdown(c.deletionImpact,'check-card.json'));
  return lines.join('\n');
 }
 export function renderCardSection(c){
@@ -63,10 +66,16 @@ export function renderCardSection(c){
  const summaries={entries:'入口與參數格式請展開查看；未確認的入口保持未知。',inputs:c.inputs.summary??c.inputs.description??'輸入格式仍待確認。',outputs:c.outputs.summary??c.outputs.description??'輸出與位置仍待確認。',sideEffects:c.sideEffects.description??'程序、網路及寫入需依本次紀錄判讀。',cost:'本次只准使用替身；未執行的外部服務費用仍未知。',tools:'工具版本與檔案指紋請展開查看。',runnability:(c.runnability.cleanupUnverified?c.runnability.description:state[c.runnability.status])??'仍缺證據',declarations:'已核對 '+c.declarations.length+' 條宣告；其中 '+c.declarations.filter(d=>d.status==='FAIL').length+' 條不一致，'+c.declarations.filter(d=>d.status==='UNKNOWN').length+' 條缺證據。',removalTrials:c.removalTrials.length?'各候選結果列於下方。':'本次沒有執行拆除試驗。',limits:'覆蓋僅表示路徑曾執行，不表示所有功能均正確。',boundaries:'網路預設拒絕、移除金鑰、禁止真實付費與部署。'};
  const candidateRows=c.removalTrials.flatMap(t=>t.candidates??[t]).slice(0,3).map(t=>'<p>'+esc(t.path??t.id??'候選')+'：'+esc(t.status??'UNKNOWN')+'</p>').join('');
  const sections=Object.entries(labels).filter(([k])=>k!=='declarations').map(([k,l])=>'<div><h3>'+l+'</h3><p>'+esc(summaries[k])+'</p>'+(k==='removalTrials'?candidateRows:'')+'<details><summary>查看依據</summary><pre>'+esc(JSON.stringify(preview(c[k]),null,2))+'</pre></details></div>').join('');
- return '<section id="check-card"><style>#check-card{font-family:system-ui;line-height:1.6;margin:16px auto;max-width:900px;padding:16px;box-sizing:border-box;color:var(--fg,#202632);background:var(--card,#fff);border:1px solid #7b8494;border-radius:12px}#check-card a{color:inherit;text-decoration:underline}#check-card pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}#check-card summary{font-weight:700;padding:12px 0}#check-card details{border-top:1px solid #7b8494}#check-card p{overflow-wrap:anywhere}@media(prefers-color-scheme:dark){#check-card{color:#e8edf4;background:#151c28}}</style><h2>體檢卡</h2><details><summary>受查對象</summary><p>'+esc(c.title)+'</p></details><p>證據等級：'+esc(levels[c.evidenceLevel]??c.evidenceLevel)+'。觀測 '+c.coveredFiles.length+' 個檔案；比靜態多 '+c.additionalFlowFiles+' 個實跑檔案。</p><p>記錄器只在程式介面上掛勾，不是作業系統沙盒。部分子程序參數不能改寫，覆蓋可能不完整。</p>'+sections+renderGroups(displayGroups(c.declarations),{json:'check-card.json'})+renderStopComparison(c.stopSites,'card-stop-site-comparison')+'</section>';
+ return '<section id="check-card"><style>#check-card{font-family:system-ui;line-height:1.6;margin:16px auto;max-width:900px;padding:16px;box-sizing:border-box;color:var(--fg,#202632);background:var(--card,#fff);border:1px solid #7b8494;border-radius:12px}#check-card a{color:inherit;text-decoration:underline}#check-card pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}#check-card summary{font-weight:700;padding:12px 0}#check-card details{border-top:1px solid #7b8494}#check-card p{overflow-wrap:anywhere}@media(prefers-color-scheme:dark){#check-card{color:#e8edf4;background:#151c28}}</style><h2>體檢卡</h2><details><summary>受查對象</summary><p>'+esc(c.title)+'</p></details><p>證據等級：'+esc(levels[c.evidenceLevel]??c.evidenceLevel)+'。觀測 '+c.coveredFiles.length+' 個檔案；比靜態多 '+c.additionalFlowFiles+' 個實跑檔案。</p><p>記錄器只在程式介面上掛勾，不是作業系統沙盒。部分子程序參數不能改寫，覆蓋可能不完整。</p>'+sections+renderGroups(displayGroups(c.declarations),{json:'check-card.json'})+renderStopComparison(c.stopSites,'card-stop-site-comparison')+renderDeletionHTML(c.deletionImpact,'check-card.json','card-deletion-impact')+'</section>';
 }
-export function writeCard(c,out,healthFile){
- const card=buildCard(c);fs.mkdirSync(out,{recursive:true});const receipts=[];
+export function writeCard(c,out,healthFile,options={}){
+ if(c.deletionImpact){
+  noLinks(path.resolve(out));for(const name of ['check-card.json','check-card.md','health.html','check-card-receipt.json'])noLinks(path.join(out,name));if(healthFile)noLinks(path.resolve(healthFile));
+  const base=options.base??process.cwd(),sources=[path.resolve(base,c.deletionImpact.repo??c.root),...(c.deletionImpact.retainedRoots??[]).map(r=>path.resolve(base,r.path))];
+  const inside=(a,b)=>{const r=path.relative(a,b);return !r||r!=='..'&&!r.startsWith('..'+path.sep)&&!path.isAbsolute(r);};
+  for(const source of sources)for(const target of [path.resolve(out),...(healthFile?[path.resolve(healthFile)]:[])])if(inside(source,target)||inside(target,source))throw Error('Output overlaps read-only deletion scope');
+ }
+ const card=buildCard(c,options);fs.mkdirSync(out,{recursive:true});const receipts=[];
  receipts.push(writeUTF8(path.join(out,'check-card.json'),JSON.stringify(card,null,2)+'\n'),writeUTF8(path.join(out,'check-card.md'),renderCardMarkdown(card)));
  const section=renderCardSection(card);
  const html=healthFile?fs.readFileSync(healthFile,'utf8').replace('</body>',section+'</body>'):'<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(card.title)+'</title><body>'+section+'</body></html>';
@@ -75,5 +84,5 @@ export function writeCard(c,out,healthFile){
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node check-card.mjs --config file');process.exit(0);}
- try{const a=process.argv.slice(2);if(a.length!==2||a[0]!=='--config')throw Error('Use --help');const c=JSON.parse(fs.readFileSync(a[a.indexOf('--config')+1],'utf8'));console.log(JSON.stringify(writeCard(c,c.outDir,c.healthFile)));}catch(e){console.error(e.stack);process.exitCode=1;}
+ try{const a=process.argv.slice(2);if(a.length!==2||a[0]!=='--config')throw Error('Use --help');const c=JSON.parse(fs.readFileSync(a[a.indexOf('--config')+1],'utf8'));console.log(JSON.stringify(writeCard(c,c.outDir,c.healthFile,{base:path.dirname(path.resolve(a[1]))})));}catch(e){console.error(e.stack);process.exitCode=1;}
 }

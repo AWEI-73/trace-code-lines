@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {hash} from './cassette.mjs';
+import {tokens} from './language-static.mjs';
 export function discoverEntries(root){
  const entries=[],documents=[],files=[],skipped=[];
  function scan(dir){
@@ -18,10 +19,18 @@ export function discoverEntries(root){
     if(/(?:argparse|add_argument|process\.argv|commander|\.command\(|click\.command|__main__)/.test(line))add('command-line',i+1,line.trim());
     if(/(?:app|router)\.(?:get|post|put|patch|delete|route)\s*\(/.test(line))add('web-route',i+1,line.trim());
     if(/^\s*export\s+(?:(?:async\s+)?function|(?:const|class)\s)/.test(line))add('exported-function',i+1,line.trim());
-    if(/(?:registerTool|\.tool\s*\(|@.*\.tool)/.test(line))add('mcp-tool',i+1,line.trim());
+    if(/@.*\.tool/.test(line))add('mcp-tool',i+1,line.trim());
     if(/\.gs$/.test(rel)&&/^\s*function\s+(?:api\w*|doGet|doPost)\s*\(/.test(line))add('gas-api',i+1,line.trim());
     if(/(?:^|\/)SKILL\.md$/i.test(rel)&&/(?:scripts\/|\.py\b|\.mjs\b|\.cjs\b)/.test(line))add('skill-script',i+1,line.trim());
    });
+   if(/\.(?:[cm]?[jt]sx?)$/i.test(rel)){
+    const t=tokens(body,false,{regexLiterals:true}).filter(t=>t.v!=='\n');
+    for(let i=0;i<t.length;i++)if(t[i].kind==='name'&&(t[i].v==='registerTool'||t[i].v==='tool'&&t[i-1]?.v==='.')&&t[i+1]?.v==='('&&t[i+2]?.kind==='string'&&t[i+2].literal&&t[i+3]?.v===','){
+     add('mcp-tool',t[i].line,t[i+2].v);
+     entries.at(-1).name=t[i+2].v;
+     entries.at(-1).registration=t[i].v;
+    }
+   }
    if(e.name==='package.json')try{const p=JSON.parse(body);for(const [name,command] of Object.entries(p.scripts??{}))entries.push({kind:'package-script',signature:name,arguments:command,anchor:{file:rel,line:lines.findIndex(l=>l.includes(JSON.stringify(name)))+1,expect:JSON.stringify(name),sha256},status:'STATIC_CANDIDATE'});}catch{}
   }
  }

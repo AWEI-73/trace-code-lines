@@ -460,14 +460,33 @@ export function languageEdges(path,source,{rows,read,sourceRoots=['.'],followWra
   }
   if(!python) {
     const childProcess=t.some(x=>x.kind==='string'&&/^(?:node:)?child_process$/.test(x.v));
-    if(childProcess)for(let i=0;i<t.length;i++){
-      if(t[i].kind!=='name'||!['spawn','spawnSync','execFile','execFileSync','fork'].includes(t[i].v)||t[i+1]?.v!=='(')continue;
+    const execaNames=new Set(),execaNamespaces=new Set(),ct=compact(t);
+    for(let k=0;k<ct.length;k++){
+      if(ct[k].v==='import'){
+        const end=ct.slice(k+1).findIndex(x=>x.kind==='string'||x.v===';');
+        if(end<0||ct[k+1+end]?.v!=='execa')continue;
+        const clause=ct.slice(k+1,k+1+end);
+        if(clause[0]?.kind==='name'&&clause[0].v!=='type')execaNames.add(clause[0].v);
+        for(let j=0;j<clause.length;j++){
+          if(clause[j].v==='*'&&clause[j+1]?.v==='as')execaNamespaces.add(clause[j+2]?.v);
+          if(clause[j].v==='execa')execaNames.add(clause[j+1]?.v==='as'?clause[j+2]?.v:'execa');
+        }
+      }
+      if(ct[k].v==='require'&&ct[k+1]?.v==='('&&ct[k+2]?.kind==='string'&&ct[k+2].v==='execa'&&ct[k-1]?.v==='='&&ct[k-2]?.kind==='name')execaNames.add(ct[k-2].v);
+    }
+    if(childProcess||execaNames.size||execaNamespaces.size)for(let i=0;i<t.length;i++){
+      const execaCall=execaNames.has(t[i].v)&&t[i-1]?.v!=='.'||t[i].v==='execa'&&t[i-1]?.v==='.'&&execaNamespaces.has(t[i-2]?.v);
+      if(t[i].kind!=='name'||!(childProcess&&['spawn','spawnSync','execFile','execFileSync','fork'].includes(t[i].v)||execaCall)||t[i+1]?.v!=='(')continue;
       const a=callArgs(t,i+1),fork=t[i].v==='fork',program=literal(a.args[0]);
       if(!fork&&program!==null){
         const argv=a.args[1]?.[0]?.v==='['&&a.args[1].at(-1)?.v===']'?callArgs([{v:'('},...a.args[1].slice(1,-1),{v:')'}],0).args.map(literal):[];
         const configured=projectCommandGap([program,...argv],path,t[i].line,{rows,read,sourceRoots});if(configured)gaps.push(configured);
       }
-      if(!fork&&program!==null&&!/(?:^|[/\\])(?:python(?:\d+(?:\.\d+)*)?|py|node)(?:\.exe)?$/i.test(program))continue;
+      if(!fork&&program!==null&&!/(?:^|[/\\])(?:python(?:\d+(?:\.\d+)*)?|py|node)(?:\.exe)?$/i.test(program)){
+        const metadata={external:true,program,classification:'EXTERNAL_COMMAND',operation:t[i].v,basis:'LITERAL_EXECUTABLE',runtimeVerified:false};
+        external.push({kind:'EXTERNAL_COMMAND',path,line:t[i].line,specifier:program,...metadata});
+        add('EXTERNAL_COMMAND',t[i].line,program,[],metadata);continue;
+      }
       let args=[];
       if(fork)args=[a.args[0]??[]];
       else if(a.args[1]?.[0]?.v==='['&&a.args[1].at(-1)?.v===']')args=callArgs([{v:'('},...a.args[1].slice(1,-1),{v:')'}],0).args;

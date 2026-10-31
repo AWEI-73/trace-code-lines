@@ -20,6 +20,48 @@ export function toolVersion(){
 export function classify(path,rules,fallback) {
   return rules.find(rule=>new RegExp(rule.pattern,rule.flags??'').test(path))?.name??fallback;
 }
+// JSON.parse sometimes omits positions. Locate syntax without evaluating input,
+// using an iterative grammar so deeply nested malformed configs do not recurse.
+function configErrorOffset(source){
+  let i=0;const states=['value'],fail=()=>{throw i;};
+  const space=()=>{while(i<source.length&&/[ \t\r\n]/.test(source[i]))i++;};
+  const string=()=>{
+    if(source[i++]!=='"'){i--;fail();}
+    while(i<source.length){const c=source[i++];if(c==='"')return;
+      if(c.charCodeAt(0)<32){i--;fail();}
+      if(c==='\\'){if(i>=source.length)fail();const escape=source[i++];
+        if(escape==='u'){for(let n=0;n<4;n++){if(!/[0-9a-fA-F]/.test(source[i]??'')||i>=source.length)fail();i++;}}
+        else if(!'"\\/bfnrt'.includes(escape)){i--;fail();}
+      }
+    }fail();
+  };
+  try{
+    while(states.length){space();const state=states.pop(),c=source[i];
+      if(state==='value'){
+        if(c==='{'){i++;states.push('objectFirst');}
+        else if(c==='['){i++;states.push('arrayFirst');}
+        else if(c==='"')string();
+        else {const literal=['true','false','null'].find(v=>source.startsWith(v,i));
+          if(literal)i+=literal.length;
+          else {const number=source.slice(i).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);if(!number)fail();i+=number[0].length;}
+        }
+      }else if(state==='objectFirst'&&c==='}'||state==='objectAfter'&&c==='}'||state==='arrayFirst'&&c===']'||state==='arrayAfter'&&c===']')i++;
+      else if(state==='objectFirst'||state==='objectPair'){string();space();if(source[i]!==':')fail();i++;states.push('objectAfter','value');}
+      else if(state==='arrayFirst'||state==='arrayValue')states.push('arrayAfter','value');
+      else if(state==='objectAfter'||state==='arrayAfter'){if(c!==',')fail();i++;states.push(state==='objectAfter'?'objectPair':'arrayValue');}
+    }
+    space();if(i!==source.length)fail();return source.length;
+  }catch(offset){if(typeof offset!=='number')throw offset;return offset;}
+}
+export function parseConfigJSON(source,file='config') {
+  try{return JSON.parse(source);}catch(error){
+    const location=error.message.match(/line (\d+) column (\d+)/),position=error.message.match(/position (\d+)/);
+    const offset=position?Number(position[1]):configErrorOffset(source);
+    const prefix=source.slice(0,offset),line=location?Number(location[1]):prefix.split('\n').length;
+    const column=location?Number(location[2]):offset-prefix.lastIndexOf('\n');
+    throw Error(`${file}: JSON parse failed at line ${line}, column ${column}: ${error.message}. Windows paths must use / or escaped backslashes (\\\\).`);
+  }
+}
 export function compareSets(actual,expected,gaps=[]) {
   const a=new Set(actual),e=new Set(expected);
   const missing=[...e].filter(p=>!a.has(p)).sort();
@@ -92,7 +134,9 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
   if(!Array.isArray(pythonSourceRoots)||!pythonSourceRoots.length)throw Error('pythonSourceRoots must be nonempty');
   for(const p of pythonSourceRoots)if(p!=='.')safeName(p);
   const walkOptions={frameworkGraph,pythonSourceRoots,parserCache:new Map(),resolutionCache:new Map(),read:readCached,progress};
-  const rules=config.classification?.rules,fallback=config.classification?.fallback;
+  const defaultClassification=config.classification===undefined;
+  const classification=defaultClassification?{rules:[],fallback:'unclassified'}:config.classification;
+  const rules=classification?.rules,fallback=classification?.fallback;
   if(!Array.isArray(rules)||typeof fallback!=='string'||!fallback)throw Error('classification rules/fallback required');
   for(const rule of rules) {
     if(typeof rule.name!=='string'||typeof rule.pattern!=='string'||/[gy]/.test(rule.flags??''))throw Error('Invalid classification rule');
@@ -102,13 +146,15 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
     schema:'trace-code-lines-v1',tool:'trace-code-lines',toolVersion:toolVersion(),repo,head,temp,scratch,tmp:process.env.TMP,
     command:{bin:process.execPath,args:process.argv.slice(1)},
     configurationSha256:sha256(JSON.stringify(config)),
-    scope:{population:'git tracked files',parser:'Lexical ESM/JSON, CJS and Python',pythonSourceRoots,
+    classification:{...classification,usedDefault:defaultClassification,basis:defaultClassification?'DEFAULT_SINGLE_POPULATION':'CALLER_SUPPLIED'},
+    scope:{population:'git tracked files',parser:'Lexical ESM/JSON, CJS, Python and Rust',pythonSourceRoots,
       completeRuntimeClosure:false,referenceFunnelPerformed:false},
     calibration:null,confidence:null,status:null,inventoryGaps,
     limitations:[
       'Static file closure, not a function call graph or runtime execution proof.',
       'CJS relative file/package-main/index, Python source roots, TS extension substitution and tsconfig/jsconfig baseUrl/paths with repo-local relative extends are supported. Package extends, arbitrary aliases, bundler settings, namespace packages and runtime sys.path changes are not resolved.',
       'Regex matching can include comments/generated strings and can miss other syntax.',
+      'Rust module/use scanning is lexical. cfg conditions are not evaluated, unsupported syntax remains a gap, and subprocess binaries are not bound to Rust source. Explicit Rust roots do not prove a TS-to-Rust runtime connection.',
       'Zero coverage candidates require the documented four-scope and template-family funnel.',
       'Unsupported-language entries are retained as roots; regex literals and unusual syntax may be misread; computed dependencies remain gaps except ordinary JS computed data reads, which are counted.',
       'Unreadable, linked or oversized inventory files are disclosed, never treated as absent.',
@@ -153,10 +199,22 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
       const r=walk(repo,[root.path],rows,walkOptions);
       return {...root,root:root.path,files:r.files.map(f=>f.path),gaps:r.gaps,edges:r.edges,externalDependencies:r.external,
         ...closureKinds(root.path,r),
-        parserScope:/\.(?:ts|tsx|jsx|mts|cts)$/.test(root.path)?(r.edges.some(e=>e.path===root.path&&e.targets?.length)?'STATIC_LEXICAL':'TS_RESOLUTION_UNSUPPORTED'):/\.(?:mjs|js|cjs|py)$/.test(root.path)?'STATIC_LEXICAL':r.edges.some(e=>e.path===root.path&&e.kind==='TEXT_REFERENCE')?'TEXT_REFERENCE':'UNSUPPORTED_LANGUAGE_ROOT_ONLY'};
+        parserScope:/\.(?:ts|tsx|jsx|mts|cts)$/.test(root.path)?(r.edges.some(e=>e.path===root.path&&e.targets?.length)?'STATIC_LEXICAL':'TS_RESOLUTION_UNSUPPORTED'):/\.(?:mjs|js|cjs|py|rs)$/.test(root.path)?'STATIC_LEXICAL':r.edges.some(e=>e.path===root.path&&e.kind==='TEXT_REFERENCE')?'TEXT_REFERENCE':'UNSUPPORTED_LANGUAGE_ROOT_ONLY'};
     });
     const covered=new Set(closures.flatMap(c=>c.files));
     result.roots=roots;result.closures=closures;
+    // Optional reverse-import inventory: same snapshot, parsers and resolvers as closures.
+    // A target's forward closure cannot reveal callers outside the selected roots.
+    if(config.importTargets?.length){
+      const targets=[...new Set(config.importTargets.map(safeName))],wanted=new Set(targets),edges=[],gaps=[],scannedFiles=[];
+      for(const file of tracked.filter(p=>/\.(?:cjs|mjs|js|ts|tsx|jsx|mts|cts|gs|py)$/.test(p))){
+        const r=walk(repo,[file],rows,{...walkOptions,directOnly:true});
+        if(r.files.some(f=>f.path===file))scannedFiles.push(file);
+        gaps.push(...r.gaps);
+        edges.push(...r.edges.filter(e=>['STATIC_IMPORT','DYNAMIC_IMPORT'].includes(e.kind)&&!e.resolutionOnly&&e.targets?.some(t=>wanted.has(t))));
+      }
+      result.incomingImports={targets,scannedFiles,edges,gaps,scope:'Direct lexical imports across readable Git-tracked program files; no execution or complete runtime guarantee.'};
+    }
     result.dataReadComputedSamples=closures.flatMap(c=>c.dataReadComputedSamples.map(sample=>({root:c.root,...sample}))).slice(0,20);
     result.endpointTable={schema:'static-endpoints-v1',layer:'static',confidence:result.confidence,completeInventory:false,endpoints:[]};
     progress('map: writer candidates');
@@ -205,7 +263,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
       else if(args[i]==='--inferred-edges'&&args[i+1]&&inferredEdges===undefined)inferredEdges=resolve(args[++i]);
       else throw Error('Unknown, duplicate or incomplete argument: '+args[i]);
     }
-    const config=JSON.parse(fs.readFileSync(args[1],'utf8'));
+    const config=parseConfigJSON(fs.readFileSync(args[1],'utf8'),args[1]);
     if(calibration)config.calibration={...(config.calibration??{}),roots:config.calibration?.roots??config.roots,baseline:{path:calibration}};
     if(out){
       noLinks(out);
