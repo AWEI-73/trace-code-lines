@@ -105,6 +105,34 @@ function closureKinds(root,r){
   return {runtimeFiles,typeOnlyFiles,dataReadFiles:r.dataReadFiles??[],dataReadComputed:r.dataReadComputed??0,dataReadComputedSamples:r.dataReadComputedSamples??[],closureCounts:{all:all.size,runtime:runtimeFiles.length,typeOnly:typeOnlyFiles.length,dataRead:(r.dataReadFiles??[]).length},edgeCounts:{runtime:r.edges.filter(e=>!e.typeOnly).length,typeOnly:r.edges.filter(e=>e.typeOnly).length}};
 }
 
+// Declared edges (config.declaredEdges) cover hops a lexical walk cannot prove, e.g. spawn(process.execPath,args)
+// where args come from runtime data. Each edge is anchored ({from:{file,line,expect?,sha256?},to:[files],kind?,basis}).
+// Only edges whose anchor still matches join the closure; they stay labelled DECLARED and never count as static proof.
+export function declaredEdges(list,rows,read){
+  if(list===undefined)return {edges:[],gaps:[]};
+  if(!Array.isArray(list))throw Error('declaredEdges must be an array');
+  const edges=[],gaps=[];
+  for(const [i,e] of list.entries()){
+    const id=e.id??'declared-'+(i+1),from=e.from??{},to=Array.isArray(e.to)?e.to:[e.to];
+    const fail=reason=>gaps.push({id,code:'DECLARED_EDGE_ANCHOR_STALE',path:from.file??null,line:from.line??null,reason});
+    if(typeof from.file!=='string'||!rows.has(from.file)){fail('from.file is not a tracked file');continue;}
+    const text=read(from.file).toString('utf8');
+    if(from.sha256&&sha256(Buffer.from(text))!==from.sha256){fail('from.sha256 changed');continue;}
+    if(from.line!==undefined&&from.expect!==undefined&&!(text.split(/\r?\n/)[from.line-1]??'').includes(from.expect)){fail('from.line no longer contains expect');continue;}
+    const missing=to.filter(t=>!rows.has(t));if(missing.length){fail('target not tracked: '+missing.join(', '));continue;}
+    edges.push({id,kind:'DECLARED_'+(e.kind??'EDGE').toUpperCase(),path:from.file,line:from.line??null,targets:to,basis:e.basis??'declared',runtimeVerified:false});
+  }
+  return {edges,gaps};
+}
+export function expandDeclared(r,declared,walkTargets){
+  if(!declared.edges.length)return r;
+  const files=new Map(r.files.map(f=>[f.path,f])),used=[],added=new Set();
+  for(let changed=true;changed;){changed=false;
+    for(const e of declared.edges){if(used.includes(e)||!files.has(e.path))continue;used.push(e);changed=true;
+      const w=walkTargets(e.targets);for(const f of w.files)if(!files.has(f.path)){files.set(f.path,f);added.add(f.path);}
+      r.edges.push(e,...w.edges.filter(x=>!r.edges.includes(x)));r.gaps.push(...w.gaps);r.external.push(...w.external);}}
+  return {...r,files:[...files.values()].sort((a,b)=>a.path.localeCompare(b.path)),declaredExpansion:used.length?{edges:used.map(e=>e.id),files:[...added].sort()}:undefined};
+}
 export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdges=config.inferredEdges}={}) {
   progress('map: inventory');
   if(typeof config.repo!=='string'||!isAbsolute(config.repo))throw Error('repo must be absolute');
@@ -195,10 +223,11 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
   } else if(calibrateOnly) {
     result.status=result.calibration.status==='PASS'?'PASS':'UNKNOWN';
   } else {
+    const declared=declaredEdges(config.declaredEdges,rows,readCached);result.declaredEdges=declared;
     const closures=roots.map(root=>{
-      const r=walk(repo,[root.path],rows,walkOptions);
+      const r=expandDeclared(walk(repo,[root.path],rows,walkOptions),declared,targets=>walk(repo,targets,rows,walkOptions));
       return {...root,root:root.path,files:r.files.map(f=>f.path),gaps:r.gaps,edges:r.edges,externalDependencies:r.external,
-        ...closureKinds(root.path,r),
+        ...closureKinds(root.path,r),...(r.declaredExpansion?{declaredExpansion:r.declaredExpansion}:{}),
         parserScope:/\.(?:ts|tsx|jsx|mts|cts)$/.test(root.path)?(r.edges.some(e=>e.path===root.path&&e.targets?.length)?'STATIC_LEXICAL':'TS_RESOLUTION_UNSUPPORTED'):/\.(?:mjs|js|cjs|py|rs)$/.test(root.path)?'STATIC_LEXICAL':r.edges.some(e=>e.path===root.path&&e.kind==='TEXT_REFERENCE')?'TEXT_REFERENCE':'UNSUPPORTED_LANGUAGE_ROOT_ONLY'};
     });
     const covered=new Set(closures.flatMap(c=>c.files));

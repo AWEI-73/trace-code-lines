@@ -1,5 +1,11 @@
 # 版本記錄
 
+## 1.27.0 (2026-11-01)
+
+- derive-map 新增 declaredEdges：有錨點（檔案、行、expect、可選 SHA-256）的宣告邊，例如執行時才決定參數的 spawn／fork／execFile，可把目標及其靜態閉包併入該根，標為 DECLARED_* 且 runtimeVerified:false；錨點過期留 gap 不擴張，未設定時不變。
+- discover-entries 新增可插拔 mcpToolTables（--mcp-tables）：以具名群組 name 的列樣式、檔案樣式與 requireText 找出資料表宣告的 MCP 工具，保留名稱、說明、檔案與行號；預設不啟用，1.24.0 的字面註冊探索不變。
+- 附 examples/mcp-table-rows.json。擴充既有 self-test（G250）；不新增測試檔。
+
 ## 1.26.0 (2026-11-01)
 
 - water-source 每次執行保存 stdout、stderr 與結束碼證據（路徑、SHA-256、位元組、尾段），放在 observation.output。

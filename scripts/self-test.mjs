@@ -48,7 +48,7 @@ import {gapReconcile,gapSummary} from './gap-reconcile.mjs';
 import {attachInferenceLayer,inferenceIdentity,gapIdentity,legacyGapIdentity} from './inference-layer.mjs';
 import {normalizeGap,gapList} from './gap-shape.mjs';
 import {toolVersion} from './derive-map.mjs';
-import {discoverEntries} from './discover-entries.mjs';
+import {discoverEntries,tableTools} from './discover-entries.mjs';
 
 if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node self-test.mjs (equal external TEMP/TMP required)');process.exit(0);}
 process.on('uncaughtException',e=>{console.error(process.env.TRACE_TEST_STACK?e.stack:e.message);process.exitCode=1;});
@@ -542,7 +542,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root)];
+  const addedChecks=[...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2020,5 +2020,35 @@ pub fn lifetime<'a>(x: &'a str) -> &'static str { "ok" }
  const exact=structuredClone(route);exact.routes[0].hops[0].anchor={file:'main.mjs',line:1,expect:'import'};
  assert.equal(check(source,undefined,exact).routes[0].hops[0].manual,false);
  checks.push('G240 route rejects mismatched anchors and adjacent-line borrowing while preserving exact map sites');
+ return checks;
+}
+
+async function g250Checks(root){
+ const checks=[],repo=join(root,'g250');fs.mkdirSync(repo,{recursive:true});
+ const put=(p,b)=>fs.writeFileSync(join(repo,p),b);
+ put('server.mjs',"// handles tools/list and tools/call\nconst defs = [\n  ['alpha', 'First tool.', 'x y'],\n  ['beta-two', 'Second tool.', ''],\n];\nconst note = ['not', 'a tool'];\nexport default defs;\n");
+ put('plain.mjs',"const rows = [\n  ['gamma', 'Looks like a row.'],\n];\n");
+ put('launcher.mjs',"import {spawn} from 'node:child_process';\nconst args = JSON.parse(process.env.ARGS ?? '[]');\nspawn(process.execPath, args);\n");
+ put('worker.mjs',"import './helper.mjs';\n");put('helper.mjs',"export const x = 1;\n");
+ const tables=[{id:'rows',requireText:'tools/list',rowPattern:"^\\s*\\[\\s*'(?<name>[a-z][\\w-]*)'\\s*,\\s*'(?<description>[^']*)'",flags:'m'}];
+ assert.equal(discoverEntries(repo).entries.filter(e=>e.registration==='table').length,0);
+ const m=discoverEntries(repo,{mcpToolTables:tables}).entries.filter(e=>e.kind==='mcp-tool');
+ assert.deepEqual(m.map(e=>[e.name,e.anchor.file,e.anchor.line,e.registration,e.table]),[['alpha','server.mjs',3,'table','rows'],['beta-two','server.mjs',4,'table','rows']]);assert.equal(m[0].description,'First tool.');
+ assert.equal(tableTools('plain.mjs',fs.readFileSync(join(repo,'plain.mjs'),'utf8'),tables).length,0);
+ assert.equal(tableTools('server.mjs',fs.readFileSync(join(repo,'server.mjs'),'utf8'),[{...tables[0],files:'^lib/'}]).length,0);
+ assert.throws(()=>tableTools('a.mjs','x',[{}]),/rowPattern/);
+ checks.push('G250 MCP tools declared in data tables use configurable patterns; default discovery is unchanged');
+ const git=args=>{const r=spawnSync('git',['-C',repo,...args],{encoding:'utf8',windowsHide:true,env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+ git(['init']);git(['add','.']);git(['-c','user.name=Fixture','-c','user.email=fixture.invalid','-c','core.hooksPath='+root,'-c','commit.gpgsign=false','commit','-m','G250 fixture']);
+ const scratch=join(root,'g250-scratch');fs.mkdirSync(scratch);
+ const base={repo,temp,scratch,roots:['launcher.mjs'],classification:{rules:[],fallback:'source'}};
+ const plain=analyze(base);assert(!plain.closures[0].files.includes('worker.mjs'));assert.equal(plain.closures[0].declaredExpansion,undefined);assert.deepEqual(plain.declaredEdges,{edges:[],gaps:[]});
+ const edge={id:'spawn-worker',kind:'subprocess',from:{file:'launcher.mjs',line:3,expect:'spawn(process.execPath'},to:['worker.mjs'],basis:'args come from ARGS at run time'};
+ const d=analyze({...base,declaredEdges:[edge]}),c=d.closures[0];
+ assert(c.files.includes('worker.mjs')&&c.files.includes('helper.mjs'));assert.deepEqual(c.declaredExpansion,{edges:['spawn-worker'],files:['helper.mjs','worker.mjs']});
+ assert(c.edges.some(e=>e.kind==='DECLARED_SUBPROCESS'&&e.runtimeVerified===false&&e.line===3));assert(!d.zeroCoverageCandidates.some(z=>z.path==='worker.mjs'));
+ const stale=analyze({...base,declaredEdges:[{...edge,from:{...edge.from,expect:'fork('}},{...edge,id:'missing',to:['absent.mjs']}]});
+ assert(!stale.closures[0].files.includes('worker.mjs'));assert.deepEqual(stale.declaredEdges.gaps.map(g=>[g.id,g.code]),[['spawn-worker','DECLARED_EDGE_ANCHOR_STALE'],['missing','DECLARED_EDGE_ANCHOR_STALE']]);
+ checks.push('G250 anchored declared subprocess edges expand the closure with labels; stale anchors stay gaps');
  return checks;
 }
