@@ -43,3 +43,51 @@ water-source.json 的 `attempts` 只放摘要列：`attempt`、`status`、`reaso
 命令參數中的 `@HOME` 換成隔離家目錄（`<temp>/home`），與 expected 檔案路徑相同。
 
 `pruneRaw: true`（只刪覆蓋可用舊名 `pruneRawCoverage: true`）在覆蓋對應完成後刪除原始覆蓋檔，`observation.coverage.pruned` 記錄刪除檔數與位元組，`evidence[]` 仍保留每個原始檔的 SHA-256 與 `pruned: true`。`pruneRaw` 另在 attempt 判定後刪除該次執行的 events 目錄、instrument-collect.json、observation.result.json 與 observation.packed，`prunedRaw[]` 記錄路徑、檔數、位元組與內容 SHA-256；判定用的 events 仍在 attempt-N.json。預設不刪，需重新對應或重讀原始追蹤時不要開。
+
+## 輸出證據與輸出判定
+
+每次執行在 `observation.output` 記錄 `exitCode` 與 `stdout`／`stderr` 的 `{path,sha256,bytes,tail}`（tail 為最後 4000 位元組）。
+
+expected 另可寫：
+
+- `{kind:'output',stream?:'stdout'|'stderr',contains?|pattern?,flags?,absent?}`：文字包含或正則；`absent:true` 表示不可出現。
+- `{kind:'json',source?:'stdout'|'stderr'|檔案,pointer,value?|exists?}`：整段或最後一行可解析的 JSON，以 RFC 6901 pointer 取值後比對；檔案可用 `@CLONE`、`@HOME`。
+- `{kind:'exit',code}`：要求指定結束碼；有這項時不再另要求 0。
+
+這三種都不算見證，仍需至少一個 coverage、write、boundary 或 anchor。
+
+## 執行時解析的外部程式允許清單
+
+`executables` 每項可為：
+
+- 路徑字串：與原本相同。
+- `{path,sha256}`：固定路徑並核對雜湊。
+- `{configFile,pointer,sha256?,sha256Pointer?}`：每次執行前讀 JSON 設定檔，以 pointer 取程式路徑（相對路徑以設定檔目錄為基準），雜湊可直接給或由 `sha256Pointer` 取（可帶 `sha256:` 前綴）。
+
+解析與核對發生在啟動前；結果寫入該 attempt 的 `executables[]`。設定檔讀不到、pointer 不存在、程式不存在或雜湊不符，該次 FAIL（`EXECUTABLE_*`），不啟動、不放寬。
+
+## 安裝副本與多 repo 覆蓋
+
+程式常先安裝到別處（例如 `@HOME/...`）再從副本執行，覆蓋落在 clone 外而不計入。設定：
+
+- `pathMaps: [{id?, installedRoot | pattern, flags?, to?, repo?, verify?}]`：`installedRoot` 可用 `@HOME`、`@CLONE`、`@TEMP`；安裝位置每次不同（例如隨機暫存目錄）時改用 `pattern`，對以 `/` 分隔的絕對路徑比對，具名群組 `rel` 為相對路徑；覆蓋到的副本檔對回 `to/<相對路徑>`。預設 `verify:'sha256'`，副本與 repo 檔位元組相同才計入，列在 `coverage.mapped[]`（`verified:true`、`sha256`）；副本在對應前已刪除（例如隨暫存目錄清掉）時，改用該次執行寫入紀錄的 after SHA-256（`verifiedBy:'write-snapshot'`）。不同、repo 無此檔或副本與寫入紀錄都沒有，列 `coverage.mapMismatches[]`（`HASH_MISMATCH`／`REPO_FILE_MISSING`／`INSTALLED_FILE_GONE`），不計覆蓋。`verify:'none'` 只在無法比對時用，列為 `verified:false`。
+- `repos: [{name, root}]`：其他 repo 的覆蓋列在 `coverage.repos[name]`，不混入主 repo；expected 寫 `{kind:'coverage',repo:name,file}`。`pathMaps` 加 `repo` 可對回其他 repo。
+
+未設定時覆蓋結果與原本相同。靜態跨 repo 依賴方向仍用 boundary.mjs；本節只處理執行覆蓋。完整範例：examples/water-installed-copy.json。
+
+## 只靠雜湊的白名單與情境 manifest（1.29.0）
+
+harness 常被情境複製到每次不同的暫存目錄，路徑無法事先寫進 `executables`。可改寫：
+
+- `{sha256, root?}`：任何被啟動的檔案，只要位元組 SHA-256 相符（且路徑符合 `root` glob，例如 `@TEMP/**`）就允許。
+- `{manifest, pointer?, sha256 | sha256Pointer, root?}`：spawn 當下讀情境寫出的 JSON manifest，`pointer` 指到的路徑須等於被啟動的檔案；雜湊由設定給（`sha256`）或由 manifest 給（`sha256Pointer`，屬情境自報，結果列標 `scenario-manifest`）。
+
+兩者都延到 spawn 時由 recorder 讀實際位元組核對，attempt 的 `executables[]` 記 `DEFERRED_TO_SPAWN`，process 事件記 `hashAllowlist`（`allowedBy: sha256 | manifest`、實際 SHA-256、root）。不符就照常 DENY，不放寬路徑白名單。範例：examples/water-hash-allowlist.json。
+
+## 單行執行與啟動快照
+
+`{kind:'line', file, line, repo?, expect?}` 以 V8 區塊覆蓋判斷該行是否執行（最內層範圍 count>0；Python 用逐行計數）。這是區塊粒度：同一區塊內的行一起算。recorder 啟動 node/python 子程序時記下腳本 SHA-256，副本事後被刪也可用 `verifiedBy: launch-snapshot` 核對 pathMaps；`to` 可寫 `$<群組名>` 引用 pattern 的具名群組。
+
+## 工具開發模式（--tool-dev）
+
+`node water-source.mjs --config c.json --enable --tool-dev`：只在修改本工具時使用。解除三次上限，但寫入 `dev-attempt-N.json`、`dev-run-N/` 與 `water-source.tool-dev.json`，報告 `status: NOT_COUNTED`、`countsTowardVerdict: false`、`label` 說明不計入；正式 attempt 檔不讀不寫，上限仍是三次。體檢卡收到這種報告只列 `toolDev` 警示，不改 runnability 與證據等級；maintenance 直接拒收（`TOOL_DEV_RESULTS_NOT_COUNTED`）。

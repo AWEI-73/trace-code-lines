@@ -1,5 +1,32 @@
 # 版本記錄
 
+## 1.29.0 (2026-11-01)
+
+- water-source 執行檔白名單新增只靠雜湊的項目：`{sha256, root?}`（root 可用 glob 與 @TEMP/@HOME/@CLONE），隨機暫存目錄裡的 harness 只要位元組 SHA-256 相符就允許；`{manifest, pointer?, sha256 | sha256Pointer, root?}` 在 spawn 當下讀情境產生的 manifest 取路徑。兩者都在 spawn 時由 recorder 核對實際位元組，事件記 `hashAllowlist.allowedBy`。
+- derive-map 支援 `repos`：其他 repo 以 `@名稱/路徑` 併入清單，跟著跨出 repo 的相對路徑、宣告的套件名稱與 declaredEdges（可寫 `{repo,file}` 或 `{repo,configFile,pointer,line?,expect?}`）走進去；跨 repo 邊標 `crossRepo`，用 boundary.mjs 的 zone/方向規則（`crossRepoRules`）分類，`crossRepo.diagrams` 輸出分 repo 的 Mermaid 圖，跨 repo 邊為虛線。規則解析移到 boundary-rules.mjs 共用。
+- `--tool-dev`（`waterSource(c,{toolDev:true})`）：改工具時解除三次上限；寫 dev-attempt-N.json 與 water-source.tool-dev.json，報告 status 為 NOT_COUNTED、每列 countsTowardVerdict:false，體檢卡顯示警示且不影響 runnability／證據等級，maintenance 拒收。正式 attempt 不受影響、仍是三次。
+- expected 新增 `{kind:'line', file, line, repo?, expect?}`：以 V8 區塊覆蓋（最內層範圍 count>0）判斷該行是否執行。recorder 在啟動 node/python 子程序時記下腳本 SHA-256（launch-snapshot），安裝副本被刪後仍可核對；pathMaps 的 `to` 可用 `$<群組名>` 引用 pattern 的具名群組。
+- 擴充既有 self-test（G290–G292、G290 multi-repo）；不新增測試檔。
+
+## 1.28.0 (2026-11-01)
+
+- water-source 新增 pathMaps：把安裝副本上的覆蓋對回 repo 檔，預設需 SHA-256 相同才計入，不同列 mapMismatches；installedRoot 支援 @HOME、@CLONE、@TEMP；隨機安裝位置可用 pattern（具名群組 rel）；副本已刪除時以同次寫入紀錄的 SHA-256 核對。
+- 新增 repos 清單：其他 repo 的覆蓋分列於 coverage.repos[name]，expected coverage 可加 repo；靜態跨 repo 仍用 boundary.mjs。未設定時不變。
+- 附 examples/water-installed-copy.json。擴充既有 self-test（G260）；不新增測試檔。
+
+## 1.27.0 (2026-11-01)
+
+- derive-map 新增 declaredEdges：有錨點（檔案、行、expect、可選 SHA-256）的宣告邊，例如執行時才決定參數的 spawn／fork／execFile，可把目標及其靜態閉包併入該根，標為 DECLARED_* 且 runtimeVerified:false；錨點過期留 gap 不擴張，未設定時不變。
+- discover-entries 新增可插拔 mcpToolTables（--mcp-tables）：以具名群組 name 的列樣式、檔案樣式與 requireText 找出資料表宣告的 MCP 工具，保留名稱、說明、檔案與行號；預設不啟用，1.24.0 的字面註冊探索不變。
+- 附 examples/mcp-table-rows.json。擴充既有 self-test（G250）；不新增測試檔。
+
+## 1.26.0 (2026-11-01)
+
+- water-source 每次執行保存 stdout、stderr 與結束碼證據（路徑、SHA-256、位元組、尾段），放在 observation.output。
+- expected 新增 output（文字包含／正則／absent）、json（stdout、stderr 或檔案的 JSON pointer 值或存在）、exit（指定結束碼）；未列 exit 時仍要求 0，原有判定不變。
+- executables 除路徑字串外，可寫 {path,sha256} 或 {configFile,pointer,sha256Pointer}：啟動前從設定檔解析並核對 SHA-256，不符或解析不到即該次 FAIL，不擴大允許清單。
+- 擴充既有 self-test（G222）；不新增測試檔。
+
 ## 1.25.0 (2026-11-01)
 
 - water-source 報告的 attempts 改為摘要列（次數、狀態、原因、檔案、SHA-256），完整觀察只存 attempt-N.json；修正大型情境 JSON.stringify RangeError 使報告為空。

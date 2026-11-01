@@ -1,0 +1,10 @@
+{
+  "mcpToolTables": [
+    {
+      "id": "array-rows",
+      "requireText": "tools/list",
+      "rowPattern": "^\\s*\\[\\s*'(?<name>[a-z][\\w-]*)'\\s*,\\s*'(?<description>[^']*)'",
+      "flags": "m"
+    }
+  ]
+}

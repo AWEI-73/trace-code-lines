@@ -1,6 +1,6 @@
 ---
 name: trace-code-lines
-version: 1.25.0
+version: 1.29.0
 description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，交付可追到證據的體檢卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
 
@@ -15,7 +15,7 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 刪除題先納題目根，合併同輪 import 邊並列數字摘要；只截其餘根，缺邊明列 UNKNOWN。
 
 1. **確認正在讀哪份**：讀 README、SKILL.md 與版本指標；多層設定用 `version-chain.mjs`。hash 不冒充 Git commit。
-2. **找入口並讀碼**：`discover-entries.mjs <repo>` 列出命令列、網頁路由、匯出函式、技能腳本、MCP 工具、GAS API 候選。agent 逐一讀 README 與原碼，補漏、確認參數與輸出，保留搜尋範圍；清冊不是完整性保證。
+2. **找入口並讀碼**：`discover-entries.mjs <repo>` 列出命令列、網頁路由、匯出函式、技能腳本、MCP 工具、GAS API 候選。agent 逐一讀 README 與原碼，補漏、確認參數與輸出，保留搜尋範圍；以資料表宣告的 MCP 工具可用 `--mcp-tables <patterns.json>` 提供列樣式（範例 examples/mcp-table-rows.json）；未提供時不變。清冊不是完整性保證。
 3. **靜態查線**：`derive-map.mjs --config <file>` 產出閉包與終點候選。設定與原碼必須綁到同一快照；不從檔名猜功能。需要時讀 [runner](references/runner.md)、[evidence](references/evidence.md)。
 4. **宣告與實作對照**：agent 從 README、SKILL.md 與註解抽出宣告，每項附文件與原碼兩邊錨點。分類為「說了沒做」「做了沒說」「流程對不上」；找不到證據寫 UNKNOWN。負面結論需可重跑的搜尋範圍。格式見 [體檢卡](references/check-card.md)。
 阻擋點亦屬宣告對照：提供政策清單與 reason／關鍵字表，分底線、要處理、不確定；無宣告只列清單，防呆與混合條件不硬判。設定、錨點與限制見[阻擋點](references/stop-sites.md)。
@@ -30,7 +30,7 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 
 只有需要執行證據且已獲授權時，才讀 [水源與情境](references/water-sources.md) 及 [儀器](references/instrumentation.md)。
 水源可換成既有紀錄／卡帶、隔離測試錄帶，或 agent 寫 scenarios.json 順 API 試跑。螢光魚只記錄覆蓋、收據及邊界。
-每個情境最多三次嘗試；每次保存計畫、錯誤與機器判決。失敗後由 agent 讀錯誤再修情境；不得改掉預期結果湊通過。裁判只採覆蓋、收據或錨點，agent 敘述不算證據。
+每個情境最多三次嘗試（`--tool-dev` 僅供改工具時解除上限，結果標 NOT_COUNTED、不計入任何判定或體檢卡）；每次保存計畫、錯誤與機器判決。失敗後由 agent 讀錯誤再修情境；不得改掉預期結果湊通過。裁判只採覆蓋、收據或錨點，agent 敘述不算證據。
 證據由強到弱：真實使用 ＞ AGENT_DRIVEN_STUBBED ＞ 測試跑過 ＞ 只有靜態；替身不能升格為真實使用。
 
 按需讀取：
@@ -55,4 +55,4 @@ description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到�
 
 ## 版本
 
-目前版本：1.25.0（2026-11-01）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.29.0（2026-11-01）。歷史見 [changelog](references/changelog.md)。

@@ -1,0 +1,30 @@
+{
+  "source": "agent-api",
+  "clone": "/abs/path/to/clone-of-main-repo",
+  "allowedRoot": "/abs/path/to/work",
+  "outputRoot": "/abs/path/to/work/water-out",
+  "pruneRaw": true,
+  "pathMaps": [
+    {"id": "installed-app", "installedRoot": "@HOME/.local/share/my-app/current", "to": "src"}
+  ],
+  "repos": [
+    {"name": "plugins", "root": "/abs/path/to/clone-of-plugins-repo"}
+  ],
+  "executables": [
+    {"configFile": "@HOME/.config/my-app/tools.json", "pointer": "/runner/path", "sha256Pointer": "/runner/sha256"}
+  ],
+  "scenarios": [
+    {
+      "id": "install-then-run",
+      "request": {"purpose": "installed copy runs the repo code"},
+      "prerequisites": [],
+      "command": ["@NODE", "@CLONE/scripts/install.mjs", "--home", "@HOME"],
+      "expected": [
+        {"kind": "coverage", "file": "src/main.mjs"},
+        {"kind": "coverage", "repo": "plugins", "file": "plugins/example.mjs"},
+        {"kind": "output", "contains": "installed"},
+        {"kind": "json", "pointer": "/status", "value": "READY"}
+      ]
+    }
+  ]
+}

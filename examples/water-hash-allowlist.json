@@ -1,0 +1,17 @@
+{
+  "_comment": "Example: a harness copied into a random temp dir is allowed by its SHA-256 only. Second entry reads a manifest the scenario writes.",
+  "source": "agent-api",
+  "clone": "/path/to/runtime/iso/clone",
+  "allowedRoot": "/path/to/runtime",
+  "outputRoot": "/path/to/runtime/water-out",
+  "executables": [
+    "/usr/bin/git",
+    {"sha256": "<64 hex of the harness bytes>", "root": "@TEMP/**"},
+    {"manifest": "@HOME/harness-manifest.json", "pointer": "/harness/path", "sha256": "<64 hex>", "root": "@TEMP/**"}
+  ],
+  "scenarios": [
+    {"id": "drift", "request": {"purpose": "worker binary replaced after install"}, "prerequisites": [],
+     "command": ["@NODE", "/path/to/drivers/drift.mjs", "@CLONE", "@HOME/harness-manifest.json"],
+     "expected": [{"kind": "coverage", "file": "src/worker-command.mjs"}], "timeoutMs": 300000}
+  ]
+}

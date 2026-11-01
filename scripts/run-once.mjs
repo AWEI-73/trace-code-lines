@@ -61,7 +61,7 @@ export async function runOnce(c,{enable=false}={}) {
  const runtimeTemp=fs.mkdtempSync(path.join(c.tempRoot,'experiment-temp-'));
  const env={...Object.fromEntries(Object.entries(c.environment??{}).filter(([k])=>!/token|secret|key|credential|password|auth/i.test(k))),HOME:c.isolationRoot,USERPROFILE:c.isolationRoot,APPDATA:path.join(c.isolationRoot,'appdata'),LOCALAPPDATA:path.join(c.isolationRoot,'localappdata'),TEMP:runtimeTemp,TMP:runtimeTemp,TMPDIR:runtimeTemp,PYTHONDONTWRITEBYTECODE:'1'};
  for(const p of [env.APPDATA,env.LOCALAPPDATA])fs.mkdirSync(p,{recursive:true});
- const instrument={mode:'active',isolated:true,cwd:c.cwd??c.clone,writeRoots:allowed,executables:c.executables??[process.execPath],
+ const instrument={mode:'active',isolated:true,cwd:c.cwd??c.clone,writeRoots:allowed,executables:c.executables??[process.execPath],executableHashes:c.executableHashes??[],
  stopOnDeniedRoots:c.stopOnDeniedRoots??[],timeoutMs:c.timeoutMs,pythonExecutables:c.pythonExecutables??[],valueReceipts:c.valueReceipts??[],writeClass:c.writeClass??'unknown',wrapPythonChildren:true,network:'deny',allowCreatedExecutables:false,cleanEnvironment:true,environment:env,boundaries:c.boundaries,cassette:c.cassette,strictBoundaries:c.strictBoundaries};
  const priorTemp=process.env.TEMP,priorTmp=process.env.TMP;process.env.TEMP=c.tempRoot;process.env.TMP=c.tempRoot;
  let preflight=null,target;

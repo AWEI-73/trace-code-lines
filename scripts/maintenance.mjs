@@ -89,6 +89,7 @@ export function loadMaintenanceWater(refs,base,repo){
   inputs.push(...[record,config,snapshot].map(({file,sha256})=>({file,sha256})));
   const w=record.value,c=config.value;
   if(w.schema!=='water-source-v1'||w.source!==c.source||path.resolve(c.clone)!==path.resolve(repo)||path.resolve(snapshot.value.repo)!==path.resolve(repo))throw Error('WATER_SOURCE_SCOPE_MISMATCH');
+  if(w.toolDev===true||w.countsTowardVerdict===false)throw Error('TOOL_DEV_RESULTS_NOT_COUNTED: --tool-dev reports cannot feed maintenance verdicts');
   const bindings=new Map((snapshot.value.files??[]).map(f=>[f.path,f.sha256]));
   const bound=new Map();
   const isBound=file=>{if(!bound.has(file)){let ok=false;try{ok=safe(file)&&bindings.get(file)===sha256(readBounded(repo,file));}catch{}bound.set(file,ok);}return bound.get(file);};

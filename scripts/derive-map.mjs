@@ -8,6 +8,7 @@ import {pathToFileURL} from 'node:url';
 import {writerCandidates} from './language-static.mjs';
 import {attachInferenceLayer} from './inference-layer.mjs';
 import {walk,safeName,noLinks,sha256,readBounded} from './walker.mjs';
+import {loadRepos,readKey,crossHops,declaredTarget,crossRules,markCross,closureMermaid,splitKey} from './cross-repo.mjs';
 
 export function toolVersion(){
   const skill=fs.readFileSync(new URL('../SKILL.md',import.meta.url),'utf8');
@@ -105,6 +106,36 @@ function closureKinds(root,r){
   return {runtimeFiles,typeOnlyFiles,dataReadFiles:r.dataReadFiles??[],dataReadComputed:r.dataReadComputed??0,dataReadComputedSamples:r.dataReadComputedSamples??[],closureCounts:{all:all.size,runtime:runtimeFiles.length,typeOnly:typeOnlyFiles.length,dataRead:(r.dataReadFiles??[]).length},edgeCounts:{runtime:r.edges.filter(e=>!e.typeOnly).length,typeOnly:r.edges.filter(e=>e.typeOnly).length}};
 }
 
+// Declared edges (config.declaredEdges) cover hops a lexical walk cannot prove, e.g. spawn(process.execPath,args)
+// where args come from runtime data. Each edge is anchored ({from:{file,line,expect?,sha256?},to:[files],kind?,basis}).
+// Only edges whose anchor still matches join the closure; they stay labelled DECLARED and never count as static proof.
+export function declaredEdges(list,rows,read,ctx=null){
+  if(list===undefined)return {edges:[],gaps:[]};
+  if(!Array.isArray(list))throw Error('declaredEdges must be an array');
+  const edges=[],gaps=[];
+  for(const [i,e] of list.entries()){
+    const id=e.id??'declared-'+(i+1),from=e.from??{},rawTo=Array.isArray(e.to)?e.to:[e.to];
+    const resolvedTo=rawTo.map(t=>ctx?declaredTarget(t,ctx):typeof t==='string'?{target:t}:{error:'object targets need repos'}),to=resolvedTo.map(t=>t.target).filter(Boolean),via=resolvedTo.map(t=>t.via).filter(Boolean);
+    const fail=reason=>gaps.push({id,code:'DECLARED_EDGE_ANCHOR_STALE',path:from.file??null,line:from.line??null,reason});
+    if(resolvedTo.some(t=>t.error)){fail(resolvedTo.find(t=>t.error).error);continue;}
+    if(typeof from.file!=='string'||!rows.has(from.file)){fail('from.file is not a tracked file');continue;}
+    const text=read(from.file).toString('utf8');
+    if(from.sha256&&sha256(Buffer.from(text))!==from.sha256){fail('from.sha256 changed');continue;}
+    if(from.line!==undefined&&from.expect!==undefined&&!(text.split(/\r?\n/)[from.line-1]??'').includes(from.expect)){fail('from.line no longer contains expect');continue;}
+    const missing=to.filter(t=>!rows.has(t));if(missing.length){fail('target not tracked: '+missing.join(', '));continue;}
+    edges.push({id,kind:'DECLARED_'+(e.kind??'EDGE').toUpperCase(),path:from.file,line:from.line??null,targets:to,basis:e.basis??'declared',runtimeVerified:false,...(via.length?{via}:{})});
+  }
+  return {edges,gaps};
+}
+export function expandDeclared(r,declared,walkTargets){
+  if(!declared.edges.length)return r;
+  const files=new Map(r.files.map(f=>[f.path,f])),used=[],added=new Set();
+  for(let changed=true;changed;){changed=false;
+    for(const e of declared.edges){if(used.includes(e)||!files.has(e.path))continue;used.push(e);changed=true;
+      const w=walkTargets(e.targets);for(const f of w.files)if(!files.has(f.path)){files.set(f.path,f);added.add(f.path);}
+      r.edges.push(e,...w.edges.filter(x=>!r.edges.includes(x)));r.gaps.push(...w.gaps);r.external.push(...w.external);}}
+  return {...r,files:[...files.values()].sort((a,b)=>a.path.localeCompare(b.path)),declaredExpansion:used.length?{edges:used.map(e=>e.id),files:[...added].sort()}:undefined};
+}
 export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdges=config.inferredEdges}={}) {
   progress('map: inventory');
   if(typeof config.repo!=='string'||!isAbsolute(config.repo))throw Error('repo must be absolute');
@@ -121,13 +152,14 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
   const head=git(['rev-parse','HEAD']).trim(),before=git(['status','--porcelain']);
   if(before!=='')throw Error('Repository is not clean; no analysis performed');
   const tracked=git(['ls-files','-z']).split('\0').filter(Boolean).sort();
-  const rows=new Map(),inventoryGaps=gapList(),readCache=new Map();
+  const rows=new Map(),inventoryGaps=gapList(),readCache=new Map();let repoCtx=null;
   // Cache only this analysis snapshot; the final integrity pass always reads disk again.
-  const readCached=name=>{if(!readCache.has(name))readCache.set(name,readBounded(repo,name));return readCache.get(name);};
+  const readCached=name=>{if(!readCache.has(name))readCache.set(name,repoCtx?readKey(name,repoCtx):readBounded(repo,name));return readCache.get(name);};
   for(const path of tracked) {
     try {rows.set(path,{path,sha256:sha256(readCached(path))});}
     catch(error) {rows.set(path,{path,sha256:null});inventoryGaps.push({path,error:error.message});}
   }
+  repoCtx=loadRepos(config,{repo,rows,inventoryGaps,commands,readCache});
   const frameworkGraph=buildFrameworkGraph(rows,readCached,config);
   const roots=config.roots==='auto-gas'? [...new Set(frameworkGraph.entryPoints.map(e=>e.file))].map(path=>({path,reason:'auto-gas entry point'})):rootsOf(config.roots,'roots');
   const pythonSourceRoots=config.pythonSourceRoots??['.','src'];
@@ -195,14 +227,35 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
   } else if(calibrateOnly) {
     result.status=result.calibration.status==='PASS'?'PASS':'UNKNOWN';
   } else {
+    const declared=declaredEdges(config.declaredEdges,rows,readCached,repoCtx);result.declaredEdges=declared;
+    const crossRuleSet=crossRules(config,repoCtx),crossRows=[];
+    const walkTargets=targets=>walk(repo,targets,rows,walkOptions);
     const closures=roots.map(root=>{
-      const r=walk(repo,[root.path],rows,walkOptions);
+      let r=expandDeclared(walk(repo,[root.path],rows,walkOptions),declared,walkTargets);
+      for(let round=0;round<64;round++){
+        const seen=new Set(r.edges.map(e=>e.kind+'|'+e.path+'|'+e.line+'|'+(e.targets??[]).join(','))),hops=crossHops(r,repoCtx,readCached).filter(h=>!seen.has(h.edge.kind+'|'+h.edge.path+'|'+h.edge.line+'|'+h.edge.targets.join(',')));
+        if(!hops.length)break;
+        const files=new Map(r.files.map(f=>[f.path,f])),w=walkTargets([...new Set(hops.flatMap(h=>h.edge.targets))]);
+        for(const f of w.files)if(!files.has(f.path))files.set(f.path,f);
+        r={...r,files:[...files.values()].sort((a,b)=>a.path.localeCompare(b.path)),gaps:[...r.gaps,...w.gaps],edges:[...r.edges,...hops.map(h=>h.edge),...w.edges],external:[...r.external,...w.external]};
+        r=expandDeclared(r,{...declared,edges:declared.edges.filter(e=>!r.edges.includes(e))},walkTargets);
+      }
+      const cross=markCross(r.edges,crossRuleSet,repoCtx);crossRows.push(...cross.map(c=>({root:root.path,...c})));
       return {...root,root:root.path,files:r.files.map(f=>f.path),gaps:r.gaps,edges:r.edges,externalDependencies:r.external,
-        ...closureKinds(root.path,r),
+        ...closureKinds(root.path,r),...(r.declaredExpansion?{declaredExpansion:r.declaredExpansion}:{}),
+        ...(repoCtx.extra.size?{repoFiles:Object.fromEntries([repoCtx.primary,...repoCtx.extra.keys()].map(n=>[n,r.files.map(f=>splitKey(f.path,repoCtx)).filter(s=>s.name===n).map(s=>s.path)])),crossRepoEdges:cross.length}:{}),
         parserScope:/\.(?:ts|tsx|jsx|mts|cts)$/.test(root.path)?(r.edges.some(e=>e.path===root.path&&e.targets?.length)?'STATIC_LEXICAL':'TS_RESOLUTION_UNSUPPORTED'):/\.(?:mjs|js|cjs|py|rs)$/.test(root.path)?'STATIC_LEXICAL':r.edges.some(e=>e.path===root.path&&e.kind==='TEXT_REFERENCE')?'TEXT_REFERENCE':'UNSUPPORTED_LANGUAGE_ROOT_ONLY'};
     });
     const covered=new Set(closures.flatMap(c=>c.files));
     result.roots=roots;result.closures=closures;
+    if(repoCtx.extra.size){
+      const counts=Object.fromEntries(['VIOLATION','DECLARED','ALLOWED','UNKNOWN'].map(k=>[k,crossRows.filter(r=>r.classification===k).length]));
+      result.crossRepo={primary:{name:repoCtx.primary,root:repo,head},repos:[...repoCtx.extra.values()].map(r=>({name:r.name,root:r.root,head:r.head,package:r.package,reason:r.reason,trackedFiles:r.tracked.length,coveredFiles:[...covered].filter(k=>splitKey(k,repoCtx).name===r.name).length})),
+        edges:crossRows,counts,rules:crossRuleSet?'CROSS_REPO_RULES (boundary zone/direction format)':'NONE',diagrams:Object.fromEntries(closures.map(c=>[c.root,closureMermaid(c,repoCtx)])),
+        keyFormat:'Files of extra repos use the key @<repo>/<path>; primary-repo files keep plain paths.',
+        limitations:['Cross-repo hops are static: relative paths into a configured repo, bare imports of a declared package name, and anchored declaredEdges. Paths assembled at run time (config roots, env) need a declared edge.','zeroCoverageCandidates and populationStats cover the primary repo only.']};
+      result.limitations.push(...result.crossRepo.limitations);
+    }
     // Optional reverse-import inventory: same snapshot, parsers and resolvers as closures.
     // A target's forward closure cannot reveal callers outside the selected roots.
     if(config.importTargets?.length){
@@ -237,12 +290,13 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
   }
   progress('map: integrity readback');
   const after=git(['status','--porcelain']),headAfter=git(['rev-parse','HEAD']).trim();
+  const extraChanged=[...(repoCtx?.extra.values()??[])].filter(r=>cp.execFileSync('git',['-C',r.root,'status','--porcelain'],{encoding:'utf8',env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}})!==r.status||cp.execFileSync('git',['-C',r.root,'rev-parse','HEAD'],{encoding:'utf8'}).trim()!==r.head).map(r=>r.name);
   const changed=[];
   for(const [path,row] of rows)if(row.sha256!==null) {
-    try {if(sha256(readBounded(repo,path))!==row.sha256)changed.push(path);}
+    try {if(sha256(repoCtx?readKey(path,repoCtx):readBounded(repo,path))!==row.sha256)changed.push(path);}
     catch {changed.push(path);}
   }
-  result.readOnly={status:before===after&&head===headAfter&&!changed.length?'PASS':'FAIL',
+  result.readOnly={status:before===after&&head===headAfter&&!changed.length&&!extraChanged.length?'PASS':'FAIL',extraReposChanged:extraChanged,
     before,after,headBefore:head,headAfter,hashedFiles:[...rows.values()].filter(r=>r.sha256!==null).length,
     changed,unhashed:inventoryGaps.map(g=>g.path)};
   result.commands=commands;

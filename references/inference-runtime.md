@@ -133,3 +133,27 @@ JSONL 壞行若無可解析 runId，使用前方明示 run 區段；交錯執行
 ## 1.9.0 legacyIds
 
 gapId 公式自 1.8.0 起凍結：code + 相對 POSIX path + line + 遞迴排序 data。legacyIds 包含 1.5.0、1.6.0、1.7.0 舊公式的投影；原結構 detail 於正規化前計算，拆分 wrapper 使用舊合併代表。legacyId 值等於 legacyIds["1.7.0"]，保留一版。舊版解析行為若不同，公式投影不保證舊版實際曾輸出該 ID；真實對上率見交付證據。
+
+## 宣告邊（declaredEdges）
+
+靜態掃描證明不了的跳點（例如 `spawn(process.execPath, args)`，args 在執行時才從設定或資料決定）可在 derive-map 設定寫 `declaredEdges`：
+
+```json
+{"declaredEdges":[{"id":"launch-worker","kind":"subprocess","from":{"file":"src/launcher.mjs","line":3,"expect":"spawn(process.execPath","sha256":"可選"},"to":["src/worker.mjs"],"basis":"為何是這個目標"}]}
+```
+
+- 錨點（檔案存在、`sha256` 相符、該行仍含 `expect`）與目標都在追蹤清單時，邊才生效；`from.file` 在某根的閉包內時，目標及其靜態閉包併入該根，`closures[].declaredExpansion` 列出採用的邊與新增檔案，邊為 `DECLARED_<KIND>`、`runtimeVerified:false`。
+- 錨點過期或目標不存在記為 `declaredEdges.gaps[]`（`DECLARED_EDGE_ANCHOR_STALE`），不擴張。
+- 未設定時結果與原本相同。宣告邊是人為主張，不是靜態證明；用執行證據（water-source coverage）核對。
+
+`--inferred-edges` 仍只附在缺口上、不擴張閉包；要擴張請改寫成有錨點的宣告邊。
+
+## 多 repo 靜態追蹤（repos）
+
+derive-map 設定加 `repos: [{name, root, package?, reason?}]`（`primaryRepoName` 可改主 repo 名稱，預設 primary）。每個 repo 須是乾淨的 git 工作樹，不可與主 repo 重疊；其追蹤檔以 `@名稱/路徑` 併入清單，主 repo 路徑不變。跨 repo 跳點來源：
+
+1. 相對路徑跨出所在 repo、落在另一個已設定 repo 的追蹤檔（`CROSS_REPO_IMPORT`）。
+2. 裸套件名等於某 repo 的 `package`（`CROSS_REPO_PACKAGE`，子路徑或 package.json main）。
+3. declaredEdges 的 `to` 寫 `"@名稱/路徑"`、`{repo,file}` 或 `{repo,configFile,pointer,base?}`（以 JSON pointer 從該 repo 的設定檔讀路徑，預設相對設定檔目錄）；可加 `line`/`expect` 錨定目標行，對不上就記 `DECLARED_EDGE_ANCHOR_STALE`。
+
+來源與目標在不同 repo 的邊都加 `crossRepo:{from,to,classification}`；`crossRepoRules` 用 boundary.mjs 同一格式（zones 的 `repo` 可寫 repo 名稱），分類 ALLOWED／VIOLATION／DECLARED／UNKNOWN，未設定規則一律 UNKNOWN。輸出 `crossRepo.edges`、`counts`、各根的 `repoFiles`，以及 `crossRepo.diagrams`（Mermaid，分 repo 子圖，跨 repo 邊為虛線並標分類與行號）。runtimeVerified 一律 false；執行證據用 water-source 的 `repos`／`pathMaps`／`line`。zeroCoverageCandidates 只算主 repo。範例：examples/multi-repo-host-plugins.json。

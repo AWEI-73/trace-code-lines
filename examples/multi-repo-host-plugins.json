@@ -1,0 +1,26 @@
+{
+  "_comment": "Example only: a host repo that loads plugin adapters from a separate plugins repo. Paths are placeholders; nothing here is built into the tool.",
+  "repo": "/path/to/TEMP/host-app",
+  "temp": "/path/to/TEMP",
+  "scratch": "/path/to/TEMP/scratch",
+  "roots": [{"path": "src/server.mjs", "reason": "entry started by the tool server"}],
+  "primaryRepoName": "host",
+  "repos": [{"name": "plugins", "root": "/path/to/host-plugins", "reason": "pluginsRoot given to install; adapters live here"}],
+  "declaredEdges": [
+    {"id": "plugin-adapter", "kind": "subprocess",
+     "from": {"file": "src/lib/adapter-process.mjs", "line": 42, "expect": "join(installed.root,binding.path)"},
+     "to": [{"repo": "plugins", "configFile": "plugins/example/manifest.json", "pointer": "/adapter/path", "line": 12, "expect": "Unsupported action"}],
+     "basis": "binding.path comes from manifest.json adapter.path of the installed plugin snapshot"}
+  ],
+  "crossRepoRules": {
+    "zones": [
+      {"name": "host", "repo": "host", "include": ["src/**"]},
+      {"name": "plugin-adapter", "repo": "plugins", "include": ["plugins/*/adapter/**"]},
+      {"name": "plugin-other", "repo": "plugins", "include": ["plugins/**", "scripts/**"]}
+    ],
+    "rules": [
+      {"from": "host", "to": "plugin-adapter", "allow": "declared", "markers": []},
+      {"from": "host", "to": "plugin-other", "allow": false, "markers": []}
+    ]
+  }
+}
