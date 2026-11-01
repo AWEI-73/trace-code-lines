@@ -1420,6 +1420,18 @@ async function g160Checks(root){
    for(let i=0;i<3;i++){const r=await waterSource(c,{enable:true});assert.equal(r.results[0].attempt,i+1);assert.equal(r.results[0].executed,false);}
    const r=await waterSource(c,{enable:true});assert.equal(r.results[0].reason,'ATTEMPT_LIMIT');assert.equal(fs.readdirSync(join(base,'retry/blocked')).filter(f=>/^attempt-/.test(f)).length,3);
   });
+  await check('G221 report rows summarize attempts so large observations are written once',async()=>{
+   fs.rmSync(join(clone,'result.json'),{force:true});const r=await waterSource({...config,outputRoot:join(base,'g221-summary')},{enable:true});assert.equal(r.results[0].verdict.status,'PASS',JSON.stringify(r.results[0].verdict));assertWater(r);
+   const row=r.results[0].attempts.at(-1);assert.equal(row.observation,undefined);assert.match(row.sha256,/^[a-f0-9]{64}$/);assert(fs.existsSync(row.file));
+   const text=fs.readFileSync(join(base,'g221-summary/water-source.json'),'utf8');assert.equal(text.split('"events"').length-1,1);
+   const retry=await waterSource({...config,outputRoot:join(base,'retry'),scenarios:[{id:'blocked',request:{purpose:'retry bound'},prerequisites:[],command:['clasp','push'],expected:[{kind:'coverage',file:'api.mjs'}]}]},{enable:true});assert.equal(retry.results[0].attempts.length,3);assert(retry.results[0].attempts.every(a=>a.sha256&&a.file));
+  });
+  await check('G221 @HOME is substituted in commands and raw coverage can be pruned after mapping',async()=>{
+   put('home.mjs',"import fs from 'node:fs';import path from 'node:path';\nconst f=process.argv[2];if(f.includes('@HOME'))throw Error('token left');fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,'ok');\nconsole.log(JSON.stringify({status:'READY'}));\n");
+   const r=await waterSource({...config,outputRoot:join(base,'g221-home'),pruneRaw:true,scenarios:[{id:'home',request:{purpose:'home token'},prerequisites:[],command:['@NODE','@CLONE/home.mjs','@HOME/state/x.txt'],expected:[{kind:'coverage',file:'home.mjs'},{kind:'write',file:'@HOME/state/x.txt'},{kind:'status',path:'$.status',value:'READY'}]}]},{enable:true});
+   assertWater(r);const cov=r.results[0].observation.coverage;assert(cov.pruned.files>0);assert(cov.pruned.bytes>0);assert(cov.evidence.every(e=>e.pruned&&!fs.existsSync(e.file)&&/^[a-f0-9]{64}$/.test(e.sha256)));assert(cov.files.includes('home.mjs'));
+   const raw=r.results[0].prunedRaw;assert(raw.length>0);assert(raw.every(x=>!fs.existsSync(x.path)&&/^[a-f0-9]{64}$/.test(x.sha256)));assert(r.results[0].observation.events.length>0);
+  });
 return checks;
 }
 
