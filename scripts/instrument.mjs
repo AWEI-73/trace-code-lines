@@ -33,8 +33,21 @@ export function config(file,overrides={}){
  if(c.network!==undefined&&!['deny','loopback'].includes(c.network))throw Error('network must be deny or loopback');
  if(c.allowCreatedExecutables!==undefined&&typeof c.allowCreatedExecutables!=='boolean')throw Error('allowCreatedExecutables must be boolean');
  c.allowCreatedExecutables??=false;
+ if(c.inheritEnvironment!==undefined&&typeof c.inheritEnvironment!=='boolean')throw Error('inheritEnvironment must be boolean');
+ if(c.environmentAllowlist!==undefined&&(!Array.isArray(c.environmentAllowlist)||c.environmentAllowlist.some(n=>typeof n!=='string')))throw Error('environmentAllowlist must be an array of names');
+ // 1.30.0: clean environment by default; only inheritEnvironment:true (or legacy cleanEnvironment:false) keeps the full parent env.
+ c.inheritEnvironment=c.inheritEnvironment===true||c.cleanEnvironment===false;c.cleanEnvironment=!c.inheritEnvironment;
+ if(c.stdinFile!==undefined&&c.stdinFile!==null){if(typeof c.stdinFile!=='string'||!path.isAbsolute(c.stdinFile))throw Error('stdinFile must be an absolute path');c.stdinFile=path.resolve(c.stdinFile);noLinks(c.stdinFile);if(!fs.statSync(c.stdinFile).isFile())throw Error('stdinFile must be a regular file');}
  c.network??='deny';c.cwd=path.resolve(c.cwd);c.outputDirectory=path.resolve(c.outputDirectory);c.configSha256=digest(raw);return c;
 }
+export const ENVIRONMENT_ALLOWLIST=['PATH','HOME','USERPROFILE','LANG','LANGUAGE','TZ','TERM','TEMP','TMP','TMPDIR','SYSTEMROOT','WINDIR','COMSPEC','PATHEXT'];
+export function baseEnvironment(c,env=process.env){
+ if(!c.cleanEnvironment)return {...env};
+ const allow=new Set([...ENVIRONMENT_ALLOWLIST,...(c.environmentAllowlist??[])].map(n=>n.toUpperCase()));
+ return Object.fromEntries(Object.entries(env).filter(([k])=>allow.has(k.toUpperCase())||/^LC_[A-Z]+$/i.test(k)));
+}
+function environmentPolicy(c){const kept=baseEnvironment(c);return {mode:c.cleanEnvironment?'CLEAN_ALLOWLIST':'INHERIT_FULL',allowlist:c.cleanEnvironment?[...ENVIRONMENT_ALLOWLIST,...(c.environmentAllowlist??[])]:null,
+ keptNames:Object.keys(kept).sort(),strippedNames:Object.keys(process.env).filter(k=>!(k in kept)).sort(),explicitNames:Object.keys(c.environment??{}).sort()};}
 function environment(c){
  return {NODE_OPTIONS:((c.cleanEnvironment?'':process.env.NODE_OPTIONS??'')+' --import='+pathToFileURL(path.join(c.outputDirectory,'instrument-recorder.mjs')).href).trim(),
  NODE_V8_COVERAGE:path.join(c.outputDirectory,'coverage'),INSTRUMENT_CONFIG:path.join(c.outputDirectory,'runtime-config.json'),PYTHONDONTWRITEBYTECODE:'1'};
@@ -42,6 +55,7 @@ function environment(c){
 export function plan(file,overrides={}){
  const c=config(file,overrides),env=environment(c);
  return {schema:'instrument-plan-v1',config:c,environmentChanges:Object.entries(env).map(([name,after])=>({name,before:process.env[name]??null,after})),
+ environmentPolicy:environmentPolicy(c),stdin:c.stdinFile?{file:c.stdinFile,sha256:digest(fs.readFileSync(c.stdinFile))}:'ignore',
  argvRewrite:c.wrapPythonChildren?'Keep interpreter flags; insert py-trace-run.py --out <coverage> --config <runtime-config> -- before script/-m/-c':'none',
  outputDirectory:c.outputDirectory,safety:{mode:c.mode,isolated:c.isolated===true,outputUnderTemp:true,noLinkedRoots:true,network:c.network,executables:c.executables},
  limitations:['Runtime API hooks are not an OS sandbox. Native code, direct syscalls, detached children, workers and uninstrumented executables are not fully observed.',
@@ -59,7 +73,7 @@ function setup(p){
  const recorders=['instrument-recorder.mjs','py-trace-run.py','boundary-stub.mjs','value-receipts.mjs','cassette.mjs','cassette-runtime.mjs','cassette-process.mjs'];for(const name of recorders)fs.copyFileSync(path.join(here,name),path.join(out,name));
  save(path.join(out,'runtime-config.json'),{...c,nodeExecutable:process.execPath,recorder:path.join(out,'instrument-recorder.mjs'),pythonWrapper:path.join(out,'py-trace-run.py'),
  boundaryStub:path.join(out,'boundary-stub.mjs'),cassetteProcess:path.join(out,'cassette-process.mjs'),cassetteState:path.join(out,'cassette-state.json'),coverageDirectory:path.join(out,'coverage'),eventsDirectory:path.join(out,'events')});
- return {schema:'instrument-manifest-v1',configSha256:c.configSha256,config:c,command:null,cwd:c.cwd,environmentChanges:p.environmentChanges,
+ return {schema:'instrument-manifest-v1',configSha256:c.configSha256,config:c,command:null,cwd:c.cwd,environmentChanges:p.environmentChanges,environmentPolicy:p.environmentPolicy,stdin:p.stdin,
  recorders:recorders.map(n=>({path:path.join(out,n),sha256:digest(fs.readFileSync(path.join(out,n)))})),startedAt:new Date().toISOString(),endedAt:null,exitCode:null,files:[],directories:[],limitations:p.limitations};
 }
 export async function run(file,command,{enable=false}={}){
@@ -69,15 +83,15 @@ export async function run(file,command,{enable=false}={}){
  if(c.mode==='active'&&!c.executables.some(x=>x.toLowerCase()===exe.toLowerCase()))throw Error('Initial executable not allowlisted');
  if(path.resolve(exe).toLowerCase()!==path.resolve(process.execPath).toLowerCase())throw Error('Initial command must use this Node executable');
  const m=setup(p),out=c.outputDirectory,manifest=path.join(out,'instrument-manifest.json');m.beforeSnapshot=fileSnapshot(c.writeRoots,[out]);m.command=[exe,...command.slice(1)];save(manifest,m);
- const stdout=fs.openSync(path.join(out,'stdout.log'),'wx'),stderr=fs.openSync(path.join(out,'stderr.log'),'wx');
+ const stdout=fs.openSync(path.join(out,'stdout.log'),'wx'),stderr=fs.openSync(path.join(out,'stderr.log'),'wx'),stdin=c.stdinFile?fs.openSync(c.stdinFile,'r'):null;
  try{
- const child=spawn(exe,command.slice(1),{cwd:c.cwd,env:{...(c.cleanEnvironment?Object.fromEntries(Object.entries(process.env).filter(([k])=>['PATH','SYSTEMROOT','WINDIR','COMSPEC','PATHEXT'].includes(k.toUpperCase()))):process.env),...c.environment,...environment(c)},stdio:['ignore',stdout,stderr],windowsHide:true});
+ const child=spawn(exe,command.slice(1),{cwd:c.cwd,env:{...baseEnvironment(c),...c.environment,...environment(c)},stdio:[stdin??'ignore',stdout,stderr],windowsHide:true});
  m.rootPid=child.pid;let stopped=false;const stop=reason=>{if(stopped)return;stopped=true;m.stoppedReason=reason;if(process.platform==='win32'&&child.pid){spawn('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'}).on('error',()=>child.kill());}else child.kill('SIGKILL');};
  const timer=c.timeoutMs?setTimeout(()=>stop('TIMEOUT'),c.timeoutMs):null;
  const watch=setInterval(()=>{if(fs.existsSync(path.join(out,'events','STOP_PROTECTED_DENY.json')))stop('PROTECTED_DENY');},50);
  const r=await new Promise(resolve=>{child.once('error',error=>resolve({code:null,error:error.message}));child.once('close',(code,signal)=>resolve({code,signal}));});clearInterval(watch);if(timer)clearTimeout(timer);
  m.exitCode=r.code;m.signal=r.signal??null;m.error=r.error??null;
- }finally{m.cleanup=await cleanupProcesses(out,m.rootPid);fs.closeSync(stdout);fs.closeSync(stderr);m.endedAt=new Date().toISOString();m.afterSnapshot=fileSnapshot(c.writeRoots,[out]);Object.assign(m,tree(out));seal(m,manifest);}
+ }finally{m.cleanup=await cleanupProcesses(out,m.rootPid);fs.closeSync(stdout);fs.closeSync(stderr);if(stdin!==null)fs.closeSync(stdin);m.endedAt=new Date().toISOString();m.afterSnapshot=fileSnapshot(c.writeRoots,[out]);Object.assign(m,tree(out));seal(m,manifest);}
  return {manifest,exitCode:m.exitCode,outputDirectory:out,executed:true};
 }
 async function cleanupProcesses(out,rootPid){
@@ -216,7 +230,7 @@ export function passiveLauncher(file,launcher){
  const p=plan(file,{mode:'passive'});launcher=path.resolve(launcher);noLinks(launcher);if(!fs.statSync(launcher).isFile())throw Error('Launcher must be a file');
  const m=setup(p),out=p.outputDirectory;m.beforeSnapshot=fileSnapshot(p.config.writeRoots,[out]);m.launcher={path:launcher,sha256:digest(fs.readFileSync(launcher))};
  const wrapper=path.join(out,'launch.cjs'),ascii=s=>JSON.stringify(s).replace(/[^\x00-\x7f]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
- const body="const cp=require('node:child_process');\nconst r=cp.spawnSync(process.execPath,["+ascii(launcher)+",...process.argv.slice(2)],{cwd:"+ascii(p.config.cwd)+",env:{...process.env,..."+ascii(environment(p.config))+"},stdio:'inherit',windowsHide:true});\nprocess.exitCode=r.status===null?1:r.status;\n";
+ const body="const cp=require('node:child_process');\nconst r=cp.spawnSync(process.execPath,["+ascii(launcher)+",...process.argv.slice(2)],{cwd:"+ascii(p.config.cwd)+",env:{..."+(p.config.cleanEnvironment?"Object.fromEntries(Object.entries(process.env).filter(([k])=>"+ascii([...ENVIRONMENT_ALLOWLIST,...(p.config.environmentAllowlist??[])].map(n=>n.toUpperCase()))+".includes(k.toUpperCase())||/^LC_[A-Z]+$/i.test(k)))":"process.env")+",..."+ascii(p.config.environment??{})+",..."+ascii(environment(p.config))+"},stdio:'inherit',windowsHide:true});\nprocess.exitCode=r.status===null?1:r.status;\n";
  fs.writeFileSync(wrapper,body,'utf8');m.endedAt=new Date().toISOString();m.command=[process.execPath,wrapper];Object.assign(m,tree(out));seal(m,path.join(out,'instrument-manifest.json'));
  return {wrapper,manifest:path.join(out,'instrument-manifest.json'),originalUnchanged:true,
  install:'Use node <wrapper> only after user authorization to change the launch command. Original launcher/config are untouched.',

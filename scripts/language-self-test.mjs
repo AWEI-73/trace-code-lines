@@ -97,6 +97,15 @@ export function languageChecks(root) {
   assert(!r.gaps.some(g=>g.code==='PYTHON_IMPORT_SYNTAX'));assert(r.files.some(f=>f.path==='src/pkg/sibling.py'));assert(r.external.some(e=>e.specifier==='missinglib'&&e.line===10));
   put('py-external.py',"subprocess.run(['ffmpeg', '-i', source])\nos.system('git status')\nsubprocess.run([computed, 'x'])\n");
   r=walk(root,['py-external.py'],rows);assert.deepEqual(r.external.filter(e=>e.kind==='EXTERNAL_COMMAND').map(e=>e.program),['ffmpeg','git']);assert.equal(r.gaps.filter(g=>g.code==='SUBPROCESS_TARGET_UNKNOWN').length,1);
+  // F2 (1.30.0): bare TS/JS package imports are external dependencies with file:line; local aliases and relatives stay in the closure.
+  put('f2/tsconfig.json','{"compilerOptions":{"baseUrl":".","paths":{"@app/*":["src/*"]}}}');put('f2/src/util.ts','export const u=1;\n');
+  put('f2/src/index.ts',"#!/usr/bin/env node\n\nimport { Server } from \"@scope/sdk/server/index.js\";\nimport {\n  A,\n  B,\n} from '@scope/sdk/types.js';\nimport plain from 'plain-pkg';\nimport type { T } from 'typed-pkg';\nimport { readFileSync } from 'node:fs';\nimport { u } from './util.js';\nimport { v } from '@app/util';\nexport * from 'reexport-pkg/sub';\nconst lazy = await import('lazy-pkg');\nconst text = \"import x from 'fake-pkg'\";\n");
+  r=walk(root,['f2/src/index.ts'],rows);
+  const f2=r.external.filter(e=>e.path==='f2/src/index.ts').map(e=>e.line+' '+e.specifier+' '+e.classification+' '+(e.package??''));
+  assert.deepEqual(f2.filter(x=>x.includes('EXTERNAL_PACKAGE')).sort(),['13 reexport-pkg/sub EXTERNAL_PACKAGE reexport-pkg','14 lazy-pkg EXTERNAL_PACKAGE lazy-pkg','3 @scope/sdk/server/index.js EXTERNAL_PACKAGE @scope/sdk','4 @scope/sdk/types.js EXTERNAL_PACKAGE @scope/sdk','8 plain-pkg EXTERNAL_PACKAGE plain-pkg','9 typed-pkg EXTERNAL_PACKAGE typed-pkg'].sort(),JSON.stringify(f2));
+  assert(f2.includes('10 node:fs NODE_BUILTIN '));assert(!f2.some(x=>x.includes('fake-pkg')||x.includes('@app/')));
+  assert(r.files.some(f=>f.path==='f2/src/util.ts'));assert(r.edges.some(e=>e.external&&e.package==='plain-pkg'&&e.line===8&&e.targets.length===0));
+  checks.push('F2 bare TS/JS package imports (scoped, subpath, type, re-export, dynamic) listed as EXTERNAL_PACKAGE with file:line; builtins, relative and tsconfig aliases unchanged');
   put('scripts/path-root.py',"ROOT = Path(__file__).resolve().parents[1] / 'extra'\nsys.path.insert(0, str(ROOT))\nimport chosen\nsys.path.append(os.path.join(os.path.dirname(__file__), '..', 'extra'))\nsys.path.append(dynamic)\n");
   put('extra/chosen.py','');
   r=walk(root,['scripts/path-root.py'],rows,{pythonSourceRoots:['.']});assert(r.files.some(f=>f.path==='extra/chosen.py'));assert.equal(r.edges.filter(e=>e.kind==='PYTHON_SOURCE_ROOT').length,2);assert.equal(r.gaps.filter(g=>g.code==='PYTHON_SYS_PATH_MUTATION').length,1);
