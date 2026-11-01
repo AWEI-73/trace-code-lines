@@ -197,6 +197,34 @@ export async function instrumentChecks(root){
  assert.equal(remove(observed.manifest).status,'PASS');
  checks.push('NamedTemporaryFile double close and custom opener native behavior match uninstrumented Python');
 
+ // F3 (1.30.0): clean environment by default, explicit inherit opt-in, stdinFile feeds a stdio server.
+ {
+  const f3=path.join(root,'f3');fs.mkdirSync(f3);
+  const server=put('f3/stdio-server.mjs',[
+  "import readline from 'node:readline';",
+  "const rl=readline.createInterface({input:process.stdin});",
+  "rl.on('line',l=>{if(!l.trim())return;const m=JSON.parse(l);process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{method:m.method,secret:process.env.F3_SECRET_TOKEN??null,home:process.env.HOME??process.env.USERPROFILE??null,explicit:process.env.F3_EXPLICIT??null}})+'\\n');});",
+  "rl.on('close',()=>process.stdout.write('EOF\\n'));",''].join('\n'));
+  const stdin=put('f3/requests.jsonl','{"jsonrpc":"2.0","id":1,"method":"initialize"}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n');
+  const base={mode:'active',isolated:true,cwd:f3,writeRoots:[f3],executables:['node'],network:'deny',stdinFile:stdin,environment:{F3_EXPLICIT:'yes'}};
+  const prior=process.env.F3_SECRET_TOKEN;process.env.F3_SECRET_TOKEN='synthetic-credential';
+  try{
+   const cleanCfg=put('f3/clean.json',{...base,outputDirectory:path.join(root,'f3-clean')});
+   const cp=plan(cleanCfg);assert.equal(cp.environmentPolicy.mode,'CLEAN_ALLOWLIST');assert(cp.environmentPolicy.strippedNames.includes('F3_SECRET_TOKEN'));assert(cp.environmentPolicy.allowlist.includes('PATH'));assert.equal(cp.stdin.sha256,digest(fs.readFileSync(stdin)));
+   const cr=await run(cleanCfg,[process.execPath,server],{enable:true});assert.equal(cr.exitCode,0);
+   const lines=fs.readFileSync(path.join(root,'f3-clean','stdout.log'),'utf8').trim().split('\n');assert.equal(lines.at(-1),'EOF');
+   const replies=lines.slice(0,-1).map(l=>JSON.parse(l));assert.deepEqual(replies.map(x=>x.result.method),['initialize','tools/list']);
+   assert(replies.every(x=>x.result.secret===null&&x.result.explicit==='yes'));if(process.env.HOME||process.env.USERPROFILE)assert(replies[0].result.home);
+   const cm=JSON.parse(fs.readFileSync(cr.manifest,'utf8'));assert.equal(cm.environmentPolicy.mode,'CLEAN_ALLOWLIST');assert(!JSON.stringify(cm.environmentPolicy).includes('synthetic-credential'));
+   const fullCfg=put('f3/full.json',{...base,inheritEnvironment:true,outputDirectory:path.join(root,'f3-full')});
+   const fr=await run(fullCfg,[process.execPath,server],{enable:true});assert.equal(fr.exitCode,0);
+   assert.equal(JSON.parse(fs.readFileSync(path.join(root,'f3-full','stdout.log'),'utf8').split('\n')[0]).result.secret,'synthetic-credential');
+   const allowCfg=put('f3/allow.json',{...base,environmentAllowlist:['F3_SECRET_TOKEN'],outputDirectory:path.join(root,'f3-allow')});assert.equal(plan(allowCfg).environmentPolicy.strippedNames.includes('F3_SECRET_TOKEN'),false);
+   assert.throws(()=>plan(put('f3/bad.json',{...base,stdinFile:'relative.jsonl',outputDirectory:path.join(root,'f3-bad')})),/stdinFile must be an absolute path/);
+   assert.throws(()=>plan(put('f3/bad2.json',{...base,inheritEnvironment:'yes',outputDirectory:path.join(root,'f3-bad')})),/inheritEnvironment must be boolean/);
+  }finally{if(prior===undefined)delete process.env.F3_SECRET_TOKEN;else process.env.F3_SECRET_TOKEN=prior;}
+  checks.push('F3 instrument clean environment by default strips credentials, keeps allowlist and explicit environment; inheritEnvironment opt-in keeps full env; stdinFile feeds stdio JSON-RPC requests to EOF');
+ }
  return checks;
 }
 

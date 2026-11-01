@@ -810,6 +810,7 @@ export function writerCandidates(path,source) {
 }
 
 // Supplemental JavaScript dependencies. Only resolved quoted relative import() targets enter the closure.
+// Builtins and bare third-party packages (1.30.0) are reported as external dependencies, never as closure targets.
 export function jsSupplementalEdges(path,source,rows,read,resolutionCache){
   const resolver=jsResolver(path,rows,read,resolutionCache);
   const t=tokens(source,false,{regexLiterals:true}),edges=[],external=[],gaps=gapList();
@@ -819,7 +820,16 @@ export function jsSupplementalEdges(path,source,rows,read,resolutionCache){
       edges.push({kind,path,line,specifier,targets:[],external:true,builtin:true});
       external.push({kind,path,line,specifier,builtin:true,classification:'NODE_BUILTIN'});return;
     }
-    const resolved=resolver.resolve(specifier);if(!resolved.local)return;
+    const resolved=resolver.resolve(specifier);
+    if(!resolved.local){
+      // Bare third-party package (not relative, absolute, URL or builtin): keep it as an external dependency with file:line.
+      if(/^[@a-zA-Z0-9_]/.test(specifier)&&!specifier.includes(':')){
+        const pkg=specifier.startsWith('@')?specifier.split('/').slice(0,2).join('/'):specifier.split('/')[0];
+        edges.push({kind,path,line,specifier,targets:[],external:true,package:pkg});
+        external.push({kind,path,line,specifier,package:pkg,builtin:false,classification:'EXTERNAL_PACKAGE'});
+      }
+      return;
+    }
     const base=resolved.base;
     if(base==='..'||base.startsWith('../')||posix.isAbsolute(base)||base.includes(':'))return;
     const target=resolved.target??base; // Keep unresolved DATA_READ and DYNAMIC_IMPORT evidence.
@@ -837,7 +847,7 @@ export function jsSupplementalEdges(path,source,rows,read,resolutionCache){
         if(t[j].v==='from'&&t[j+1]?.kind==='string'){spec=t[j+1];break;}
         if(t[j].v==='\n'&&!t.slice(i+1,j).some(x=>x.v==='{'))break;
       }
-      if(spec?.literal&&isBuiltin(spec.v))add('STATIC_IMPORT',t[i].line,spec.v);
+      if(spec?.literal&&(isBuiltin(spec.v)||!resolver.resolve(spec.v).local))add('STATIC_IMPORT',t[i].line,spec.v);
     }
     if(t[i].v==='new'&&t[i+1]?.v==='URL'&&t[i+2]?.v==='('){
       const a=callArgs(t,i+2),specifier=literal(a.args[0]);

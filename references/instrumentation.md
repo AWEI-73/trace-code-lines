@@ -10,7 +10,9 @@ JSON 欄位：mode（active／passive，預設 active）、cwd（已存在的絕
 outputDirectory（TEMP 底下尚不存在的子目錄）、writeRoots（絕對路徑陣列）、
 executables（執行檔路徑或 PATH 名稱，plan 時解析）、pythonExecutables（其子集）、
 isolated:true、network（deny 或 loopback，預設 deny）、wrapPythonChildren:true。
-environment 可指定子程序環境；denyCommandPatterns 是額外禁止的 argv 正規式，例如禁止套件安裝。
+環境預設乾淨（1.30.0）：只保留 PATH、HOME、USERPROFILE、LANG、LANGUAGE、LC_*、TZ、TERM、TEMP、TMP、TMPDIR 與 Windows 必要的 SYSTEMROOT、WINDIR、COMSPEC、PATHEXT，其餘（含權杖、API key）一律不傳；environmentAllowlist 可加名稱；只有 inheritEnvironment:true（或舊寫法 cleanEnvironment:false）才繼承完整環境。plan 與 manifest 的 environmentPolicy 只記名稱（keptNames、strippedNames），不記值。
+stdinFile（絕對路徑、一般檔、不可經符號連結）把檔案內容接到根程序 stdin，讀到 EOF 即關閉，可直接餵 stdio 伺服器（如 MCP JSON-RPC 一行一則），不需 driver 腳本；manifest 記 stdin 的路徑與 SHA-256。未設定時 stdin 為 ignore。
+environment 可指定子程序環境（在乾淨基底上再加）；denyCommandPatterns 是額外禁止的 argv 正規式，例如禁止套件安裝。
 執行前把 TEMP/TMP 設為授權根；輸出不可沿符號連結；不要以廣大根規避範圍限制。
 
 ~~~text

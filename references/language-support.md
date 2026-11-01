@@ -6,6 +6,7 @@
 - require("./x")、module.require("./x") 依序找精確檔、.js／.cjs／.mjs／.json、目錄 package.json 的 main、index 同組副檔名。main 可指檔或目錄；循環與越界不跟隨。
 - require.resolve 產生 resolutionOnly 邊，保守納入候選閉包；不能據此推論模組已執行。
 - 非相對套件名列 externalDependencies，builtin 有獨立旗標；不把缺 node_modules 當缺檔。
+- ESM／TS 的 `import … from 'pkg'`、`export … from 'pkg'`、`import type` 與字面 `import('pkg')`（1.30.0 起）：裸套件名（含 `@scope/name/子路徑`）列 EXTERNAL_PACKAGE，保留 file:line、完整 specifier 與 `package`（`@scope/name` 或第一段）；外部邊 targets 為空，不進閉包。tsconfig paths 別名與相對路徑照舊解析；不讀 node_modules，也不比對 package.json 是否已宣告。
 - require(運算式) 記 DYNAMIC_COMPUTED 與 gap。module.createRequire／createRequire 記載入基底與 CREATE_REQUIRE_BASE_UNRESOLVED；不猜後續 alias。
 - 明確 const／let／var 宣告為函式的局部 require，在所屬大括號範圍內排除；這不是完整作用域／型別分析。
 - 支援 TS／TSX／JSX、.js 類副檔名替代、無副檔名與 index；tsconfig／jsconfig 的 baseUrl、paths 與 repo 內相對 extends 已支援。不處理 package exports/imports、任意 alias、bundler 設定、套件 extends、安裝樹解析或原生 addon。

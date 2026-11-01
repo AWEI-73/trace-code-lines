@@ -1,5 +1,12 @@
 # 版本記錄
 
+## 1.30.0 (2026-11-01)
+
+- 修正 derive-map 漏列 TS/JS 裸套件匯入：`import … from '@scope/pkg/sub'`、`export … from 'pkg'`、`import type` 與字面 `import('pkg')` 以前只留 builtin，第三方套件從 edges 與 externalDependencies 消失；現在列 EXTERNAL_PACKAGE，含 file:line、specifier 與 `package`，與 Python／CJS 一致。外部邊不進閉包；tsconfig 別名與相對路徑行為不變。
+- instrument 預設乾淨環境：只留 PATH、HOME、LANG/LC_*、TEMP/TMP 等白名單（可用 environmentAllowlist 加名稱），權杖與 API key 不再傳給目標；`inheritEnvironment:true` 才保留完整環境。plan／manifest 新增只記名稱的 environmentPolicy。passive 啟動器套同一政策。
+- instrument 新增 `stdinFile`：把檔案接到根程序 stdin，可直接餵 stdio（MCP）伺服器的 JSON-RPC 請求，不需 driver；manifest 記路徑與 SHA-256。
+- 新增 self-test：F2（language-self-test）、F3（instrument-self-test）。
+
 ## 1.29.0 (2026-11-01)
 
 - water-source 執行檔白名單新增只靠雜湊的項目：`{sha256, root?}`（root 可用 glob 與 @TEMP/@HOME/@CLONE），隨機暫存目錄裡的 harness 只要位元組 SHA-256 相符就允許；`{manifest, pointer?, sha256 | sha256Pointer, root?}` 在 spawn 當下讀情境產生的 manifest 取路徑。兩者都在 spawn 時由 recorder 核對實際位元組，事件記 `hashAllowlist.allowedBy`。
