@@ -26,6 +26,8 @@ export function scanEnvironment(){
 }
 const SECRET_NAME=/(^|\/)(\.env(\..*)?|.*\.pem|.*\.key|id_rsa.*|credentials.*|.*\.local\.json)$/i;
 export const TEST_PATH=/(^|\/)(tests?|__tests__|spec|fixtures?|e2e)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.py$/i;
+// Type declarations only describe an API (e.g. `exec(handle): Response`); they are listed but never count as a capability need.
+const TYPE_DECL=/\.d\.(ts|mts|cts)$|(^|\/)(typings|@types)\//;
 const RETIRED_DIR=/^(.*?(?:^|\/)(?:history|retired[^/]*|archive[sd]?|legacy|deprecated|vendor|third_party|old)\/)/i;
 const COMMENT=/^\s*(\/\/|#|\*|\/\*|<!--)/;
 function listFiles(root){
@@ -44,8 +46,9 @@ const RULES=[
  {kind:'paid',label:'付費呼叫',file:CODE,line:/new\s+(OpenAI|Anthropic|Stripe|Twilio)\b|from\s+['"](openai|@anthropic-ai\/sdk|stripe|twilio|@sendgrid\/mail)['"]|require\(\s*['"](openai|@anthropic-ai\/sdk|stripe|twilio|@sendgrid\/mail)['"]|^\s*(import|from)\s+(openai|anthropic|stripe|twilio)\b|completions\.create\(|messages\.create\(|charges\.create\(/},
  {kind:'real-account',label:'用真帳號的呼叫',file:CODE,line:/from\s+['"]nodemailer['"]|require\(\s*['"]nodemailer['"]|^\s*(import|from)\s+smtplib\b|smtplib\.SMTP\(|['"]--model['"]|\b(keyring\.get_password|os\.environ\[['"][A-Z_]*(API_KEY|TOKEN)['"]\])/},
  // Dogfood ext round: `regex.exec(` and `plugins.exec(` are not subprocesses; only bare calls or child_process members count.
- {kind:'subprocess',label:'執行其他程式',file:CODE,line:/(?<![.\w$])(spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)\(|\b(child_process|childProcess|cp)\.(spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)\(|subprocess\.(run|Popen|call|check_output)\(|os\.system\(/},
- {kind:'network',label:'網路呼叫',file:CODE,line:/\bfetch\(|\bhttps?\.(get|request)\(|net\.(connect|createConnection)\(|dgram\.createSocket|dns\.(lookup|resolve)|requests\.(get|post|put|delete)\(|urlopen\(|socket\.socket\(/},
+ {kind:'subprocess',label:'執行其他程式',file:CODE,line:/^\s*import\s+(?!type\b)[^;]*from\s+['"](node:)?child_process['"]|require\(\s*['"](node:)?child_process['"]\s*\)|(?<![.\w$])(spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)\(|\b(child_process|childProcess|cp)\.(spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)\(|subprocess\.(run|Popen|call|check_output)\(|os\.system\(/},
+ // Star round (axios): an HTTP client only showed `transport.request(`; importing http/https/net or new XMLHttpRequest counts too.
+ {kind:'network',label:'網路呼叫',file:CODE,line:/^\s*import\s+(?!type\b)[^;]*from\s+['"](node:)?(http|https|http2|net|dgram|tls)['"]|require\(\s*['"](node:)?(http|https|http2|net|dgram|tls)['"]\s*\)|new\s+(XMLHttpRequest|WebSocket)\(|^\s*(import|from)\s+(requests|httpx|aiohttp|urllib\.request)\b|\bfetch\(|\bhttps?\.(get|request)\(|net\.(connect|createConnection)\(|dgram\.createSocket|dns\.(lookup|resolve)|requests\.(get|post|put|delete)\(|urlopen\(|socket\.socket\(/},
  {kind:'listen',label:'開放連線埠或通道',file:CODE,line:/\.listen\(|createServer\(|app\.run\(|uvicorn\.run\(/},
  {kind:'secret-files',label:'機密檔名',file:SECRET_NAME,line:null}
 ];
@@ -56,7 +59,7 @@ export function scanTarget(root,{paths=[]}={}){
   const test=TEST_PATH.test(f);if(test)tests++;
   const rm=f.match(RETIRED_DIR);if(rm)retired.set(rm[1],(retired.get(rm[1])??0)+1);
   for(const r of RULES){if(!r.file.test(f))continue;
-   const base={kind:r.kind,label:r.label,file:f,test,retired:!!rm};
+   const base={kind:r.kind,label:r.label,file:f,test,retired:!!rm,...(TYPE_DECL.test(f)?{typesOnly:true}:{})};
    if(r.kind==='secret-files'||r.kind==='agent-instructions'){found.push({...base,line:null,note:'只列檔名，不讀內容'});continue;}
    if(!r.line){found.push({...base,line:null});continue;}
    let body;try{const st=fs.statSync(path.join(root,f));if(st.size>8*1024*1024)continue;body=fs.readFileSync(path.join(root,f),'utf8');}catch{continue;}
@@ -73,7 +76,7 @@ const opt=(value,label)=>({value,label});
 // A local socket or pipe listener is not outbound network; it is reported as a finding, not a capability need.
 const CAP_NEED={subprocess:'exec',network:'network',paid:'paid','real-account':'real-account'};
 export function buildQuestions(env,target,{mode='integrate'}={}){
- const k=target.byKind,live=x=>(k[x]??[]).filter(f=>!f.test&&!f.retired),has=x=>live(x).length>0,ev=x=>live(x).slice(0,5).map(f=>f.file+(f.line?':'+f.line:''));
+ const k=target.byKind,live=x=>(k[x]??[]).filter(f=>!f.test&&!f.retired&&!f.typesOnly),has=x=>live(x).length>0,ev=x=>live(x).slice(0,5).map(f=>f.file+(f.line?':'+f.line:''));
  const available=env.scanners.filter(s=>s.found).map(s=>s.name),missing=env.scanners.filter(s=>!s.found).map(s=>s.name);
  const q=[],settled=[];
  q.push({id:'run',decide:'能不能實際跑這份程式，看它真的做了什麼？',why:'不跑就只能讀程式碼猜；跑也只在隔離副本、限時、不碰你的帳號。'+(has('install-scripts')?'這份程式有安裝時自動跑的腳本，試跑也不會執行它。':''),default:'none',scope:'只影響這次查線',
@@ -104,7 +107,7 @@ const CAP_LABEL=Object.fromEntries(CAPS.map(([v,l])=>[v,l]));
 export function parseCapability(value){
  const [head,...rest]=String(value??'').split(/[|｜]/),h=head.trim(),refine=rest.join('|').trim()||null;
  const hit=CAPS.find(([v,l,long,al])=>v===h||l===h||long===h||al.includes(h));
- return hit?{capability:hit[0],refine,text:hit[1]+(refine?'（'+refine+'）':'')}:{capability:null,refine:null,text:String(value??'').trim()};
+ return hit?{capability:hit[0],refine,text:hit[1]+(refine?(/[（）()]/.test(refine)?'：'+refine:'（'+refine+'）'):'')}:{capability:null,refine:null,text:String(value??'').trim()};
 }
 export const capLabel=v=>CAP_LABEL[v]??v;
 export function preflight(root,{paths=[],mode='integrate'}={}){

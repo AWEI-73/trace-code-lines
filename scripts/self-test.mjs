@@ -37,7 +37,7 @@ import {evidenceChecks} from './evidence-self-test.mjs';
 import {languageChecks} from './language-self-test.mjs';
 import {census} from './record-census.mjs';
 import {classifyRecords} from './classify-records.mjs';
-import {preflight as tracePreflight,resolveScope,scopeNotes,answersFrom,relayText} from './preflight.mjs';
+import {preflight as tracePreflight,resolveScope,scopeNotes,answersFrom,relayText,parseCapability} from './preflight.mjs';
 import {buildReport as buildTraceReport,safeSnippet} from './trace-report-html.mjs';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -2561,6 +2561,25 @@ function g370Checks(root){
   r=run('report','--card',cf,'--out',hf);assert.equal(r.status,0,r.stderr);assert(r.stdout.includes('結論：有條件可接'));assert(fs.existsSync(hf)&&fs.existsSync(join(area,'cli-report-evidence','chain','chain-card.json')));
   const html=fs.readFileSync(hf,'utf8');assert(!html.includes('IGNORE'));assert(html.includes('有條件可接，先拿掉命令執行'));
   r=run('report','--card',cf,'--out',hf);assert.notEqual(r.status,0);
+ });
+ check('ext round: type declarations and regex .exec( are not capability needs; fix corrects a card without hand edits',()=>{
+  fs.mkdirSync(join(repo,'typings'),{recursive:true});
+  put('typings/api.ts',"export interface G {\n  exec(handle: () => void): void;\n  fetch(remote: string): void;\n}\n");put('src/api.d.ts',"export declare function spawn(c: string): void;\n");put('src/re.mjs',"export const m=s=>/x(\\d+)/.exec(s);\nexport const n=p=>p.plugins.exec('spawn.args');\n");
+  put('src/h.mjs',"import https from 'https';\nexport const g=u=>https.get(u);\n");put('src/t.ts',"import type {Agent} from 'node:http';\nexport type A=Agent;\n");
+  for(const a of [['add','-A'],['commit','-q','-m','ext']])assert.equal(git(a).status,0);
+  const q2=tracePreflight(repo,{paths:['typings','src']});
+  assert(!q2.target.findings.some(f=>f.file==='src/re.mjs'),'regex or member .exec( is not a subprocess');
+  for(const f of ['typings/api.ts','src/api.d.ts']){const hits=q2.target.findings.filter(x=>x.file===f);assert(hits.length&&hits.every(x=>x.typesOnly),f);}
+  assert(q2.target.findings.some(f=>f.file==='src/h.mjs'&&f.kind==='network'&&f.line===1),'importing https is a network hint');assert(!q2.target.findings.some(f=>f.file==='src/t.ts'),'type-only import is not');
+  assert.deepEqual(q2.questions.find(x=>x.id==='capabilities')?.needs??[],['network'],'type declarations add no capability need; the real https import does');
+  assert.equal(parseCapability('寫檔|只寫 .git（commit）').text,'寫檔：只寫 .git（commit）');assert.equal(parseCapability('寫檔|只寫 out').text,'寫檔（只寫 out）');
+  const cli=fileURLToPath(new URL('./trace.mjs',import.meta.url)),run=(...a)=>spawnSync(process.execPath,[cli,...a],{encoding:'utf8',windowsHide:true}),cf=join(area,'fix-card.json');
+  let r=run('start','--mode','integrate','--question','可否接入','--root',repo,'--out',cf);assert.equal(r.status,0,r.stderr);
+  r=run('fill','--card',cf,'--step','2','--interface','a|b|c|d|e','--unknown','耗時|超出範圍|未跑|讀碼|試跑|免費讀取|未量|no');assert(r.stdout.includes('介面第 1 項還沒有錨點'),r.stdout);
+  let c=JSON.parse(fs.readFileSync(cf,'utf8'));assert.equal(c.unknowns[0].class,'out-of-scope');
+  r=run('fix','--card',cf,'--remove','interface:1','--class','1=沒去跑');assert.equal(r.status,0,r.stderr);assert(r.stdout.includes('已刪除'));
+  c=JSON.parse(fs.readFileSync(cf,'utf8'));assert.equal(c.integration.interfaces.length,0);assert.equal(c.unknowns[0].class,'not-run');
+  assert.notEqual(run('fix','--card',cf,'--remove','interface:5').status,0);assert.notEqual(run('fix','--card',cf,'--class','1=亂寫').status,0);assert.notEqual(run('fix','--card',cf).status,0);
  });
  return checks;
 }

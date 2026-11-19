@@ -120,7 +120,7 @@ export function buildReport({card,questions,triage,boundary,instrumentLog,ledger
   ...(integ.conditions??[]).map(x=>({kind:'condition',text:x.text,anchors:(x.anchors??[]).map(at)}))];
  const ok=(c.cleared??[]).map(x=>({text:x.finding,anchors:(x.anchors??[]).map(at)}));
  const decide=[...(p?.pending??[]).map(id=>({kind:'preflight',text:(questions?.questions??[]).find(q=>q.id===id)?.decide??id,next:'回覆開卡前問題；沒回覆就當作不准'})),
-  ...capRows.map(x=>({kind:'capability',capability:x.capability,text:'要不要准：'+x.label+(x.refine.length?'（'+x.refine.join('；')+'）':''),next:(x.onCard?'卡上寫明需要':'只有掃描看到，讀碼的人沒寫進卡')+(x.onCard&&x.byScan?'，掃描也看到':'')+'；不准就維持「有條件可接」',anchors:x.anchors,review:x.refine.length>0})),
+  ...capRows.map(x=>({kind:'capability',capability:x.capability,text:'要不要准：'+x.label+(x.refine.length?(/[（）()]/.test(x.refine.join(''))?'：'+x.refine.join('；'):'（'+x.refine.join('；')+'）'):''),next:(x.onCard?'卡上寫明需要':'只有掃描看到，讀碼的人沒寫進卡')+(x.onCard&&x.byScan?'，掃描也看到':'')+'；不准就維持「有條件可接」',anchors:x.anchors,review:x.refine.length>0})),
   ...(cr?.review??[]).map(x=>({kind:'review',capability:x.capability,text:'需人看：你准了「'+capLabel(x.capability)+'」，卡上限定「'+x.refine+'」',next:'確認你准的範圍有涵蓋這個限定',anchors:x.anchors.map(at),review:true})),
   ...(cr?.freeText??[]).map(x=>({kind:'free-text',text:'需人看：'+x.text,next:'沒對上固定選項，系統無法自動對照',anchors:x.anchors.map(at),review:true})),
   ...(c.unknowns??[]).filter(u=>u.affects!=='no'&&(['Owner','隔離試跑','付費模型'].includes(u.next?.cost)||u.class==='owner-only')).map(u=>({kind:'unknown',text:u.question,next:u.next?.action+'（'+(ZH_COST[u.next?.cost]??u.next?.cost)+'）',why:u.cause}))];
@@ -171,7 +171,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break
 @media print{nav.toc{display:none}section.card{break-inside:avoid}details{display:block}}`;
  const decCls=decision==='不建議'?'bad':decision==='可接'||decision==='查完'?'ok':'part';
  const pf=p?'<p class="muted">問題只在開卡前問；沒回覆就當作不准。agent 只建議工具，不安裝。</p>'+preflightSvg(p,questions):preflightSvg(null);
- const findings=(questions?.target?.findings??[]),liveF=findings.filter(f=>!f.test&&!f.retired),otherF=findings.length-liveF.length;
+ const findings=(questions?.target?.findings??[]),liveF=findings.filter(f=>!f.test&&!f.retired&&!f.typesOnly),otherF=findings.length-liveF.length;
  const html='<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+
  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; base-uri \'none\'; form-action \'none\'">'+
  '<title>'+esc(title??c.question??'查線報告')+'</title><style>'+css+'</style></head><body><main>'+
@@ -185,7 +185,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break
  '<nav class="toc"><a href="#decision">結論</a><a href="#preflight">開卡前授權</a><a href="#route">路線圖</a>'+(boundary?.findings?.length?'<a href="#modules">模組方向</a>':'')+'<a href="#evidence">證據</a><a href="#unknowns">未知</a><a href="#dynamic">試跑</a>'+(ledger?'<a href="#ledger">埋雷對照</a>':'')+'<a href="#agent">給 agent</a></nav>'+
  ((integ.interfaces??[]).length?'<section class="card" id="interfaces"><h2>接起來長怎樣</h2><ul>'+integ.interfaces.map(x=>'<li><b>'+esc(x.name)+'</b>：輸入 '+esc(x.input)+'；輸出 '+esc(x.output)+'；出錯 '+esc(x.error)+'；重送 '+esc(x.retry)+' '+(x.anchors??[]).slice(0,2).map(a=>ref(typeof a==='string'?a:at(a))).join(' ')+'</li>').join('')+'</ul>'+((c.chain??[]).length?'<h3>查到的路線</h3><ol>'+c.chain.map(x=>'<li>'+esc(x.label)+' '+(x.anchors??[]).slice(0,3).map(a=>ref(at(a))).join(' ')+'</li>').join('')+'</ol>':'')+'</section>':'')+
  '<section class="card" id="preflight"><h2>開卡前：你決定了什麼 → 這次能查多深</h2>'+pf+
- (questions?'<details><summary>受查程式中需要你知道的線索 '+liveF.length+' 項'+(otherF?'（另有測試或退役部分 '+otherF+' 項不列）':'')+'</summary><table><tbody>'+liveF.map(f=>'<tr><td>'+esc(f.label)+'</td><td><code>'+esc(f.file+(f.line?':'+f.line:''))+'</code></td><td class="muted">'+esc(f.note??'')+'</td></tr>').join('')+'</tbody></table></details>'+
+ (questions?'<details><summary>受查程式中需要你知道的線索 '+liveF.length+' 項'+(otherF?'（另有測試、退役或型別宣告 '+otherF+' 項不列）':'')+'</summary><table><tbody>'+liveF.map(f=>'<tr><td>'+esc(f.label)+'</td><td><code>'+esc(f.file+(f.line?':'+f.line:''))+'</code></td><td class="muted">'+esc(f.note??'')+'</td></tr>').join('')+'</tbody></table></details>'+
   '<details><summary>環境偵測（只看有沒有裝，不執行掃描工具）</summary><table class="compact"><tbody>'+[...questions.environment.runtimes,...questions.environment.scanners].map(t=>'<tr><td>'+esc(t.name)+'</td><td>'+(t.found?'<span class="badge ok">有</span> <code>'+esc(String(t.version).replace('UNKNOWN（只偵測路徑，不執行）','只看路徑'))+'</code>':'<span class="badge unk">沒裝</span>')+'</td></tr>').join('')+'</tbody></table></details>':'')+'</section>'+
  '<section class="card" id="route"><h2>路線圖：入口 → 來源 → 危險動作</h2><p class="muted">只畫程式碼（測試不畫）。實線＝同檔找到具名關聯；虛線來源「未知」＝看到危險動作但沒找到是誰給的參數；入口是同檔最近的入口（推論）。跨檔不追。</p>'+renderLanes(lanes)+'</section>'+
  (boundary?.findings?.length?'<section class="card" id="modules"><h2>模組依賴方向</h2><div class="legend"><span style="color:#dc2626">━ 違反方向</span><span style="color:#16a34a">━ 允許</span><span style="color:#94a3b8">┄ 未知</span></div>'+renderZones(boundary)+

@@ -15,6 +15,30 @@ const array=x=>Array.isArray(x)?x:[];
 const object=x=>x&&typeof x==='object'&&!Array.isArray(x)?x:{};
 const one=x=>String(x??'').replace(/[\r\n]+/g,' ').slice(0,1800);
 const completed=s=>s.done===true||['done','skipped'].includes(s.status);
+// Dogfood ext round: correcting a filled card needed hand-edited JSON; `fix` removes one row or re-labels an unknown's class.
+const FIX_SECTIONS={chain:['chain'],鏈:['chain'],conflict:['conflicts'],衝突:['conflicts'],cleared:['cleared'],排除:['cleared'],verify:['verification'],驗證:['verification'],unknown:['unknowns'],未知:['unknowns'],condition:['integration','conditions'],條件:['integration','conditions'],permission:['integration','permissions'],權限:['integration','permissions'],interface:['integration','interfaces'],介面:['integration','interfaces']};
+export function fixTrace(c,args){
+ const done=[],removals=[];
+ for(let i=0;i<args.length;i++){
+  const flag=args[i],value=args[i+1];
+  if(flag==='--card'){i++;continue;}
+  if(flag==='--remove'){i++;const m=String(value??'').match(/^([^:：]+)[:：]([1-9]\d*)$/),keys=m&&FIX_SECTIONS[m[1].trim()];
+   if(!keys)throw Error('--remove 期望「章節:序號」，章節為 chain、conflict、cleared、verify、unknown、condition、permission、interface（或中文名）；收到 '+value);
+   removals.push({keys,n:Number(m[2]),label:m[1].trim()});}
+  else if(flag==='--class'){i++;const m=String(value??'').match(/^([1-9]\d*)=(.+)$/);if(!m)throw Error('--class 期望「未知序號=類別」；收到 '+value);
+   const row=array(c.unknowns)[Number(m[1])-1];if(!row)throw Error('沒有未知第 '+m[1]+' 項');
+   const v=UNKNOWN_CLASS_ZH[m[2].trim()]??m[2].trim();if(!Object.values(UNKNOWN_CLASS_ZH).includes(v))throw Error('類別無效：'+m[2]+'；可用：沒去跑、由模型決定、單次異常、資料沒了、要負責人判斷、範圍或授權外');
+   row.class=v;done.push('未知第 '+m[1]+' 項類別改為 '+m[2].trim());}
+  else throw Error('fix 只收 --remove 與 --class；收到 '+flag);
+ }
+ // Remove from the highest index first so earlier numbers stay valid within one call.
+ removals.sort((a,b)=>b.n-a.n);
+ for(const r of removals){const owner=r.keys.length>1?c[r.keys[0]]:c,list=array(owner?.[r.keys.at(-1)]);
+  if(r.n>list.length)throw Error(r.label+' 沒有第 '+r.n+' 項（共 '+list.length+' 項）');list.splice(r.n-1,1);done.push('已刪除 '+r.label+' 第 '+r.n+' 項');}
+ if(!done.length)throw Error('fix 沒有要改的項目；用 --remove 章節:序號 或 --class 序號=類別');
+ return done;
+}
+
 export function startTrace(mode,question,root,books=playbooks){
  const book=books.modes[mode];if(!book)return null;
  const c={...initChain(question,root),chain:[],unknowns:[],...(mode==='integrate'?{integration:{decision:'',conditions:[],permissions:[],interfaces:[]}}:{}),mode,steps:book.steps.map(s=>({id:s.id,status:'pending',notes:'',anchors:[]}))};
@@ -143,7 +167,7 @@ export function fillTrace(c,args,errors=[]){
 }
 export function traceHelp(){
  return [
-  '用法：node scripts/trace.mjs <preflight|answer|start|fill|next|status|report> [參數]；--help 顯示本說明。',
+  '用法：node scripts/trace.mjs <preflight|answer|start|fill|fix|next|status|report> [參數]；--help 顯示本說明。',
   '開卡前三步：preflight --root <repo> --out <問題.json> [--paths 目錄,檔] [--mode 情境]，把印出的問題原文轉給負責人；',
   '  answer --questions <問題.json> --out <答覆.json> --by "誰回的" [--accept-defaults] [--set 1=乙]… [--simulated]；',
   '  start … --preflight <答覆.json>。未回覆＝未授權，接入結論最多「有條件可接」。',
@@ -159,6 +183,7 @@ export function traceHelp(){
   '--decision <可接|有條件可接|不建議>（以下四項僅 integrate）',
   '--condition "條件"；--permission "固定選項|一句範圍補充（可省）"：讀檔、寫檔、執行其他程式、連外網、用真帳號、花錢、讀機密、讓模型下系統指令；對不上的保留為需人看。',
   '--interface "名稱|輸入|輸出|錯誤|重送"',
+  'fix --card <卡片.json> --remove "章節:序號"（如 interface:2、未知:1，可重複）--class "未知序號=類別"：修正已填的項目，不用手改卡片。\n'+
   '--anchor "檔案:行號:比對文字"：歸前面最近的章節；第一章節前歸步驟，其他參數不改歸屬。',
   '章節為 chain/conflict/cleared/verify/unknown/decision/condition/permission/interface；欄位均不可空白。',
   '例（start）：node scripts/trace.mjs start --mode symptom --question "為何出錯" --root . --out ../card.json',
@@ -186,8 +211,8 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
    if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('問題清單請放在受查資料夾外。');
    const paths=(get('--paths')??'').split(',').map(x=>x.trim()).filter(Boolean),mode=get('--mode')??'integrate';
    noLinks(target);const q=preflight(root,{paths,mode});fs.writeFileSync(target,JSON.stringify(q,null,2)+'\n',{encoding:'utf8',flag:'wx'});
-   const live=q.target.findings.filter(f=>!f.test&&!f.retired).length;
-   console.log(['開卡前檢查：讀 '+q.target.fileCount+' 檔'+(paths.length?'（只看 '+paths.join('、')+'）':'')+'；需要負責人知道的線索 '+live+' 項（另有測試或退役部分 '+(q.target.findings.length-live)+' 項）。'+(!paths.length&&q.target.fileCount>500?'\n範圍很大（'+q.target.fileCount+' 檔）：若只要接其中一部分，請重做並加 --paths 子目錄，問題和報告都會小很多。':''),'',relayText(q),'',
+   const live=q.target.findings.filter(f=>!f.test&&!f.retired&&!f.typesOnly).length;
+   console.log(['開卡前檢查：讀 '+q.target.fileCount+' 檔'+(paths.length?'（只看 '+paths.join('、')+'）':'')+'；需要負責人知道的線索 '+live+' 項（另有測試、退役或型別宣告 '+(q.target.findings.length-live)+' 項）。'+(!paths.length&&q.target.fileCount>500?'\n範圍很大（'+q.target.fileCount+' 檔）：若只要接其中一部分，請重做並加 --paths 子目錄，問題和報告都會小很多。':''),'',relayText(q),'',
     '給 agent：把上面原文轉給負責人；收到回覆後執行',
     '  node scripts/trace.mjs answer --questions '+JSON.stringify(target)+' --out <答覆.json> --by "回覆者" --accept-defaults [--set 題號=甲乙丙]',
     '  回「照建議」就只加 --accept-defaults；模擬演練一定要加 --simulated。'].join('\n'));
@@ -230,11 +255,12 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
     console.log([...(c.preflight?[(c.preflight.simulated?'【模擬回覆】':'')+scopeLine(c.preflight)]:[]),...stepText(playbooks.modes[c.mode].steps[0],0,c.steps.length)].join('\n'));
    }
   }catch(e){console.log(String(e?.message).startsWith('開卡前檢查')?'卡片未建立：'+e.message+'。':'卡片未建立；請確認位置可寫、檔案不存在，而且位於受查資料夾外。');}
- }else if(['next','status','fill'].includes(command)){
+ }else if(['next','status','fill','fix'].includes(command)){
   let c,file;try{file=path.resolve(get('--card'));c=JSON.parse(fs.readFileSync(file,'utf8'));}catch{console.error('卡片讀不到，或內容不是有效的資料格式。');process.exitCode=1;}
   if(!process.exitCode)try{
+   if(command==='fix'){noLinks(file);const rel=path.relative(path.resolve(c.root),file);if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('卡片請放在受查資料夾外。');const done=fixTrace(c,args);fs.writeFileSync(file,JSON.stringify(c,null,2)+'\n','utf8');console.log(done.join('\n'));}
    if(command==='fill'){noLinks(file);const rel=path.relative(path.resolve(c.root),file);if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('卡片請放在受查資料夾外。');const errors=[];fillTrace(c,args,errors);fs.writeFileSync(file,JSON.stringify(c,null,2)+'\n','utf8');if(errors.length)console.error(errors.join('\n')+'\n其餘合法內容已寫入；只需補送被拒絕的項目。');}
-   console.log(traceOutput(c,command,file).join('\n'));
+   console.log(traceOutput(c,command==='fix'?'status':command,file).join('\n'));
   }catch(e){console.error(e.message);process.exitCode=1;}
  }else console.log('先用 preflight 做開卡前檢查，再用 start 選情境與問題；填卡後用 next 看下一步，或用 status 看進度。用法見 references/playbooks.md。');
 }
