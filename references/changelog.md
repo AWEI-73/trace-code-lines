@@ -14,6 +14,11 @@
 - 條件更準：能力本身在 `if` 裡標「有條件」；只在 `當 …` 分支才會跑的危險動作，「怎麼接」寫「只在特定情況（檔:行 只在「當 …」時）」，不再一律寫成「這條路會」。呼叫處的條件另列在「有條件才會走的動作」。
 - 試跑：`--run "… < {input}"` 改由標準輸入餵檔，第四種情況換成空輸入；Python 試跑設 PYTHONPATH 指向副本、不寫 .pyc、不用使用者 site-packages，不安裝任何套件，缺的套件記在案例與注意事項。
 - 試用：jc（`jc --csv`，Python）。既有自測新增五例（G390）。
+- 合併報告：路線頁加「能不能接」（結論、這條路需要的能力與授權 已准／沒准／還沒問、你要決定、目前准的），鏈卡細節收合在後；`report --card … --route …` 一個指令產單一網頁（舊的鏈卡頁另存 `.card.html`），`route|wired --preflight <答覆.json>` 帶入授權。兩份 JSON 都內嵌。
+- 試跑參數自動推論：沒給 `--run` 時讀 README／docs 用法與隔離副本裡的 `--help`，挑對到問句的指令與旗標，標成推論並列依據；repo 有 `.venv` 時用它的 python。會開連線埠的路線：只開本機回環，等服務起來後 GET 試讀再關掉。
+- 框架入口：click／typer（群組與 `name=`）、argparse `set_defaults(func=…)`、commander `.command().action()`、yargs `.command(…, handler)`、Express／Fastify／Koa（含 `router.route().get().post()`）、Flask／FastAPI 路由。問句點名或由動詞／文件用法推論的才進路線；`wired` 從群組函式能走到子指令。
+- 修正：`require('./')` 結尾斜線、`module.exports = function`、bin 指向未建置的 `lib/` 時退回 `src/`、`.venv`／site-packages 不再被掃、`from .utils import sqlite3` 這類轉出口與 try/except 備援 import 追到標準庫、`sqlite3.connect` 算寫檔、`express()` 本身不再算開連線埠（只有 `.listen`）、只在特定條件才連網的會標「只在特定情況」。
+- 試用：sqlite-utils（click）、json-server（yargs＋Express）；jc、csvtojson 不再需要手寫 `--run`。既有自測新增 G400。
 
 ## 1.37.0-rc.1 (2026-11-19，測試中)
 

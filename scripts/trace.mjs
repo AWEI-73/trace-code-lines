@@ -6,7 +6,7 @@ import {initChain,checkChainAnchor} from './chain-card.mjs';
 import {reviewUnknowns} from './unknowns.mjs';
 import {noLinks} from './walker.mjs';
 import {gitRead} from './git-evidence.mjs';
-import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight} from './usage-route.mjs';
+import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun} from './usage-route.mjs';
 import {renderRouteHtml} from './route-report-html.mjs';
 import {preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,relayText,capLabel,parseCapability} from './preflight.mjs';
 // Dogfood ext round: the step hints say 超出範圍 etc. in Chinese, so --unknown accepts the Chinese class labels too.
@@ -170,7 +170,7 @@ export function fillTrace(c,args,errors=[]){
 export function traceHelp(){
  return [
   '用法：node scripts/trace.mjs <route|wired|route-report|preflight|answer|start|fill|fix|next|status|report> [參數]；--help 顯示本說明。',
-  '用途路線：route --root <repo> --question "一句用途" --out <路線.json> [--html 報告] [--entry bin:名稱|library|檔] [--trial --run "node bin/x {input}"]；',
+  '用途路線：route --root <repo> --question "一句用途" --out <路線.json> [--html 報告] [--entry bin:名稱|library|檔] [--trial [--run "node bin/x {input}"]] [--preflight 答覆.json]；',
   '  功能接好沒：wired --from 檔:函式 --to 函式；改寫答案：route-report --route <路線.json> --out <報告.html> --answer "…"。',  '開卡前三步：preflight --root <repo> --out <問題.json> [--paths 目錄,檔] [--mode 情境]，把印出的問題原文轉給負責人；',
   '  answer --questions <問題.json> --out <答覆.json> --by "誰回的" [--accept-defaults] [--set 1=乙]… [--simulated]；',
   '  start … --preflight <答覆.json>。未回覆＝未授權，接入結論最多「有條件可接」。',
@@ -217,10 +217,17 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
     if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('路線檔請放在受查資料夾外。');
     if(command==='wired'){if(!get('--from')||!get('--to'))throw Error('wired 要給 --from 檔案:函式 與 --to 函式');m=await traceWired(root,{from:get('--from'),to:get('--to'),question:get('--question')});}
     else{m=await traceRoute(root,{question:get('--question')??'',entry:get('--entry'),fn:get('--fn')});
-     if(args.includes('--trial')){const run=get('--run')??(m.entry?.kind==='bin'?'node '+m.entry.file+' {input}':null);if(!run)throw Error('這個入口不是命令列，試跑要給 --run');m.trial=runTrial(root,{run,input:get('--fake-input')&&path.resolve(get('--fake-input')),badInput:get('--bad-input')&&path.resolve(get('--bad-input')),question:m.question});
+     if(args.includes('--trial')){
+      // no --run: infer it from README usage, --help (run in the isolated copy) and the sentence; marked 推論
+      const plan=get('--run')?null:inferRun(root,m);const run=get('--run')??plan?.run;if(!run)throw Error('這個入口不是命令列，試跑要給 --run');if(plan)console.log('試跑指令（推論）：'+plan.display+'\n　依據：'+plan.why.join('；'));
+      const listens=(m.touches?.route??[]).some(t=>t.cap==='listen');
+      m.trial=runTrial(root,{run,plan,server:listens?{paths:(m.framework?.picked??[]).filter(e=>e.kind==='route'&&/GET|ALL/.test(e.method??'GET')).map(e=>e.name.replace(/^\S+\s+/,'')).filter(p=>p.startsWith('/')&&!/[:*{(]/.test(p))}:null,input:get('--fake-input')&&path.resolve(get('--fake-input')),badInput:get('--bad-input')&&path.resolve(get('--bad-input')),question:m.question});
       if(m.trial.cases.find(c=>c.id==='good')?.json?.ok){for(const s of m.stations)if(/^推論/.test(s.status))s.status+='；試跑有正確輸出，間接支持';for(const u of m.unknowns)if(u.kind==='inferred')u.text+='試跑有正確輸出，間接支持這些推論。';}
       m.answer=draftAnswer(m);}}
    }
+   // --preflight 答覆.json: what the owner granted, so the page says 已准／沒准 per capability on this route
+   if(get('--preflight')){const af=path.resolve(get('--preflight')),ans=JSON.parse(fs.readFileSync(af,'utf8')),qs=JSON.parse(fs.readFileSync(path.resolve(path.dirname(af),ans.questionsFile),'utf8')),r=resolveScope(qs,ans);
+    m.scope={granted:r.scope.capabilities.map(x=>parseCapability?parseCapability(x).capability??x:x),pending:r.pending,pendingLabels:r.pendingLabels,simulated:r.simulated,answeredBy:r.answeredBy};}
    const html=command==='route-report'?path.resolve(out):get('--html')&&path.resolve(get('--html'));
    if(command!=='route-report'){noLinks(path.resolve(out));fs.writeFileSync(path.resolve(out),JSON.stringify(m,null,1)+'\n');}
    if(html){noLinks(html);fs.writeFileSync(html,renderRouteHtml(m));}
@@ -262,7 +269,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
   try{
    const file=path.resolve(get('--card')??''),out=get('--out');if(!out)throw Error('請給 --out <報告.html>。');
    // Separate process: trace-report-html imports this module, so an in-process import would deadlock.
-   const extra=args.flatMap((a,i)=>['--proto','--boundary','--instrument-log','--ledger','--chain-dir'].includes(a)?[a,args[i+1]]:[]);
+   const extra=args.flatMap((a,i)=>['--proto','--boundary','--instrument-log','--ledger','--chain-dir'].includes(a)?[a,args[i+1]]:a==='--route'?[a,path.resolve(args[i+1])]:[]);
    const r=spawnSync(process.execPath,[fileURLToPath(new URL('./trace-report-html.mjs',import.meta.url)),'--make','--card',file,'--out',path.resolve(out),...extra],{encoding:'utf8',windowsHide:true});
    if(r.status!==0)throw Error((r.stderr||r.stdout||'').trim().split(/\r?\n/).pop());
    process.stdout.write(r.stdout);

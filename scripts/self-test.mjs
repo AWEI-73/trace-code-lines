@@ -81,6 +81,7 @@ try {
   if(process.env.TRACE_P4_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:p4Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G360_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g360Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G350_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g350Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G400_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g400Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G390_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g390Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G380_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g380Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G370_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g370Checks(root)}));process.exit(0);}
@@ -563,7 +564,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
+  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2590,6 +2591,91 @@ function g370Checks(root){
 }
 
 // 1.38 usage-route: AST call graph, aliases, reachability, route stations, isolated trial, report, fallback.
+async function g400Checks(root){
+ const checks=[],area=join(root,'g400'),py=join(area,'fwpy'),js=join(area,'fwjs');
+ const ast=await loadAst();
+ if(!ast.ok){checks.push('G400 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G400 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G400 '+name);};
+ const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body,'utf8');};
+ const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
+ const {inferRun}=await import('./usage-route.mjs');const {capNeeds}=await import('./route-report-html.mjs');
+ // --- JS: commander command that registers Express routes, plus a yargs CLI ---
+ put(js,'package.json','{"name":"fwjs","version":"1.0.0","bin":{"fwjs":"./bin/fwjs.js"},"dependencies":{"commander":"*","express":"*","yargs":"*"}}\n');
+ put(js,'README.md','# fwjs\n\n```\n$ fwjs serve db.json\n$ fwjs wipe\n```\n');
+ put(js,'bin/fwjs.js',"#!/usr/bin/env node\nconst {program} = require('commander');\nconst {serve} = require('../lib/server');\nprogram.command('serve <file>').action(serve);\nprogram.command('wipe').action(() => require('child_process').execSync('rm -rf data'));\nprogram.parse();\n");
+ put(js,'lib/server.js',"const express = require('express');\nconst fs = require('fs');\nlet file;\nfunction list(req, res) { res.json(JSON.parse(fs.readFileSync(file, 'utf8'))); }\nfunction add(req, res) { fs.writeFileSync(file, '{}'); res.end(); }\nfunction serve(f) {\n  file = f;\n  const app = express();\n  const r = express.Router();\n  r.route('/items').get(list).post(add);\n  app.get('/health', (req, res) => res.send('ok'));\n  app.use(r);\n  app.listen(3000);\n}\nmodule.exports = {serve};\n");
+ put(js,'lib/build.js',"const yargs = require('yargs');\nconst https = require('https');\nfunction build(argv) { https.get(argv.url); }\nyargs.command('build <url>', 'build it', () => {}, build).parse();\n");
+ gitInit(js);
+ const gj=buildGraph(ast,js),fj=gj.framework.map(e=>e.framework+':'+e.kind+':'+e.name).sort();
+ await check('JS framework entries: commander .command().action, yargs .command handler, express app.get and router.route().get().post() become entries',()=>{
+  for(const k of ['commander:command:serve','commander:command:wipe','yargs:command:build','express:route:GET /health','express:route:GET /items','express:route:POST /items'])assert(fj.includes(k),k+' in '+fj.join(','));
+  const before=astReach(gj,['bin/fwjs.js::<top>'],{framework:'none'}),after=astReach(gj,['bin/fwjs.js::<top>']);
+  assert(!before.has('lib/server.js::list')&&after.has('lib/server.js::list')&&after.has('lib/server.js::add'),'routes only reachable through framework edges');
+  assert.equal(capOfRoute(gj,'lib/server.js',13),'listen','app.listen is the port; express() alone is not');
+ });
+ const mj=await traceRoute(js,{question:'用 serve 指令給它一份 db.json，用 GET /items 讀時會不會改到檔案？',ast});
+ await check('narrowing: the question names serve and GET /items; wipe (runs a program) and POST /items (writes) stay off the route',()=>{
+  assert.deepEqual(mj.framework.picked.map(e=>e.name).sort(),['GET /items','serve']);
+  assert(mj.stations.some(s=>/框架入口（commander 指令 serve）/.test(s.label)));
+  assert(!mj.touches.route.some(t=>t.cap==='subprocess'),'wipe not entered');assert(!mj.touches.route.some(t=>t.cap==='write-file'),'POST add not entered');
+  assert(mj.touches.route.some(t=>t.cap==='listen'&&t.file==='lib/server.js'));
+ });
+ await check('wired: cli file to a route handler goes through the framework registration, not 走不到',async()=>{
+  const w=await traceWired(js,{from:'bin/fwjs.js',to:'server.js:list',ast});assert(w.answer.text.startsWith('原碼接線完整'),w.answer.text);
+ });
+ await check('server trial: loopback only, waits for the port, GETs the routes, stops it; GET leaves files alone',()=>{
+  if(spawnSync('unshare',['-rn','true']).status!==0)return;
+  const sv=join(area,'srv');put(sv,'package.json','{"name":"srv","version":"1.0.0","bin":{"srv":"./srv.js"}}\n');
+  put(sv,'srv.js',"const http = require('http'); const fs = require('fs');\nconst data = fs.readFileSync(process.argv[2], 'utf8'); JSON.parse(data);\nhttp.createServer((q, s) => s.end(data)).listen(3000, 'localhost', () => console.log('http://localhost:3000/items'));\n");gitInit(sv);
+  const t=runTrial(sv,{run:'node srv.js {input}',question:'給它一份 db.json，用 GET 讀',server:{paths:['/items']}});const g=t.cases.find(c=>c.id==='good');
+  assert(t.server&&g.server.listened&&g.server.stoppedByProbe,'listened and stopped');assert(g.server.gets.some(x=>x.status===200&&/posts/.test(x.shape??'')));assert.deepEqual(g.changed,[]);
+  assert.equal(t.cases.find(c=>c.id==='bad').server.listened,false);
+ });
+ // --- Python: click group + commands, argparse subparsers, Flask route ---
+ put(py,'pyproject.toml','[project]\nname = "fwpy"\nversion = "0.1.0"\n\n[project.scripts]\nfwpy = "fwpy.cli:cli"\n');
+ put(py,'README.md','# fwpy\n\n```\n$ fwpy dump data.db\n$ fwpy insert data.db rows input.csv --csv\n```\n');
+ put(py,'docs/changelog.md','$ fwpy convert data.db rows --csv \\\n');
+ put(py,'fwpy/__init__.py','');
+ put(py,'fwpy/cli.py',"import click\nimport sqlite3\nimport urllib.request\n\n\n@click.group()\ndef cli():\n    pass\n\n\n@cli.command()\n@click.argument('path')\n@click.argument('table')\n@click.argument('file')\n@click.option('--csv', is_flag=True)\ndef insert(path, table, file, csv):\n    save(path, open(file).read())\n\n\n@cli.command(name='dump')\ndef dump_cmd():\n    urllib.request.urlopen('https://example.invalid')\n\n\ndef save(path, text):\n    sqlite3.connect(path).execute('select 1')\n");
+ put(py,'fwpy/tool.py',"import argparse\nimport subprocess\n\n\ndef scan(args):\n    subprocess.run(['ls'])\n\n\ndef main():\n    p = argparse.ArgumentParser()\n    sub = p.add_subparsers()\n    s = sub.add_parser('scan')\n    s.set_defaults(func=scan)\n    a = p.parse_args()\n    a.func(a)\n");
+ put(py,'fwpy/web.py',"from flask import Flask\napp = Flask(__name__)\n\n\n@app.route('/items', methods=['POST'])\ndef add():\n    open('items.txt', 'w').write('x')\n");
+ gitInit(py);
+ if(!ast.langs.python){checks.push('G400 python SKIPPED: tree-sitter-python not installed');return checks;}
+ const gp=buildGraph(ast,py),fp=gp.framework.map(e=>e.framework+':'+e.kind+':'+e.name).sort();
+ await check('Python framework entries: click group/commands (name= too), argparse set_defaults, Flask route with methods',()=>{
+  for(const k of ['click:group:cli','click:command:insert','click:command:dump','argparse:command:scan','flask:route:POST /items'])assert(fp.includes(k),k+' in '+fp.join(','));
+  assert(astReach(gp,['fwpy/tool.py::main']).has('fwpy/tool.py::scan'),'set_defaults(func=scan) handler reached from main');
+ });
+ const q='用 insert 指令給它一份 CSV，它能不能只把資料寫進我指定的 SQLite 檔，而且不連網？';
+ const mp=await traceRoute(py,{question:q,ast});
+ await check('click narrowing: insert is entered, dump (network) is not; sqlite3.connect counts as writing a file',()=>{
+  assert.deepEqual(mp.framework.picked.map(e=>e.name),['insert']);
+  assert(mp.touches.route.some(t=>t.cap==='write-file'&&/sqlite3\.connect/.test(t.canon)));assert(!mp.touches.route.some(t=>t.cap==='network'));
+  assert(mp.answer.text.includes('fwpy insert'));
+ });
+ await check('unnamed command is inferred from the verb (寫進 → insert) and marked as inferred',async()=>{
+  const m2=await traceRoute(py,{question:'給它一份 CSV，它能不能把資料寫進我指定的 SQLite 檔？',ast});
+  assert.deepEqual(m2.framework.picked.map(e=>e.name),['insert']);assert(/推論/.test(m2.framework.how));assert(m2.unknowns.some(u=>u.kind==='framework'));
+ });
+ await check('wired: from the click group function to a helper used by one command',async()=>{
+  const w=await traceWired(py,{from:'fwpy/cli.py:cli',to:'save',ast});assert(w.answer.text.startsWith('原碼接線完整'),w.answer.text);
+ });
+ await check('trial args are inferred from README usage for the picked command; changelog and continuation lines are skipped',()=>{
+  const plan=inferRun(py,mp);assert(plan?.inferred);assert(/insert data\.db rows \{input\} --csv/.test(plan.run),plan.run);
+  assert(plan.why.some(w=>/README\.md:\d+/.test(w))&&!plan.why.some(w=>/changelog/.test(w)));
+ });
+ await check('merged report: 怎麼接 then 能不能接 then 路線; grants from --preflight mark caps 已准 / 沒准; both JSON blocks embedded',()=>{
+  mp.scope={granted:['fs-write'],pending:[],pendingLabels:[]};const needs=capNeeds(mp);
+  assert(needs.some(n=>n.grant==='fs-write'&&n.granted===true));
+  const card={decision:'有條件可接',verdict:{why:['只寫指定檔']},ownerDecisions:[],candidates:[],unknowns:[]};
+  const h=renderRouteHtml(mp,{card});const i=k=>h.indexOf(k);
+  assert(i('怎麼接')>0&&i('怎麼接')<i('能不能接')&&i('能不能接')<i('<h2>路線'),'order');
+  assert(h.includes('id="trace-route-data"')&&h.includes('id="trace-report"')&&h.includes('已准'));
+  assert(!/<(script|link|img)[^>]+(src|href)=/i.test(h));
+ });
+ return checks;
+}
+function capOfRoute(g,file,line){const t=astTouches(g,null).find(t=>t.file===file&&t.line===line);return t?.cap??null;}
 async function g390Checks(root){
  const checks=[],area=join(root,'g390'),repo=join(area,'repo');for(const d of ['minipy/plugins'])fs.mkdirSync(join(repo,d),{recursive:true});
  const put=(name,body)=>fs.writeFileSync(join(repo,name),body,'utf8');

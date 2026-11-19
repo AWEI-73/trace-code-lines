@@ -10,7 +10,7 @@ import {PY_FILE,parsePy,resolvePy,pyCanon,pyBinding} from './ast-python.mjs';
 const sha256=s=>crypto.createHash('sha256').update(s).digest('hex');
 const SKILL_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export const JS_FILE=/\.(m?js|cjs|jsx|ts|mts|cts|tsx)$/;
-const SKIP_DIR=/(^|\/)(node_modules|\.git|coverage|\.next|\.nuxt)(\/|$)/;
+const SKIP_DIR=/(^|\/)(node_modules|\.git|coverage|\.next|\.nuxt|\.venv|venv|\.tox|__pycache__|site-packages)(\/|$)/;
 const TYPE_DECL=/\.d\.(ts|mts|cts)$/;
 let cached=null;
 // Search order: $TCL_AST_DIR (a folder with node_modules), then this skill's own node_modules.
@@ -43,8 +43,8 @@ const GLOBALS=new Set(['fetch','XMLHttpRequest','WebSocket','EventSource','proce
 const CAPS=[
  ['subprocess',/^node:child_process\.(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)$|^pkg:(execa|cross-spawn|shelljs)(\.|$)|^py:subprocess\.(run|call|check_call|check_output|Popen|getoutput|getstatusoutput)$|^py:os\.(system|popen|exec\w*|spawn\w*|posix_spawn\w*)$|^pkg:(sh|plumbum|pexpect)(\.|$)/],
  ['network',/^global\.(fetch|XMLHttpRequest#?|WebSocket#?|EventSource#?)$|^node:(http|https|http2)\.(request|get|connect)$|^node:(net|tls)\.(connect|createConnection|Socket#?)$|^node:dgram\.createSocket$|^node:dns(\/promises)?\.\w+$|^pkg:(axios|node-fetch|got|undici|request|superagent|ws|cross-fetch|isomorphic-fetch|ky|follow-redirects)(\.|#|$)|^py:(urllib\.request\.(urlopen|urlretrieve|build_opener)|http\.client\.\w*Connection|socket\.(socket|create_connection)|smtplib\.SMTP\w*|ftplib\.FTP\w*|imaplib\.IMAP4\w*|poplib\.POP3\w*|xmlrpc\.client\.ServerProxy)$|^pkg:(requests|httpx|aiohttp|urllib3|websockets|websocket|boto3|botocore|grpc|paramiko|pycurl)(\.|#|$)/],
- ['listen',/^node:(http|https|http2|net|tls)\.createServer$|\.createServer\(\)#?\.listen$|^pkg:(express|koa|fastify)(\.|#|$)|^py:(http\.server|socketserver)\.\w+$|^pkg:(flask|fastapi|uvicorn|django|tornado|bottle|sanic|starlette|gunicorn|aiohttp\.web)(\.|#|$)/],
- ['write-file',/^node:fs(\/promises)?\.(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdir|mkdirSync|rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|cp|cpSync|symlink|symlinkSync|chmod|chmodSync|truncate|truncateSync)$|^py:(shutil\.(copy\w*|move|rmtree|make_archive|unpack_archive)|os\.(remove|unlink|rename|replace|makedirs|mkdir|rmdir|removedirs|chmod|chown|symlink|link|truncate))$|^py:pathlib\.\w*Path\(\)\.(write_text|write_bytes|mkdir|unlink|rename|replace|touch|rmdir|symlink_to|chmod)$/],
+ ['listen',/^node:(http|https|http2|net|tls)\.createServer$|\.createServer\(\)#?\.listen$|^(pkg|local|file):.*[.)#]\.?listen$|^pkg:(express|koa|fastify)(\(\))?#?\.listen$|^py:(http\.server|socketserver)\.\w+$|^pkg:(flask|fastapi|uvicorn|django|tornado|bottle|sanic|starlette|gunicorn|aiohttp\.web)(\.|#|$)/],
+ ['write-file',/^node:fs(\/promises)?\.(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdir|mkdirSync|rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|cp|cpSync|symlink|symlinkSync|chmod|chmodSync|truncate|truncateSync)$|^py:(shutil\.(copy\w*|move|rmtree|make_archive|unpack_archive)|os\.(remove|unlink|rename|replace|makedirs|mkdir|rmdir|removedirs|chmod|chown|symlink|link|truncate))$|^py:pathlib\.\w*Path\(\)\.(write_text|write_bytes|mkdir|unlink|rename|replace|touch|rmdir|symlink_to|chmod)$|^py:(sqlite3\.connect|dbm\.open|shelve\.open)$|^pkg:(better-sqlite3|sqlite3)(\.|#|$)/],
  ['read-file',/^node:fs(\/promises)?\.(readFile|readFileSync|createReadStream|readdir|readdirSync|existsSync|exists|stat|statSync|lstat|lstatSync|access|accessSync|open|openSync|read|readSync|opendir)$|^py:(os\.(listdir|scandir|walk)|glob\.\w+)$|^py:pathlib\.\w*Path\(\)\.(read_text|read_bytes|iterdir|glob|rglob|open)$/],
  ['stdin',/^global\.process\.stdin(\.\w+)?$|^py:sys\.stdin(\.\w+)*$|^global\.input$|^py:fileinput\.input$/],
  ['stdout',/^global\.console\.(log|info|debug|table|dir)$|^global\.process\.stdout\.write$|^global\.print$|^py:sys\.stdout(\.buffer)?\.write$/],
@@ -118,7 +118,7 @@ function parseFile(ast,root,rel){
     let m;
     if(l.type==='identifier'){if(fv){const id=addUnit(fv,lt);bind(lt,{kind:'unit',id},n,'top');}else bind(lt,{kind:'expr',node:r},n,'assign');}
     else if((m=lt.match(/^([A-Za-z_$][\w$]*)\.prototype\.([A-Za-z_$][\w$]*)$/))){if(fv)addUnit(fv,m[1]+'.'+m[2],m[1]);}
-    else if(lt==='module.exports'){f.exports.set('',{node:r});
+    else if(lt==='module.exports'){f.exports.set('',fv&&!nodeUnit.has(fv.id)?{unit:addUnit(fv,'module.exports')}:{node:r});
      // module.exports = {a, b: c} → named exports a, b
      if(unwrap(r)?.type==='object')for(const p of unwrap(r).namedChildren){if(p.type==='shorthand_property_identifier')f.exports.set(p.text,{local:p.text});else if(p.type==='pair'){const k=p.childForFieldName('key'),v=p.childForFieldName('value');const kn=k?.type==='property_identifier'?k.text:strOf(k);if(kn&&v){const fv2=funcValue(v);if(fv2&&!nodeUnit.has(fv2.id)){addUnit(fv2,'exports.'+kn);f.exports.set(kn,{unit:rel+'::exports.'+kn});}else f.exports.set(kn,v.type==='identifier'?{local:v.text}:{node:v});}}else if(p.type==='method_definition'){const kn=p.childForFieldName('name')?.text;if(kn){addUnit(p,'exports.'+kn);f.exports.set(kn,{unit:rel+'::exports.'+kn});}}}if(fv&&!nodeUnit.has(fv.id)){const nm=fv.childForFieldName?.('name')?.text??'module.exports';addUnit(fv,nm);if(nm!=='module.exports')bind(nm,{kind:'unit',id:rel+'::'+nm},null);}}
     else if((m=lt.match(/^(?:module\.)?exports\.([A-Za-z_$][\w$]*)$/))){f.exports.set(m[1],{node:r});if(fv&&!nodeUnit.has(fv.id))addUnit(fv,'exports.'+m[1]);}
@@ -157,7 +157,25 @@ function parseFile(ast,root,rel){
  for(const u of f.units.values())if(!u.cls&&[...f.units.values()].some(v=>v.cls===u.name))u.cls=u.name;
  for(const x of pending){const cls=enclosingProtoClass(x.n);if(!cls)continue;if(x.fv){if(!nodeUnit.has(x.fv.id))addUnit(x.fv,cls+'.'+x.prop,cls);}else if(!f.fields.has(cls+'#.'+x.prop))f.fields.set(cls+'#.'+x.prop,{node:x.r});}
  // Pass 2: calls / refs with enclosing unit + condition context.
+ // Framework entries (JS): commander .command('x').action(fn), yargs .command('x', d, b, fn), Express/Koa/Fastify app.get('/p', fn).
+ // Inline handlers become their own units so a route can include one command without the others.
+ f.framework=[];const srcs=new Set([...f.imports.map(i=>i.src),...[...body.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map(m=>m[1])]);const has=re=>[...srcs].some(x=>re.test(x));
+ const WEB=has(/^(express|koa|@koa\/router|koa-router|fastify|hono|restify|polka|@tinyhttp\/app|router)$/)?([...srcs].find(x=>/^(express|koa|@koa\/router|koa-router|fastify|hono|restify|polka|@tinyhttp\/app|router)$/.test(x))):null;
+ const CLI=has(/^(commander|yargs|yargs\/yargs|cac|sade)$/)?[...srcs].find(x=>/^(commander|yargs|yargs\/yargs|cac|sade)$/.test(x)).replace(/\/yargs$/,''):null;
+ const fwHandler=(node,name,entry)=>{const fv=funcValue(node);if(fv){const id=nodeUnit.get(fv.id)??addUnit(fv,name);f.framework.push({...entry,unit:id});}else if(unwrap(node)?.type==='identifier'||unwrap(node)?.type==='member_expression')f.framework.push({...entry,handlerNode:unwrap(node)});};
+ // router.route('/x').get(a).post(b): the path sits on an earlier call in the chain
+ const routeOf=callee=>{let o=callee.childForFieldName('object');for(let i=0;o&&i<8;i++){o=unwrap(o);if(o?.type!=='call_expression')return null;const c=unwrap(o.childForFieldName('function'));if(c?.type==='member_expression'&&propName(c.childForFieldName('property'))==='route'){const s=strOf(o.childForFieldName('arguments')?.namedChildren?.[0]);return s&&/^[/*]/.test(s)?s:null;}o=c?.childForFieldName?.('object');}return null;};
+ (function fw(n){
+  if(n.type==='call_expression'){const callee=unwrap(n.childForFieldName('function')),args=n.childForFieldName('arguments')?.namedChildren??[];const prop=callee?.type==='member_expression'?propName(callee.childForFieldName('property')):null;const line=n.startPosition.row+1,regNode=n;
+   if(CLI&&prop==='action'&&args[0]){let o=callee.childForFieldName('object'),nm=null;for(let i=0;o&&i<8&&!nm;i++){o=unwrap(o);if(o?.type==='call_expression'){const c=unwrap(o.childForFieldName('function'));if(c?.type==='member_expression'&&propName(c.childForFieldName('property'))==='command'){nm=strOf(o.childForFieldName('arguments')?.namedChildren?.[0])?.split(/\s/)[0]??null;}o=c?.childForFieldName?.('object');}else break;}
+    fwHandler(args[0],'command '+(nm??'(主程式)'),{kind:'command',framework:CLI,name:nm??'(主程式)',line,regNode,via:n.text.replace(/\s+/g,' ').slice(0,60)});}
+   else if(CLI&&prop==='command'&&args.length>=2&&strOf(args[0])!=null){const h=args.slice(1).reverse().find(a=>funcValue(a)||unwrap(a)?.type==='identifier'&&args.indexOf(a)>=3);const nm=strOf(args[0]).split(/\s/)[0];if(h)fwHandler(h,'command '+nm,{kind:'command',framework:CLI,name:nm,line,regNode,via:n.text.replace(/\s+/g,' ').slice(0,60)});}
+   else if(WEB&&/^(get|post|put|delete|del|patch|all|head|options)$/.test(prop??'')&&(args.length>=2&&/^[/*]/.test(strOf(args[0])??'')||args.length>=1&&routeOf(callee))){const meth=prop==='all'?'ALL':prop==='del'?'DELETE':prop.toUpperCase(),direct=/^[/*]/.test(strOf(args[0])??''),pth=direct?strOf(args[0]):routeOf(callee);
+    for(const h of args.slice(direct?1:0))fwHandler(h,meth+' '+pth,{kind:'route',framework:WEB,name:meth+' '+pth,method:meth,path:pth,line,regNode,via:n.text.replace(/\s+/g,' ').slice(0,60)});}
+   else if(WEB&&prop==='route'&&args[0]&&unwrap(args[0])?.type==='object'){const o=unwrap(args[0]),get=k=>o.namedChildren.find(p=>p.type==='pair'&&(p.childForFieldName('key')?.text===k||strOf(p.childForFieldName('key'))===k))?.childForFieldName('value');const pth=strOf(get('url'))??strOf(get('path')),meth=(strOf(get('method'))??'GET').toUpperCase();if(pth&&get('handler'))fwHandler(get('handler'),meth+' '+pth,{kind:'route',framework:WEB,name:meth+' '+pth,method:meth,path:pth,line,regNode,via:n.text.replace(/\s+/g,' ').slice(0,60)});}}
+  for(const c of n.namedChildren)fw(c);})(tree.rootNode);
  const unitOf=n=>{for(let p=n;p;p=p.parent)if(nodeUnit.has(p.id))return nodeUnit.get(p.id);return TOP;};
+ for(const e of f.framework){e.reg=unitOf(e.regNode.parent);delete e.regNode;}
  function context(n){
   // Nearest guard inside the same unit: if condition, ternary, &&/||, catch, error-event handler.
   const ctx=[];let prev=n;
@@ -209,7 +227,11 @@ export function buildGraph(ast,root,{files=null,focus=[]}={}){
   for(const im of f.imports)im.target=f.lang==='python'?resolvePy(g,f.rel,im.src,im.member):resolveImport(g,f.rel,im.src);
   for(const c of f.calls){c.canon=c.synthetic??canonOf(g,f,c.node,c.unit);if(c.isNew&&c.canon)c.canon+='#';c.cap=capOf(c.canon);if(f.lang==='python')pyCapFix(c);if(c.cap==='env'){c.envName=f.lang==='python'?(c.arg0?.match(/^['"]([\w.-]+)['"]$/)?.[1]??c.text.match(/environ\[['"]([\w.-]+)/)?.[1]??null):c.canon.split('.')[2]??null;}}
   for(const r of f.refs)r.canon=canonOf(g,f,r.node,r.unit);
+  for(const e of f.framework??[]){if(e.handlerNode&&!e.unit){const ts=targetsOf(g,canonOf(g,f,e.handlerNode,e.reg??f.rel+'::<top>'));e.unit=ts[0]??null;}delete e.handlerNode;e.file=f.rel;
+   // @cli.command under `def cli()` group: reaching the group function reaches its commands too
+   if(e.owner){const u=[...f.units.values()].find(u=>u.name===e.owner);if(u&&u.id!==e.unit)e.ownerUnit=u.id;}}
  }
+ g.framework=[...g.files.values()].flatMap(f=>(f.framework??[]).filter(e=>e.unit));g.fwUnits=new Map(g.framework.map(e=>[e.unit,e]));
  return g;
 }
 function isScriptNoExt(root,r,py=false){if(path.posix.extname(r)||!/(^|\/)(bin|cli|scripts)\//.test(r))return false;try{const h=fs.readFileSync(path.join(root,r),'utf8').slice(0,80);return /^#!.*\bnode\b/.test(h)||py&&/^#!.*\bpython/.test(h);}catch{return false;}}
@@ -220,7 +242,7 @@ function pyCapFix(c){const a=c.pyArgs;if(!a)return;
 function readPkg(g,dir){if(g.pkgCache.has(dir))return g.pkgCache.get(dir);let p=null;try{p=JSON.parse(fs.readFileSync(path.join(g.root,dir,'package.json'),'utf8'));}catch{}g.pkgCache.set(dir,p);return p;}
 const EXT=['.ts','.tsx','.mts','.cts','.js','.jsx','.mjs','.cjs'];
 function resolveFile(g,base){
- base=path.posix.normalize(base);if(base.startsWith('../')||base==='..')return null;
+ base=path.posix.normalize(base).replace(/\/+$/,'')||'.';if(base.startsWith('../')||base==='..')return null;
  const has=p=>g.set.has(p);
  if(has(base)&&!g.set.has(base+'/package.json'))return base;
  const ext=path.posix.extname(base);
@@ -331,9 +353,11 @@ export function targetsOf(g,canon,seen=new Set()){
 function superOf(g,f,cls){const n=f.supers.get(cls);if(!n)return null;const c=canonOf(g,f,n,f.rel+'::<top>');return c?c.replace(/#$/,''):null;}
 export function superUnits(g,u){const f=g.files.get(u.file);const sc=f?superOf(g,f,u.cls):null;return sc?targetsOf(g,sc+'#'):[];}
 // Reachability from root units; returns parent map for station paths.
-export function reach(g,roots,{classes=null,hints=null}={}){
+export function reach(g,roots,{classes=null,hints=null,framework='all'}={}){
  const parent=new Map(),queue=[];
- const push=(id,from,edge)=>{if(!id||parent.has(id))return;parent.set(id,{from,...edge});queue.push(id);};
+ // framework: 'all' | 'none' | Set of handler unit ids this route may enter (others stay off, even if referenced)
+ const fwOff=id=>framework!=='all'&&g.fwUnits?.has(id)&&!(framework instanceof Set&&framework.has(id))&&!roots.includes(id);
+ const push=(id,from,edge)=>{if(!id||parent.has(id)||fwOff(id))return;parent.set(id,{from,...edge});queue.push(id);};
  for(const r of roots)push(r,null,{why:'入口'});
  const unitFile=id=>id.split('::')[0];
  // Method calls on values we cannot type (x.chain().push(t)) link by method name to classes this route instantiates.
@@ -359,6 +383,7 @@ export function reach(g,roots,{classes=null,hints=null}={}){
     const list=pendingByName.get(c.prop)??pendingByName.set(c.prop,[]).get(c.prop);if(list.length<3)list.push(e);}
   }
   for(const r of f.refs){if(r.unit!==id||!r.canon)continue;for(const t of targetsOf(g,r.canon))push(t,id,{why:'當成回呼傳入',file:rel,line:r.line});}
+  for(const e of g.framework??[])if(e.reg===id||e.ownerUnit===id)push(e.unit,id,{why:'框架註冊（'+e.framework+(e.kind==='route'?' 路由 ':' 指令 ')+e.name+'）',file:e.file,line:e.line,text:e.via});
   // Python import_module(f'pkg.parsers.{name}'): pick the module(s) the question names (csv → pkg/parsers/csv.py).
   for(const d of f.dynImports??[]){if(d.unit!==id)continue;for(const pre of d.prefixes){const dir=pre.replace(/\.$/,'').split('.').join('/');
    for(const cand of g.files.values()){if(path.posix.dirname(cand.rel)!==dir)continue;const base=path.posix.basename(cand.rel,'.py');

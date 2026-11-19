@@ -9,12 +9,26 @@ const RISKY=new Set(['subprocess','network','listen','paid','real-account','writ
 // a touch that only runs under its own `if` (not an else / 不成立 branch) is conditional, not the normal path
 const onlyIf=x=>(x.ownCtx??[]).some(c=>/^當 /.test(c)&&!/不成立/.test(c));
 const riskLabels=R=>{const by=new Map();for(const t of R.filter(x=>RISKY.has(x.cap)&&x.cap!=='dynamic'))(by.get(t.label)??by.set(t.label,[]).get(t.label)).push(t);return [...by].map(([l,ts])=>ts.every(onlyIf)?l+'（只在特定情況）':l);};
+// route capability → the fixed preflight options the owner grants (preflight.mjs CAPS)
+export const CAP_GRANT={subprocess:'exec',network:'network',listen:'network','write-file':'fs-write','read-file':'fs-read',paid:'paid','real-account':'real-account','mcp-tools':'mcp-shell'};
+const GRANT_LABEL={'fs-read':'讀檔','fs-write':'寫檔',exec:'執行其他程式',network:'連外網','real-account':'用真帳號',paid:'花錢',secrets:'讀機密','mcp-shell':'讓模型下系統指令'};
+const SECRET_ENV=/KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH/i;
+// What this route needs the owner to grant, one row per preflight option, with the first place it happens.
+export function capNeeds(m){
+ const rows=new Map();
+ for(const t of m.touches?.route??[]){const g=t.cap==='env'?(SECRET_ENV.test(t.envName??'')?'secrets':null):CAP_GRANT[t.cap];if(!g)continue;
+  const r=rows.get(g)??rows.set(g,{grant:g,label:GRANT_LABEL[g],at:[],cond:true}).get(g);if(r.at.length<3)r.at.push(t);if(!onlyIf(t))r.cond=false;}
+ const granted=new Set(m.scope?.granted??[]);
+ return [...rows.values()].map(r=>({...r,granted:granted.has(r.grant),known:!!m.scope})).sort((a,b)=>(a.grant==='fs-read')-(b.grant==='fs-read'));
+}
 export function verdictOf(m){
  if(!m.entry||m.engine?.name!=='tree-sitter')return {label:'待查',tone:'amber',why:!m.entry?'找不到入口':'沒有語法解析，只能文字比對'};
  const risky=(m.touches?.route??[]).filter(t=>RISKY.has(t.cap)&&t.cap!=='dynamic');
  const cav=m.answer?.parts?.caveats??[],unk=(m.unknowns??[]).filter(u=>u.kind!=='inferred');
  if(risky.some(t=>['paid','real-account'].includes(t.cap)))return {label:'不建議直接接',tone:'red',why:'這條路會花錢或用真帳號'};
- if(risky.length||cav.length||unk.length||!m.trial?.ran)return {label:'有條件可接',tone:'amber',why:[risky.length?'這條路會'+riskLabels(risky).join('、'):null,cav.length?cav.length+' 個接法注意事項':null,unk.length?unk.length+' 個未知':null,!m.trial?.ran?'還沒試跑':null].filter(Boolean).join('；')};
+ const notGranted=capNeeds(m).filter(r=>!r.granted&&r.grant!=='fs-read');
+ if(m.card?.decision==='不建議')return {label:'不建議直接接',tone:'red',why:m.card.summary??'讀碼的人結論是不建議'};
+ if(risky.length&&notGranted.length||cav.length||unk.length||!m.trial?.ran||m.scope?.pending?.length)return {label:'有條件可接',tone:'amber',why:[risky.length?'這條路會'+riskLabels(risky).join('、')+(m.scope?(notGranted.length?'（'+notGranted.map(r=>r.label).join('、')+' 還沒准）':'（都已准）'):''):null,cav.length?cav.length+' 個接法注意事項':null,unk.length?unk.length+' 個未知':null,!m.trial?.ran?'還沒試跑':null,m.scope?.pending?.length?'開卡前問題還有 '+m.scope.pending.length+' 題沒回':null].filter(Boolean).join('；')};
  return {label:'可接',tone:'green',why:'原碼與試跑都對得上'};
 }
 const css=String.raw`
@@ -34,9 +48,33 @@ table{width:100%;border-collapse:collapse;background:var(--card);border:1px soli
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}.card h3{font-size:1rem;margin:0 0 6px}.card ul{margin:4px 0 0;padding-left:1.1em}
 details{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:10px 0}summary{cursor:pointer;font-weight:600}
 .notes{background:var(--amberbg);border-radius:10px;padding:10px 14px;margin:0 0 14px}.notes b{color:var(--amber)}.notes ul{margin:4px 0 0;padding-left:1.2em}.verified{margin:12px 0 0;font-size:.92rem}
+.verdict{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:16px 0}.verdict h2{margin:0 0 8px}.chip.big{font-size:1rem;padding:4px 14px}.decide{background:var(--amberbg);border-radius:10px;padding:10px 14px;margin-top:12px}.decide ol{margin:6px 0 0;padding-left:1.3em}.small{font-size:.85rem}h3{font-size:1rem;margin:12px 0 4px}
 .warn{background:var(--amberbg);color:var(--amber);border-radius:10px;padding:10px 14px;margin:10px 0}
 @media(max-width:600px){main{padding:18px 12px 40px}.kv{grid-template-columns:1fr}.kv dt{margin-top:6px}.answer{padding:14px}.route li{padding-left:34px}table,thead,tbody,tr,td,th{display:block}thead{display:none}td{border:0;padding:4px 10px}tr{border-bottom:1px solid var(--line);padding:6px 0}td[data-k]:before{content:attr(data-k)'：';color:var(--muted);font-weight:600}}
 `;
+function decideHtml(m,v){
+ const needs=capNeeds(m),c=m.card;
+ const decide=[...needs.filter(r=>!r.granted&&r.grant!=='fs-read').map(r=>({text:'要不要准：'+r.label+(r.cond?'（只在特定情況）':''),at:r.at,next:m.scope?'你還沒准；不准就維持「有條件可接」':'還沒做開卡前問答（加 --preflight 答覆.json 帶入），先當作不准'})),
+  ...(m.scope?.pendingLabels??[]).map(x=>({text:'開卡前問題沒回：'+x,next:'沒回覆就當作不准'})),
+  ...(c?.ownerDecisions??[]).filter(x=>x.kind!=='capability'&&x.kind!=='preflight').map(x=>({text:x.text,next:x.next,anchors:x.anchors}))];
+ const rows=needs.map(r=>'<tr><td data-k="能力">'+esc(r.label)+(r.cond?' <span class="chip amber">只在特定情況</span>':'')+'</td><td data-k="這條路在哪">'+r.at.map(loc).join(' ')+'</td><td data-k="授權">'+(!r.known?'<span class="chip amber">還沒問</span>':r.granted?'<span class="chip green">已准</span>':'<span class="chip red">沒准</span>')+'</td></tr>').join('');
+ return '<section class="verdict" id="verdict"><h2>能不能接</h2><p><span class="chip big '+v.tone+'">'+esc(v.label)+'</span> <span class="muted">'+esc(v.why)+'</span></p>'+
+  (c?'<p class="muted">讀碼結論（鏈卡）：<b>'+esc(c.decision)+'</b>'+(c.decisionCap?'，上限 '+esc(c.decisionCap):'')+(c.summary?'。'+esc(c.summary):'')+'</p>'+(c.why?.length?'<ul>'+c.why.slice(0,6).map(x=>'<li>'+esc(x.text)+' '+(x.anchors??[]).slice(0,2).map(a=>'<code class="loc">'+esc(a)+'</code>').join(' ')+'</li>').join('')+'</ul>':''):'')+
+  (needs.length?'<table><thead><tr><th>這條路需要的能力</th><th>在哪</th><th>授權</th></tr></thead><tbody>'+rows+'</tbody></table>':'<p class="muted">這條路沒有需要授權的能力。</p>')+
+  '<div class="decide"><b>你要決定（'+decide.length+'）</b>'+(decide.length?'<ol>'+decide.map(x=>'<li>'+esc(x.text)+' '+(x.at??[]).slice(0,2).map(loc).join(' ')+(x.anchors??[]).slice(0,2).map(a=>' <code class="loc">'+esc(a)+'</code>').join('')+'<div class="muted small">'+esc(x.next??'')+'</div></li>').join('')+'</ol>':'<p class="muted">沒有要你決定的事。</p>')+
+  (m.scope?'<p class="small">你目前准的：'+((m.scope.granted??[]).length?m.scope.granted.map(g=>'<span class="chip green">'+esc(GRANT_LABEL[g]??g)+'</span>').join(''):'<span class="chip red">什麼都沒准</span>')+(m.scope.simulated?' <span class="chip amber">模擬回覆</span>':'')+'</p>':'')+'</div></section>';
+}
+function cardDetails(c){
+ if(!c)return '';
+ const cand=c.candidates??[];
+ return '<details id="card"><summary>鏈卡細節（讀碼紀錄：'+esc(c.anchors?.pass??0)+'／'+esc(c.anchors?.total??0)+' 錨點核對、線索 '+esc(c.counts?.code??0)+' 筆）</summary>'+
+  (c.conditions?.length?'<h3>接入條件</h3><ul>'+c.conditions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'')+(c.permissions?.length?'<h3>需要的權限</h3><ul>'+c.permissions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'')+
+  (c.verdict?.cleared?.length?'<h3>查過、不是問題</h3><ul>'+c.verdict.cleared.map(x=>'<li>'+esc(x.text)+'</li>').join('')+'</ul>':'')+
+  (c.unknowns?.length?'<h3>鏈卡上的未知</h3><ul>'+c.unknowns.map(u=>'<li>'+esc(u.question)+(u.next?.action?' <span class="muted">→ '+esc(u.next.action)+'</span>':'')+'</li>').join('')+'</ul>':'')+
+  (cand.length?'<h3>掃描線索（前 30 筆；不是弱點判定）</h3><table><thead><tr><th>類別</th><th>位置</th></tr></thead><tbody>'+cand.filter(x=>!x.test).slice(0,30).map(x=>'<tr><td data-k="類別">'+esc(x.category)+(x.citedOnCard?' <span class="chip green">卡上引用</span>':'')+'</td><td data-k="位置">'+loc(x)+'</td></tr>').join('')+'</tbody></table>':'')+
+  (c.flags?.length?'<h3>工具提醒</h3><ul>'+c.flags.slice(0,10).map(f=>'<li>'+esc(f)+'</li>').join('')+'</ul>':'')+
+  (c.preflight?'<p class="muted small">開卡前回覆者：'+esc(c.preflight.answeredBy)+(c.preflight.simulated?'（模擬）':'')+'</p>':'')+'</details>';
+}
 function stationHtml(s){
  return '<li class="r-'+esc(s.role)+'"><div class="box"><div><span class="label">'+esc(s.label)+'</span> '+loc(s)+' <span class="chip '+(/推論/.test(s.status)?'amber':s.status==='文件'?'blue':'green')+'">'+esc(s.status)+'</span></div>'+
   (s.code?'<pre>'+esc(s.code)+'</pre>':'')+(s.ctx?.length?'<div class="cond">條件：'+s.ctx.map(esc).join('，且 ')+'</div>':'')+(s.via?.length>1?'<div class="via">怎麼走到：'+s.via.map(esc).join(' → ')+'</div>':'')+'</div></li>';
@@ -46,7 +84,8 @@ function touchCards(list,{max=6}={}){
  const order=[...by.keys()].sort((a,b)=>(RISKY.has(b)-RISKY.has(a))||by.get(b).length-by.get(a).length);
  return '<div class="cards">'+order.map(k=>{const xs=by.get(k);return '<div class="card"><h3>'+(RISKY.has(k)?'<span class="chip amber">要准</span>':'')+esc(CAP_LABEL[k]??k)+' <span class="muted">'+xs.length+' 處</span></h3><ul>'+xs.slice(0,max).map(t=>'<li>'+loc(t)+(t.ctx?.length?' <span class="muted">（'+esc(t.ctx[0])+'）</span>':'')+'</li>').join('')+(xs.length>max?'<li class="muted">另有 '+(xs.length-max)+' 處（見內嵌資料）</li>':'')+'</ul></div>';}).join('')+'</div>';
 }
-export function renderRouteHtml(m){
+export function renderRouteHtml(m,{card=null}={}){
+ if(card)m={...m,card:{decision:card.decision,decisionCap:card.decisionCap,summary:card.verdict?.summary??null,why:card.verdict?.why??[],ownerDecisions:card.ownerDecisions??[]}};
  const v=verdictOf(m),a=m.answer??{},p=a.parts??{},t=m.trial,R=m.touches?.route??[],E=m.touches?.elsewhere??[];
  const riskyRoute=riskLabels(R);
  const riskyElse=[...new Set(E.filter(x=>RISKY.has(x.cap)&&!R.some(r=>r.cap===x.cap)).map(x=>x.label))];
@@ -61,7 +100,7 @@ export function renderRouteHtml(m){
  const meta='受查：<code>'+esc(m.repo?.name)+'</code> 版本 <code>'+esc(m.repo?.version??'未知')+'</code> 提交 <code>'+esc((m.repo?.commit??'無版本控制').slice(0,12))+'</code>'+(m.repo?.dirty?' <span class="chip amber">有未提交修改</span>':'')+'<br>解析：'+(m.engine?.name==='tree-sitter'?'語法樹（tree-sitter '+esc(m.engine.version)+'），'+esc(m.stats?.files??0)+' 檔、'+esc(m.stats?.units??0)+' 個函式、這條路走到 '+esc(m.reachedUnits??0)+' 個':'<b>文字比對（沒有語法解析）</b>：'+esc(m.engine?.reason))+'<br>產生：'+esc(taipei(m.generatedAt));
  const body='<header><div class="eyebrow">查線 · 用途路線</div><h1>'+esc(m.question||'（沒有填用途）')+'</h1><span class="chip '+v.tone+'">'+esc(v.label)+'</span><span class="muted">'+esc(v.why)+'</span></header>'+
   (m.engine?.name!=='tree-sitter'?'<div class="warn">這份沒有用語法解析（'+esc(m.engine?.reason)+'），路線與能力可能漏抓或誤判。</div>':'')+
-  '<section class="answer" id="how"><div class="eyebrow">怎麼接</div><p class="lead">'+md(lead)+'</p>'+(notes.length?'<div class="notes"><b>接的時候注意</b><ul>'+notes.map(x=>'<li>'+md(x)+'</li>').join('')+'</ul></div>':'')+'<dl class="kv">'+kv.map(([k,x])=>'<dt>'+esc(k)+'</dt><dd>'+md(x)+'</dd>').join('')+'</dl>'+(p.verified?'<p class="verified"><span class="chip '+(m.trial?.ran?'green':'amber')+'">'+(m.trial?.ran?'已試跑':'待試跑')+'</span>'+md(p.verified)+'</p>':'')+(a.draft?'<p class="muted" style="margin:10px 0 0;font-size:.85rem">這段由路線與試跑事實自動組成；agent 讀碼後可用 route-report --answer 改寫。</p>':'')+'</section>'+
+  '<section class="answer" id="how"><div class="eyebrow">怎麼接</div><p class="lead">'+md(lead)+'</p>'+(notes.length?'<div class="notes"><b>接的時候注意</b><ul>'+notes.map(x=>'<li>'+md(x)+'</li>').join('')+'</ul></div>':'')+'<dl class="kv">'+kv.map(([k,x])=>'<dt>'+esc(k)+'</dt><dd>'+md(x)+'</dd>').join('')+'</dl>'+(p.verified?'<p class="verified"><span class="chip '+(m.trial?.ran?'green':'amber')+'">'+(m.trial?.ran?'已試跑':'待試跑')+'</span>'+md(p.verified)+'</p>':'')+(a.draft?'<p class="muted" style="margin:10px 0 0;font-size:.85rem">這段由路線與試跑事實自動組成；agent 讀碼後可用 route-report --answer 改寫。</p>':'')+'</section>'+decideHtml(m,v)+
   '<h2>路線</h2><p class="muted">每一站都是原碼裡的實際位置（版本 '+esc((m.repo?.commit??'').slice(0,12)||'未知')+'）。</p><ol class="route">'+m.stations.map(stationHtml).join('')+'</ol>'+
   (m.conditional?.length?'<details><summary>有條件才會走的動作（'+m.conditional.length+'）</summary><ul>'+m.conditional.map(c=>'<li>'+esc(c.label)+' '+loc(c)+'：'+c.when.map(esc).join('，且 ')+'</li>').join('')+'</ul></details>':'')+
   trialHtml+
@@ -69,7 +108,7 @@ export function renderRouteHtml(m){
   '<details><summary>repo 有、但這條路沒走到（'+E.length+' 處）</summary><p class="muted">只有這條路真的走到才算接入條件；這些列出來讓你知道 repo 別處有。</p>'+touchCards(E,{max:5})+'</details>'+
   '<h2>未知</h2>'+(unk.length?'<ul>'+unk.map(u=>'<li>'+(u.file?loc(u)+' ':'')+esc(u.text)+'</li>').join('')+'</ul>':'<p class="muted">沒有。</p>')+
   (m.candidates?.length>1?'<details><summary>其他入口（'+(m.candidates.length-1)+'）</summary><ul>'+m.candidates.filter(c=>c!==m.entry&&!(c.kind===m.entry?.kind&&c.name===m.entry?.name)).map(c=>'<li>'+esc(c.kind==='bin'?'命令列 '+c.name:'函式庫 '+c.name)+' '+loc(c)+'　換這條：<code>--entry '+esc(c.kind==='bin'?'bin:'+c.name:'library')+'</code></li>').join('')+'</ul></details>':'')+
-  '<details class="meta"><summary>版本與來源</summary><p>'+meta+'</p></details>';
- const data='<script type="application/json" id="trace-route-data">'+JSON.stringify(m).replace(/</g,'\\u003c')+'</script>';
+  cardDetails(card)+'<details class="meta"><summary>版本與來源</summary><p>'+meta+'</p></details>';
+ const data='<script type="application/json" id="trace-route-data">'+JSON.stringify(m).replace(/</g,'\\u003c')+'</script>'+(card?'<script type="application/json" id="trace-report">'+JSON.stringify(card).replace(/</g,'\\u003c')+'</script>':'');
  return '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; base-uri \'none\'"><title>'+esc('查線：'+(m.question||m.repo?.name))+'</title><style>'+css+'</style></head><body><main>'+body+'</main>'+data+'</body></html>\n';
 }

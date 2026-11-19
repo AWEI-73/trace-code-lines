@@ -20,7 +20,7 @@ export function parsePy(f,tree){
  const table=new Map();
  const scopeOf=n=>{for(let p=n.parent;p;p=p.parent)if(p.type==='function_definition'||p.type==='lambda'||p.type==='class_definition')return [p.startIndex,p.endIndex];return [0,Infinity];};
  const bind=(name,b,node,scope)=>{const [s0,e0]=scope??(node?scopeOf(node):[0,Infinity]);const list=table.get(name)??[];const same=list.find(x=>x.s===s0&&x.e===e0);
-  if(same){if(b.kind==='unit'&&same.kind!=='unit')Object.assign(same,b);else if(b.kind==='expr'&&same.kind==='expr'&&(same.alts??=[]).length<8)same.alts.push(b.node);return;}list.push({...b,s:s0,e:e0});table.set(name,list);};
+  if(same){if(b.kind==='unit'&&same.kind!=='unit')Object.assign(same,b);else if(b.kind==='expr'&&same.kind==='expr'&&(same.alts??=[]).length<8)same.alts.push(b.node);else if(b.kind!=='param'&&(same.others??=[]).length<4)same.others.push(b);return;}list.push({...b,s:s0,e:e0});table.set(name,list);};
  f.bindings={get:(name,pos=null)=>{const list=table.get(name);if(!list)return undefined;const hits=list.filter(x=>pos==null?x.s===0:x.s<=pos&&pos<x.e);if(!hits.length)return undefined;hits.sort((a,b)=>(a.e-a.s)-(b.e-b.s));return hits[0].kind==='param'?null:hits[0];},has(name,pos=null){return this.get(name,pos)!==undefined;}};
  const classOf=n=>{for(let p=n.parent;p;p=p.parent){if(p.type==='class_definition')return p.childForFieldName('name')?.text;if(p.type==='function_definition')return null;}return null;};
  const methodClass=n=>{for(let p=n.parent;p;p=p.parent)if(nodeUnit.has(p.id))return f.units.get(nodeUnit.get(p.id))?.cls??null;return null;};
@@ -43,18 +43,33 @@ export function parsePy(f,tree){
      f.imports.push({src,line,kind:'from',member:nm,unit:unitOf(n)});bind(al,{kind:'module',src,member:nm},n);if(isTop(n))f.exports.set(al,{local:al});}
     break;}
    case 'assignment':case 'augmented_assignment':{const l=n.childForFieldName('left'),r=n.childForFieldName('right');if(!l||!r)break;
-    if(l.type==='identifier'){bind(l.text,{kind:'expr',node:r},n);if(isTop(n))f.exports.set(l.text,{local:l.text});}
+    if(l.type==='identifier'){bind(l.text,{kind:'expr',node:r},n);if(isTop(n))f.exports.set(l.text,{local:l.text});
+     if(r.type==='call'&&r.childForFieldName('function')?.type==='attribute'&&r.childForFieldName('function').childForFieldName('attribute')?.text==='add_parser'){const a0=r.childForFieldName('arguments')?.namedChildren?.[0];const s0=a0?strOf(a0):null;if(s0)parsers.set(l.text,s0);}}
     else if(l.type==='attribute'&&['self','cls'].includes(l.childForFieldName('object')?.text)){const cls=methodClass(n);const a=l.childForFieldName('attribute')?.text;if(cls&&a&&!f.fields.has(cls+'#.'+a))f.fields.set(cls+'#.'+a,{node:r});}
     else if(l.type==='pattern_list'||l.type==='tuple_pattern'){for(const c of l.namedChildren)if(c.type==='identifier')bind(c.text,{kind:'param'},n);}
     break;}
    case 'with_item':{const v=n.childForFieldName('value');if(v?.type==='as_pattern'){const t=v.childForFieldName('alias')?.namedChildren?.[0];const e=v.namedChildren[0];if(t?.type==='identifier'&&e)bind(t.text,{kind:'expr',node:e,ctxManager:true},n);}break;}
    case 'if_statement':{if(isTop(n)&&!n.parent?.parent&&/^__name__\s*==\s*['"]__main__['"]$|^['"]__main__['"]\s*==\s*__name__$/.test(n.childForFieldName('condition')?.text??'')){addUnit(n,'<main>');f.mainGuard=n.startPosition.row+1;}break;}
+   case 'decorated_definition':{const d=n.childForFieldName('definition');if(d?.type==='function_definition')decorated.push({n,d});break;}
    case 'for_statement':{const l=n.childForFieldName('left');if(l?.type==='identifier')bind(l.text,{kind:'param'},n);break;}
   }
   for(const c of n.namedChildren)visit1(c);
  }
  function unitOf(n){for(let p=n;p;p=p.parent)if(nodeUnit.has(p.id))return nodeUnit.get(p.id);return TOP;}
+ const decorated=[],parsers=new Map();f.framework=[];
  visit1(tree.rootNode);
+ // Framework entries: @cli.command() / @app.command() (click, typer), @app.route('/x') / @app.get('/x') (Flask, FastAPI…).
+ // The decorator runs at import and registers the function; nothing in the source calls it, so without this it looks unreached.
+ const fwOf=new Set(f.imports.map(i=>(i.src||'').replace(/^\.+/,'').split('.')[0]).filter(Boolean));
+ const CLI_FW=['click','typer','cyclopts','cloup'].filter(x=>fwOf.has(x)),WEB_FW=['flask','fastapi','starlette','sanic','quart','bottle','aiohttp','litestar','django'].filter(x=>fwOf.has(x));
+ for(const {n,d} of decorated){const fn=d.childForFieldName('name')?.text,id=nodeUnit.get(d.id);if(!fn||!id)continue;
+  for(const dec of n.namedChildren.filter(c=>c.type==='decorator')){const t=dec.text.replace(/\s+/g,' ');let m;
+   if(CLI_FW.length&&(m=t.match(/^@([\w.]+)\.(command|group|callback)\b(?:\((.*)\))?$/))){
+    const nm=(m[3]??'').match(/^\s*(?:name\s*=\s*)?['"]([\w:-]+)['"]/)?.[1]??(m[2]==='callback'?'(主指令)':fn.replace(/_/g,'-'));
+    f.framework.push({kind:m[2]==='group'?'group':'command',framework:CLI_FW[0],name:nm,unit:id,line:dec.startPosition.row+1,reg:TOP,owner:m[1].split('.').pop(),via:t.slice(0,60)});break;}
+   if(WEB_FW.length&&(m=t.match(/^@([\w.]+)\.(route|get|post|put|delete|patch|head|options|websocket|api_route)\(\s*['"]([^'"]*)['"](.*)\)$/))){
+    const meth=m[2]==='route'||m[2]==='api_route'?((m[4].match(/methods\s*=\s*\[([^\]]*)\]/)?.[1]??"'GET'").match(/\w+/g)??['GET']).map(x=>x.toUpperCase()).join('|'):m[2].toUpperCase();
+    f.framework.push({kind:'route',framework:WEB_FW[0],name:meth+' '+m[3],method:meth,path:m[3],unit:id,line:dec.startPosition.row+1,reg:TOP,owner:m[1].split('.').pop(),via:t.slice(0,60)});break;}}}
  // f'{modpath}{name}' where modpath = 'a.' if … else 'b.' → ['a.','b.']
  function prefixesOf(a){a=unwrap(a);const p=prefixOf(a);if(p)return [p];
   const first=a?.type==='string'?a.namedChildren.find(c=>c.type==='interpolation'||c.type==='string_content'):a?.type==='binary_operator'?a.childForFieldName('left'):null;
@@ -77,6 +92,8 @@ export function parsePy(f,tree){
    if(/^(importlib\.)?import_module$/.test(fnText)||fnText==='__import__'){const s=strOf(pos[0]);if(s!=null)f.imports.push({src:s,line,kind:'dynamic-import',unit:unitOf(n)});
     else{const pres=prefixesOf(pos[0]);f.dynamic.push({line,unit:unitOf(n),why:'動態載入模組：'+n.text.replace(/\s+/g,' ').slice(0,70)+(pres.length?'（前綴 '+pres.join(' / ')+'）':'')});if(pres.length)f.dynImports.push({prefixes:pres,line,unit:unitOf(n)});}}
    else if(fnText==='getattr'&&pos[1]&&strOf(pos[1])==null&&n.parent?.type==='call'&&n.parent.childForFieldName('function')?.id===n.id)f.dynamic.push({line,unit:unitOf(n),call:true,why:'用算出來的名稱呼叫：'+n.parent.text.replace(/\s+/g,' ').slice(0,60)});
+   if(fn?.type==='attribute'&&fn.childForFieldName('attribute')?.text==='set_defaults'&&kw.func){const obj=fn.childForFieldName('object')?.text;const fnode=args.namedChildren.find(a=>a.type==='keyword_argument'&&a.childForFieldName('name')?.text==='func')?.childForFieldName('value');
+    f.framework.push({kind:'command',framework:'argparse',name:parsers.get(obj)??obj,handlerNode:fnode,line,reg:unitOf(n),via:n.text.replace(/\s+/g,' ').slice(0,60)});}
    if(fn)f.calls.push({node:fn,prop:fn.type==='attribute'?fn.childForFieldName('attribute')?.text:null,isNew:false,line,col:n.startPosition.column,unit:unitOf(n),text:n.text.replace(/\s+/g,' ').slice(0,90),arg0:pos[0]?.text.replace(/\s+/g,' ').slice(0,40)??null,pyArgs:{pos:pos.map(p=>p.text.slice(0,40)),kw},ctx:context(n)});
    for(const a of pos){const u=unwrap(a);if(u?.type==='identifier'||u?.type==='attribute')f.refs.push({node:u,line,unit:unitOf(n)});}
    for(const a of args?.namedChildren??[])if(a.type==='keyword_argument'){const v=a.childForFieldName('value');if(v?.type==='identifier'||v?.type==='attribute')f.refs.push({node:v,line,unit:unitOf(n)});}
@@ -108,7 +125,9 @@ export function pyCanon(g,f,node,unit,depth,h){
   case 'identifier':{if(['self','cls'].includes(node.text)){const u=f.units.get(unit);if(u?.cls)return 'local:'+f.rel+'::'+u.cls+'#';}
    const b=f.bindings.get(node.text,node.startIndex);if(b)return pyBinding(g,f,b,depth,h);if(b===null)return null;return PY_GLOBALS.has(node.text)?'global.'+node.text:null;}
   case 'attribute':{const a=node.childForFieldName('attribute')?.text,base=C(node.childForFieldName('object'));return base&&a?h.normalize(g,base+'.'+a):null;}
-  case 'call':{const fn=unwrap(node.childForFieldName('function'));const b=C(fn);if(!b)return null;
+  case 'call':{const fn=unwrap(node.childForFieldName('function'));
+   if(/^(importlib\.)?import_module$/.test(fn?.text??'')){const s=strOf(node.childForFieldName('arguments')?.namedChildren?.[0]);if(s)return h.modCanon(resolvePy(g,f.rel,s));}
+   const b=C(fn);if(!b)return null;
    // calling a class makes an instance
    if(/^local:/.test(b)&&h.targetsOf(g,b).some(t=>{const u=h.findUnit(g,t);return u?.cls&&u.name===u.cls;}))return b+'#';
    if(/^file:/.test(b)){const ts=h.targetsOf(g,b);if(ts.some(t=>{const u=h.findUnit(g,t);return u?.cls&&u.name===u.cls;}))return b+'#';}
@@ -118,9 +137,13 @@ export function pyCanon(g,f,node,unit,depth,h){
  return null;
 }
 export function pyBinding(g,f,b,depth,h){
+ // try/except import fallbacks (pysqlite3 or sqlite3): prefer the stdlib / capability candidate
+ if(b.others?.length&&!b.busyO){b.busyO=true;try{const cs=[{...b,others:null},...b.others].map(x=>pyBinding(g,f,x,depth,h)).filter(Boolean);return cs.find(c=>/^py:/.test(c))??cs.find(c=>h.capOf(c))??cs[0]??null;}finally{b.busyO=false;}}
  if(b.kind==='unit')return 'local:'+b.id;
  if(b.kind==='class')return 'local:'+f.rel+'::'+b.cls;
- if(b.kind==='module'){const t=resolvePy(g,f.rel,b.src,b.member);if(t.submodule)return 'file:'+t.file+'|';const base=h.modCanon(t);if(!base)return null;return b.member?h.normalize(g,base+'.'+b.member):base;}
+ if(b.kind==='module'){const t=resolvePy(g,f.rel,b.src,b.member);if(t.submodule)return 'file:'+t.file+'|';
+  // from .utils import sqlite3: follow the re-exported import/value to what it really is
+  if(t.type==='file'&&b.member&&depth<8){const tf=g.files.get(t.file),eb=tf?.bindings.get(b.member);if(eb&&eb.kind!=='unit'&&eb.kind!=='class'&&eb.kind!=='param'){const c=pyBinding(g,tf,eb,depth+1,h);if(c&&/^(py:|pkg:)/.test(c))return c;}}const base=h.modCanon(t);if(!base)return null;return b.member?h.normalize(g,base+'.'+b.member):base;}
  if(b.kind==='expr'){if(b.busy)return null;b.busy=true;try{const cs=[b.node,...(b.alts??[])].map(n=>pyCanon(g,f,n,f.rel+'::<top>',depth+1,h)).filter(Boolean);let c=cs.find(c=>h.capOf(c)||/^(py:|pkg:)/.test(c))??cs[0]??null;
   if(c&&b.ctxManager&&/^global\.open\(\)$|\.open\(\)$/.test(c))c=c.replace(/\(\)$/,'()');return c;}finally{b.busy=false;}}
  return null;

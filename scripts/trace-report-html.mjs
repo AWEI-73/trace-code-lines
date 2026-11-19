@@ -11,6 +11,7 @@ import {inspectTrace,capabilityReview} from './trace.mjs';
 import {scanIntegration} from './integrate.mjs';
 import {writeChainCard} from './chain-card.mjs';
 import {capLabel,TEST_PATH,LETTERS} from './preflight.mjs';
+import {renderRouteHtml} from './route-report-html.mjs';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
 const tryRead=p=>{try{return p&&fs.existsSync(p)?read(p):null;}catch{return null;}};
@@ -220,7 +221,15 @@ export async function makeReport({cardFile,out,chainDir,proto=[],boundary,instru
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  const args=process.argv.slice(2),get=k=>args.includes(k)?args[args.indexOf(k)+1]:undefined,all=k=>args.flatMap((a,i)=>a===k?[args[i+1]]:[]);
- if(args.includes('--make')){try{const r=await makeReport({cardFile:path.resolve(get('--card')),out:path.resolve(get('--out')),chainDir:get('--chain-dir'),proto:all('--proto'),boundary:get('--boundary'),instrumentLog:get('--instrument-log'),ledger:get('--ledger')});console.log(r.lines.join('\n'));}catch(e){console.error(e.message);process.exitCode=1;}}
+ if(args.includes('--make')&&get('--route')){try{
+  // Merged page: route (怎麼接 + stations + trial) on top, card verdict and decisions folded in; card-only page kept beside it.
+  const out=path.resolve(get('--out'));if(fs.existsSync(out))throw Error('輸出已存在：'+out);
+  const cardOut=out.replace(/\.html?$/i,'')+'.card.html',route=read(get('--route'));
+  const r=await makeReport({cardFile:path.resolve(get('--card')),out:cardOut,chainDir:get('--chain-dir'),proto:all('--proto'),boundary:get('--boundary'),instrumentLog:get('--instrument-log'),ledger:get('--ledger')});
+  const card=read(path.resolve(get('--card')));if(!route.scope&&card.preflight)route.scope={granted:card.preflight.scope?.capabilities??[],pending:card.preflight.pending??[],pendingLabels:[],simulated:!!card.preflight.simulated};
+  fs.writeFileSync(out,renderRouteHtml(route,{card:r.machine}),{encoding:'utf8',flag:'wx'});
+  console.log([...r.lines.map(l=>l.replace(cardOut,cardOut+'（只有鏈卡的舊版）')),'合併報告：'+out].join('\n'));}catch(e){console.error(e.message);process.exitCode=1;}}
+ else if(args.includes('--make')){try{const r=await makeReport({cardFile:path.resolve(get('--card')),out:path.resolve(get('--out')),chainDir:get('--chain-dir'),proto:all('--proto'),boundary:get('--boundary'),instrumentLog:get('--instrument-log'),ledger:get('--ledger')});console.log(r.lines.join('\n'));}catch(e){console.error(e.message);process.exitCode=1;}}
  else if(args.includes('--help')||!get('--card')||!get('--out')){console.log('用法：node scripts/trace-report-html.mjs --card <卡片.json> --out <報告.html> [--triage <分診輸出.json>]… [--proto <原型輸出.json>]… [--boundary <boundary.json>] [--instrument-log <stdout.log>] [--ledger <答案表.json>]；一般請用 trace.mjs report。');process.exit(args.includes('--help')?0:1);}
  else{
  const card=read(get('--card')),questions=card.preflight?.questionsFile?tryRead(card.preflight.questionsFile):null;
