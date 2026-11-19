@@ -1,7 +1,7 @@
 ---
 name: trace-code-lines
 metadata:
-  version: 1.36.2
+  version: 1.37.0-rc.1
 description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，沿問題讀碼，交付可追到證據的鏈卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
 
@@ -23,10 +23,21 @@ node scripts/trace.mjs next --card <卡片.json>
 node scripts/trace.mjs status --card <卡片.json>
 ```
 
+開卡前先問清楚（接入或要試跑時必做）：`preflight` 只讀掃環境與受查 repo，印出給負責人的問題原文（甲乙丙一鍵回、附建議）；掃描能決定的不問。
+
+```text
+node scripts/trace.mjs preflight --root <repo> --out <問題.json> [--paths 子目錄] [--mode <情境>]
+node scripts/trace.mjs answer --questions <問題.json> --out <答覆.json> --by "誰回的" [--accept-defaults] [--set 1=乙]
+node scripts/trace.mjs start … --preflight <答覆.json>
+node scripts/trace.mjs report --card <卡片.json> --out <報告.html>
+```
+
+問題只在開卡前問，查到一半不追問；沒回覆＝沒准，接入結論最多「有條件可接」；演練用的模擬回覆一定加 `--simulated`。`report` 唯讀跑分診、套用不查範圍、產鏈卡與單檔離線網頁（給負責人看的結論與給 agent 的機器資料在同一頁）。
+
 一鍵填卡：`node scripts/trace.mjs fill --card <卡> --step <n> --note "說明" --anchor "檔:行:文字"`；可重複錨點，跳步加 `--skip`，寫回即核對並印下一步。
 同命令可加 `--chain "一站"`、`--conflict "現象|方向"`、`--cleared "排除項"`、`--verify "檢查|結果"`、`--unknown "問題|類別|原因|試過|下一步|成本|理解|會不會改變本題結論"`；末欄可省略：`yes`＝會、`no`＝不會、`unsure`＝不確定；接入欄位見 [接入分診](references/integrate.md)。
 下一步只顯示第一個尚未完成的步驟。未知是誠實交代原因與目前解釋，不是待辦；探索以本卡的一句問題、固定流程以成品與宣告的驗收項目為終點，只補會或可能改變結論的未知，驗收未明須補證據或明寫交付限制，其餘僅記錄；不為清零擴張調查或自動開卡，值得另追的只留一句「另一個問題」。
-走完用印出的 `chain-card.mjs --config <卡片.json> --out <證據目錄>` 產鏈卡並讀回；核對引用不代替語意覆核或實際重現。
+走完用 `report` 一次產鏈卡與網頁，或用印出的 `chain-card.mjs --config <卡片.json> --out <證據目錄>` 只產鏈卡並讀回；核對引用不代替語意覆核或實際重現。
 
 ## 需要時才讀
 
@@ -47,4 +58,4 @@ node scripts/trace.mjs status --card <卡片.json>
 
 ## 版本
 
-目前版本：1.36.2（2026-11-15）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.37.0-rc.1（2026-11-19，測試中）。歷史見 [changelog](references/changelog.md)。

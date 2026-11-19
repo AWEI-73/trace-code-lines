@@ -28,9 +28,10 @@ const excerpt=(body,line,file)=>{
  if(excerptCache.body===body&&excerptCache.file===file)return excerptCache.lines[line-1]??'';
  // Redact whole multiline secrets before selecting a line; preserve line count.
  let safe=body.replace(privatePattern(),s=>mask(s)+'\n'.repeat((s.match(/\n/g)??[]).length));
- for(const t of tokens(safe,file?.endsWith('.py'),{regexLiterals:true}).filter(t=>t.kind==='string').reverse()){
-  const raw=safe.slice(t.start,t.end),replacement=mask(t.v).replace(/[\r\n]/g,' ')+'\n'.repeat((raw.match(/\n/g)??[]).length);safe=safe.slice(0,t.start)+replacement+safe.slice(t.end);
- }
+ // 1.37 prototype: comments are masked like strings so target text addressed to an agent never reaches the reader verbatim.
+ const all=tokens(safe,file?.endsWith('.py'),{regexLiterals:true}),edits=all.filter(t=>t.kind==='string').map(t=>({start:t.start,end:t.end,text:mask(t.v).replace(/[\r\n]/g,' ')}));
+ for(let k=0,from=0;k<=all.length;k++){const to=k<all.length?all[k].start:safe.length,gap=safe.slice(from,to);if(gap.trim())edits.push({start:from+gap.search(/\S/),end:to-(gap.length-gap.trimEnd().length),text:'〔註解已遮蔽，長度 '+gap.trim().length+'〕'});if(k<all.length)from=all[k].end;}
+ for(const e of edits.sort((a,b)=>b.start-a.start)){const raw=safe.slice(e.start,e.end);safe=safe.slice(0,e.start)+e.text+'\n'.repeat((raw.match(/\n/g)??[]).length)+safe.slice(e.end);}
  const lines=safe.split(/\r?\n/).map(s=>redact(s).slice(0,260));excerptCache={body,file,lines};return lines[line-1]??'';
 };
 const anchor=(file,line,body)=>({file,line,lineSha256:sha256(body.split(/\r?\n/)[line-1]??''),sourceSha256:sha256(body)});
