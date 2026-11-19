@@ -43,7 +43,8 @@ const RULES=[
  // Calls, imports or CLI model runs only; comments, URLs and env-name blocklists are not paid calls.
  {kind:'paid',label:'付費呼叫',file:CODE,line:/new\s+(OpenAI|Anthropic|Stripe|Twilio)\b|from\s+['"](openai|@anthropic-ai\/sdk|stripe|twilio|@sendgrid\/mail)['"]|require\(\s*['"](openai|@anthropic-ai\/sdk|stripe|twilio|@sendgrid\/mail)['"]|^\s*(import|from)\s+(openai|anthropic|stripe|twilio)\b|completions\.create\(|messages\.create\(|charges\.create\(/},
  {kind:'real-account',label:'用真帳號的呼叫',file:CODE,line:/from\s+['"]nodemailer['"]|require\(\s*['"]nodemailer['"]|^\s*(import|from)\s+smtplib\b|smtplib\.SMTP\(|['"]--model['"]|\b(keyring\.get_password|os\.environ\[['"][A-Z_]*(API_KEY|TOKEN)['"]\])/},
- {kind:'subprocess',label:'執行其他程式',file:CODE,line:/\b(spawn|spawnSync|execFile|execFileSync|execSync|exec)\(|subprocess\.(run|Popen|call|check_output)\(|os\.system\(/},
+ // Dogfood ext round: `regex.exec(` and `plugins.exec(` are not subprocesses; only bare calls or child_process members count.
+ {kind:'subprocess',label:'執行其他程式',file:CODE,line:/(?<![.\w$])(spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)\(|\b(child_process|childProcess|cp)\.(spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)\(|subprocess\.(run|Popen|call|check_output)\(|os\.system\(/},
  {kind:'network',label:'網路呼叫',file:CODE,line:/\bfetch\(|\bhttps?\.(get|request)\(|net\.(connect|createConnection)\(|dgram\.createSocket|dns\.(lookup|resolve)|requests\.(get|post|put|delete)\(|urlopen\(|socket\.socket\(/},
  {kind:'listen',label:'開放連線埠或通道',file:CODE,line:/\.listen\(|createServer\(|app\.run\(|uvicorn\.run\(/},
  {kind:'secret-files',label:'機密檔名',file:SECRET_NAME,line:null}

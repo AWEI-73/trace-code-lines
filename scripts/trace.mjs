@@ -7,6 +7,8 @@ import {reviewUnknowns} from './unknowns.mjs';
 import {noLinks} from './walker.mjs';
 import {gitRead} from './git-evidence.mjs';
 import {preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,relayText,capLabel,parseCapability} from './preflight.mjs';
+// Dogfood ext round: the step hints say 超出範圍 etc. in Chinese, so --unknown accepts the Chinese class labels too.
+const UNKNOWN_CLASS_ZH={'沒去跑':'not-run','沒跑':'not-run','未試跑':'not-run','由模型決定':'model-choice','單次異常':'one-off','資料沒了':'evidence-lost','要負責人判斷':'owner-only','負責人判斷':'owner-only','範圍或授權外':'out-of-scope','超出範圍':'out-of-scope'};
 
 export const playbooks=JSON.parse(fs.readFileSync(new URL('../assets/playbooks.json',import.meta.url),'utf8'));
 const array=x=>Array.isArray(x)?x:[];
@@ -61,6 +63,8 @@ export function inspectTrace(input,books=playbooks){
   const r=object(c.integration);
   for(const row of [r,...array(r.conditions),...array(r.permissions),...array(r.interfaces)])if(array(row.anchors).map(check).some(a=>a.status!=='PASS'))flags.push('接入結論的錨點對不上。');
   if(next<0&&(!r.decision||!array(r.interfaces).length))flags.push('接入結論或介面摘要尚未填齊。');
+  // Dogfood ext round: chain-card requires an anchor per interface; say so at fill time, not only as ANCHOR_MISMATCH in the report.
+  array(r.interfaces).forEach((x,i)=>{if(!array(x.anchors).length)flags.push('介面第 '+(i+1)+' 項還沒有錨點；產鏈卡時必填，請在 --interface 後緊接 --anchor。');});
   const cap=capabilityReview(c);
   if(!c.preflight)flags.push('未做開卡前檢查：負責人授權範圍未記錄，結論最多「有條件可接」。');
   if(cap.cap&&r.decision==='可接')flags.push(cap.cap.reason+'，結論最多「有條件可接」；請改填。');
@@ -117,7 +121,7 @@ export function fillTrace(c,args,errors=[]){
    if(flag==='--cleared')add(c,'cleared',{finding:value});
    if(flag==='--conflict')add(c,'conflicts',{phenomenon:p[0],direction:p[1]});
    if(flag==='--verify')add(c,'verification',{check:p[0],result:p[1]});
-   if(flag==='--unknown')add(c,'unknowns',{question:p[0],class:p[1],cause:p[2],tried:p[3],next:{action:p[4],cost:p[5]},understanding:p[6],...(p.length===8?{affects:p[7]}:{})});
+   if(flag==='--unknown')add(c,'unknowns',{question:p[0],class:UNKNOWN_CLASS_ZH[p[1]]??p[1],cause:p[2],tried:p[3],next:{action:p[4],cost:p[5]},understanding:p[6],...(p.length===8?{affects:p[7]}:{})});
    if(['--decision','--condition','--permission','--interface'].includes(flag)){
     if(c.mode!=='integrate')throw Error('期望接入情境（integrate），目前為 '+c.mode);
     const r=c.integration??={decision:'',conditions:[],permissions:[],interfaces:[]};
@@ -151,7 +155,7 @@ export function traceHelp(){
   '--version "提交" 或 "提交|執行版本"',
   '--chain "一站"；--cleared "排除項目"',
   '--conflict "現象|方向"；--verify "檢查|結果"',
-  '--unknown "問題|類別|原因|試過|下一步|成本|理解|會不會改變本題結論"；末欄可省略：yes＝會、no＝不會、unsure＝不確定。',
+  '--unknown "問題|類別|原因|試過|下一步|成本|理解|會不會改變本題結論"；類別：沒去跑、由模型決定、單次異常、資料沒了、要負責人判斷、範圍或授權外（或超出範圍）；末欄可省略：yes＝會、no＝不會、unsure＝不確定。',
   '--decision <可接|有條件可接|不建議>（以下四項僅 integrate）',
   '--condition "條件"；--permission "固定選項|一句範圍補充（可省）"：讀檔、寫檔、執行其他程式、連外網、用真帳號、花錢、讀機密、讓模型下系統指令；對不上的保留為需人看。',
   '--interface "名稱|輸入|輸出|錯誤|重送"',
