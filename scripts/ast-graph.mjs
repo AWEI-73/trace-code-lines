@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
+import {PY_FILE,parsePy,resolvePy,pyCanon,pyBinding} from './ast-python.mjs';
 const sha256=s=>crypto.createHash('sha256').update(s).digest('hex');
 const SKILL_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export const JS_FILE=/\.(m?js|cjs|jsx|ts|mts|cts|tsx)$/;
@@ -27,38 +28,40 @@ export async function loadAst(){
    const langs={javascript:await Language.load(wasm('tree-sitter-javascript','tree-sitter-javascript.wasm')),
     typescript:await Language.load(wasm('tree-sitter-typescript','tree-sitter-typescript.wasm')),
     tsx:await Language.load(wasm('tree-sitter-typescript','tree-sitter-tsx.wasm'))};
+   // Python grammar is optional on its own: without it, .py files fall back to the regex scan.
+   let pyNote=null;try{langs.python=await Language.load(wasm('tree-sitter-python','tree-sitter-python.wasm'));}catch(e){pyNote='沒有 tree-sitter-python，Python 檔改用文字比對';}
    const version=JSON.parse(fs.readFileSync(path.join(dir('web-tree-sitter'),'package.json'),'utf8')).version;
-   return cached={ok:true,Parser,langs,engine:'tree-sitter',version,from:base};
+   return cached={ok:true,Parser,langs,engine:'tree-sitter',version,from:base,pyNote};
   }catch(e){tried.push(base+'：'+String(e?.code??e?.message??e).slice(0,80));}
  }
  return cached={ok:false,engine:'regex-fallback',reason:'沒有裝 tree-sitter（'+tried.join('；')+'）；改用文字比對，可能漏抓或誤判。安裝：在 skill 資料夾執行 npm install --ignore-scripts'};
 }
-const langOf=(rel,head)=>/\.tsx$/.test(rel)?'tsx':/\.(ts|mts|cts)$/.test(rel)?'typescript':/\.(m?js|cjs|jsx)$/.test(rel)||/^#!.*\bnode\b/.test(head)?'javascript':null;
+const langOf=(rel,head)=>/\.py$/.test(rel)||!/\.\w+$/.test(rel)&&/^#!.*\bpython/.test(head)?'python':/\.tsx$/.test(rel)?'tsx':/\.(ts|mts|cts)$/.test(rel)?'typescript':/\.(m?js|cjs|jsx)$/.test(rel)||/^#!.*\bnode\b/.test(head)?'javascript':null;
 export const BUILTINS=new Set(['assert','buffer','child_process','cluster','crypto','dgram','dns','events','fs','fs/promises','http','http2','https','module','net','os','path','perf_hooks','process','querystring','readline','stream','stream/promises','string_decoder','timers','tls','tty','url','util','v8','vm','worker_threads','zlib','dns/promises','readline/promises','timers/promises']);
 const GLOBALS=new Set(['fetch','XMLHttpRequest','WebSocket','EventSource','process','console','Buffer','eval','Function','Worker','RegExp','JSON','Promise','Object','Array','setTimeout','setInterval','globalThis','window','document','navigator','require','module','exports','__dirname','__filename']);
 // canon string -> capability. Canon forms: node:fs.readFile  global.fetch  pkg:axios.get  (instances end with #)
 const CAPS=[
- ['subprocess',/^node:child_process\.(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)$|^pkg:(execa|cross-spawn|shelljs)(\.|$)/],
- ['network',/^global\.(fetch|XMLHttpRequest#?|WebSocket#?|EventSource#?)$|^node:(http|https|http2)\.(request|get|connect)$|^node:(net|tls)\.(connect|createConnection|Socket#?)$|^node:dgram\.createSocket$|^node:dns(\/promises)?\.\w+$|^pkg:(axios|node-fetch|got|undici|request|superagent|ws|cross-fetch|isomorphic-fetch|ky|follow-redirects)(\.|#|$)/],
- ['listen',/^node:(http|https|http2|net|tls)\.createServer$|\.createServer\(\)#?\.listen$|^pkg:(express|koa|fastify)(\.|#|$)/],
- ['write-file',/^node:fs(\/promises)?\.(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdir|mkdirSync|rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|cp|cpSync|symlink|symlinkSync|chmod|chmodSync|truncate|truncateSync)$/],
- ['read-file',/^node:fs(\/promises)?\.(readFile|readFileSync|createReadStream|readdir|readdirSync|existsSync|exists|stat|statSync|lstat|lstatSync|access|accessSync|open|openSync|read|readSync|opendir)$/],
- ['stdin',/^global\.process\.stdin(\.\w+)?$/],
- ['stdout',/^global\.console\.(log|info|debug|table|dir)$|^global\.process\.stdout\.write$/],
- ['stderr',/^global\.console\.(error|warn|trace)$|^global\.process\.stderr\.write$/],
- ['exit',/^global\.process\.exit$/],
- ['args',/^global\.process\.argv$/],
- ['env',/^global\.process\.env(\.\w+)?$/],
- ['worker',/^node:worker_threads\.Worker#?$|^global\.Worker#?$/],
- ['paid',/^pkg:(openai|@anthropic-ai\/sdk|stripe|twilio|@sendgrid\/mail)(\.|#|$)/],
+ ['subprocess',/^node:child_process\.(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)$|^pkg:(execa|cross-spawn|shelljs)(\.|$)|^py:subprocess\.(run|call|check_call|check_output|Popen|getoutput|getstatusoutput)$|^py:os\.(system|popen|exec\w*|spawn\w*|posix_spawn\w*)$|^pkg:(sh|plumbum|pexpect)(\.|$)/],
+ ['network',/^global\.(fetch|XMLHttpRequest#?|WebSocket#?|EventSource#?)$|^node:(http|https|http2)\.(request|get|connect)$|^node:(net|tls)\.(connect|createConnection|Socket#?)$|^node:dgram\.createSocket$|^node:dns(\/promises)?\.\w+$|^pkg:(axios|node-fetch|got|undici|request|superagent|ws|cross-fetch|isomorphic-fetch|ky|follow-redirects)(\.|#|$)|^py:(urllib\.request\.(urlopen|urlretrieve|build_opener)|http\.client\.\w*Connection|socket\.(socket|create_connection)|smtplib\.SMTP\w*|ftplib\.FTP\w*|imaplib\.IMAP4\w*|poplib\.POP3\w*|xmlrpc\.client\.ServerProxy)$|^pkg:(requests|httpx|aiohttp|urllib3|websockets|websocket|boto3|botocore|grpc|paramiko|pycurl)(\.|#|$)/],
+ ['listen',/^node:(http|https|http2|net|tls)\.createServer$|\.createServer\(\)#?\.listen$|^pkg:(express|koa|fastify)(\.|#|$)|^py:(http\.server|socketserver)\.\w+$|^pkg:(flask|fastapi|uvicorn|django|tornado|bottle|sanic|starlette|gunicorn|aiohttp\.web)(\.|#|$)/],
+ ['write-file',/^node:fs(\/promises)?\.(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdir|mkdirSync|rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|cp|cpSync|symlink|symlinkSync|chmod|chmodSync|truncate|truncateSync)$|^py:(shutil\.(copy\w*|move|rmtree|make_archive|unpack_archive)|os\.(remove|unlink|rename|replace|makedirs|mkdir|rmdir|removedirs|chmod|chown|symlink|link|truncate))$|^py:pathlib\.\w*Path\(\)\.(write_text|write_bytes|mkdir|unlink|rename|replace|touch|rmdir|symlink_to|chmod)$/],
+ ['read-file',/^node:fs(\/promises)?\.(readFile|readFileSync|createReadStream|readdir|readdirSync|existsSync|exists|stat|statSync|lstat|lstatSync|access|accessSync|open|openSync|read|readSync|opendir)$|^py:(os\.(listdir|scandir|walk)|glob\.\w+)$|^py:pathlib\.\w*Path\(\)\.(read_text|read_bytes|iterdir|glob|rglob|open)$/],
+ ['stdin',/^global\.process\.stdin(\.\w+)?$|^py:sys\.stdin(\.\w+)*$|^global\.input$|^py:fileinput\.input$/],
+ ['stdout',/^global\.console\.(log|info|debug|table|dir)$|^global\.process\.stdout\.write$|^global\.print$|^py:sys\.stdout(\.buffer)?\.write$/],
+ ['stderr',/^global\.console\.(error|warn|trace)$|^global\.process\.stderr\.write$|^py:sys\.stderr(\.buffer)?\.write$/],
+ ['exit',/^global\.process\.exit$|^py:sys\.exit$|^py:os\._exit$|^global\.(exit|quit)$/],
+ ['args',/^global\.process\.argv$|^py:sys\.argv$|^py:argparse\.ArgumentParser$|^py:getopt\.\w+$/],
+ ['env',/^global\.process\.env(\.\w+)?$|^py:os\.(environ(\.\w+)?|getenv|putenv)$|^pkg:dotenv(\.|$)/],
+ ['worker',/^node:worker_threads\.Worker#?$|^global\.Worker#?$|^py:(threading\.Thread|multiprocessing\.(Process|Pool)|concurrent\.futures\.\w+Executor)$/],
+ ['paid',/^pkg:(openai|@anthropic-ai\/sdk|stripe|twilio|@sendgrid\/mail)(\.|#|$)|^pkg:(openai|anthropic|stripe|twilio|sendgrid)(\.|#|$)/],
  ['real-account',/^pkg:nodemailer(\.|#|$)/],
  ['mcp-tools',/^pkg:@modelcontextprotocol\/sdk[^#]*#?\.(tool|registerTool|setRequestHandler)$|^pkg:@modelcontextprotocol\/sdk\S*McpServer#$/],
- ['dynamic',/^global\.(eval|Function#?)$/]
+ ['dynamic',/^global\.(eval|Function#?)$|^global\.(eval|exec|compile)$/]
 ];
 export const CAP_LABEL={subprocess:'執行其他程式',network:'網路呼叫',listen:'開放連線埠',['write-file']:'寫檔',['read-file']:'讀檔',stdin:'讀標準輸入',stdout:'印到標準輸出',stderr:'印到錯誤輸出',exit:'結束程式（exit code）',args:'讀命令列參數',env:'讀環境變數',worker:'開背景執行緒',paid:'付費呼叫','real-account':'用真帳號的呼叫','mcp-tools':'提供給模型的工具',dynamic:'動態執行（eval 類或算出來的載入路徑）','dynamic-call':'用算出來的名稱呼叫'};
 export function capOf(canon){if(!canon)return null;for(const [k,re] of CAPS)if(re.test(canon))return k;return null;}
 // Node stream / thenable protocol methods are called by the runtime, not by visible code.
-const PROTOCOL=new Set(['_transform','_flush','_read','_write','_writev','_final','_destroy','then','constructor']);
+const PROTOCOL=new Set(['_transform','_flush','_read','_write','_writev','_final','_destroy','then','constructor','__init__','__call__','__enter__','__exit__','__iter__','__next__','__aenter__','__aexit__']);
 function listFiles(root){
  const out=[];const walk=(d,rel)=>{let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}
   for(const e of es){const r=rel?rel+'/'+e.name:e.name;if(e.isSymbolicLink()||SKIP_DIR.test(r))continue;if(e.isDirectory())walk(path.join(d,e.name),r);else if(e.isFile()&&out.length<20000)out.push(r);}};
@@ -73,10 +76,12 @@ function parseFile(ast,root,rel){
  let body;try{const st=fs.statSync(path.join(root,rel));if(st.size>2*1024*1024)return {rel,ok:false,error:'檔案太大（>2MB），沒解析'};body=fs.readFileSync(path.join(root,rel),'utf8');}catch(e){return {rel,ok:false,error:String(e.code??e)};}
  const lang=langOf(rel,body.slice(0,80));if(!lang)return null;
  if(/\.min\.[cm]?js$/.test(rel)||body.length>20000&&body.length/(body.split('\n').length)>400)return {rel,ok:false,error:'壓縮過的打包檔，沒解析',minified:true};
+ if(lang==='python'&&!ast.langs.python)return null;
  const parser=new ast.Parser();parser.setLanguage(ast.langs[lang]);
  let tree;try{tree=parser.parse(body);}catch(e){return {rel,ok:false,error:'解析失敗'};}
  const lines=body.split(/\r?\n/);
  const f={rel,ok:true,lang,lines,errors:tree.rootNode.hasError?1:0,units:new Map(),bindings:null,fields:new Map(),props:new Map(),supers:new Map(),calls:[],refs:[],imports:[],exports:new Map(),dynamic:[]};
+ if(lang==='python'){parsePy(f,tree);f.tree=tree;f.bodySha=sha256(body);return f;}
  const TOP=rel+'::<top>';f.units.set(TOP,{id:TOP,name:'<top>',file:rel,line:1,end:lines.length});
  const nodeUnit=new Map();// node id -> unit id for function nodes that are named units
  const uname=(name,line)=>{let id=rel+'::'+name;if(f.units.has(id))id+='@'+line;return id;};
@@ -195,18 +200,23 @@ export function buildGraph(ast,root,{files=null,focus=[]}={}){
  const all=(files??listFiles(root)).filter(r=>!SKIP_DIR.test(r));
  const set=new Set(all);
  const g={root,files:new Map(),failed:[],set,pkgCache:new Map()};
- const parseList=all.filter(r=>JS_FILE.test(r)&&!TYPE_DECL.test(r)||isScriptNoExt(root,r));
+ const parseList=all.filter(r=>JS_FILE.test(r)&&!TYPE_DECL.test(r)||ast.langs.python&&PY_FILE.test(r)||isScriptNoExt(root,r,!!ast.langs.python));
+ g.pyRoots=['',...(set.has('src/__init__.py')?[]:all.some(r=>/^src\/[^/]+\/__init__\.py$/.test(r))?['src']:[])];
  for(const r of parseList){const f=parseFile(ast,root,r);if(!f)continue;if(f.ok)g.files.set(r,f);else g.failed.push({file:r,error:f.error,minified:!!f.minified});}
  g.resolveImport=(from,src)=>resolveImport(g,from,src);
  g.canonCache=new Map();
  for(const f of g.files.values()){
-  for(const im of f.imports)im.target=resolveImport(g,f.rel,im.src);
-  for(const c of f.calls){c.canon=canonOf(g,f,c.node,c.unit);if(c.isNew&&c.canon)c.canon+='#';c.cap=capOf(c.canon);if(c.cap==='env'){c.envName=c.canon.split('.')[2]??null;}}
+  for(const im of f.imports)im.target=f.lang==='python'?resolvePy(g,f.rel,im.src,im.member):resolveImport(g,f.rel,im.src);
+  for(const c of f.calls){c.canon=c.synthetic??canonOf(g,f,c.node,c.unit);if(c.isNew&&c.canon)c.canon+='#';c.cap=capOf(c.canon);if(f.lang==='python')pyCapFix(c);if(c.cap==='env'){c.envName=f.lang==='python'?(c.arg0?.match(/^['"]([\w.-]+)['"]$/)?.[1]??c.text.match(/environ\[['"]([\w.-]+)/)?.[1]??null):c.canon.split('.')[2]??null;}}
   for(const r of f.refs)r.canon=canonOf(g,f,r.node,r.unit);
  }
  return g;
 }
-function isScriptNoExt(root,r){if(path.posix.extname(r)||!/(^|\/)(bin|cli)\//.test(r))return false;try{return /^#!.*\bnode\b/.test(fs.readFileSync(path.join(root,r),'utf8').slice(0,80));}catch{return false;}}
+function isScriptNoExt(root,r,py=false){if(path.posix.extname(r)||!/(^|\/)(bin|cli|scripts)\//.test(r))return false;try{const h=fs.readFileSync(path.join(root,r),'utf8').slice(0,80);return /^#!.*\bnode\b/.test(h)||py&&/^#!.*\bpython/.test(h);}catch{return false;}}
+// open(path, 'w') writes, open(path) reads; print(..., file=sys.stderr) is the error stream.
+function pyCapFix(c){const a=c.pyArgs;if(!a)return;
+ if(c.canon==='global.open'||/^py:(io|codecs)\.open$/.test(c.canon)||/^py:pathlib\.\w*Path\(\)\.open$/.test(c.canon??'')){const mode=(c.canon==='global.open'||/^py:(io|codecs)/.test(c.canon)?a.pos[1]:a.pos[0])??a.kw.mode??'';c.cap=/[wax+]/.test(mode.replace(/^[rbuf]*(['"])/,'$1'))?'write-file':'read-file';c.mode=mode||"'r'";}
+ if(c.canon==='global.print'&&a.kw.file){c.cap=/stderr/.test(a.kw.file)?'stderr':/stdout/.test(a.kw.file)?'stdout':null;}}
 function readPkg(g,dir){if(g.pkgCache.has(dir))return g.pkgCache.get(dir);let p=null;try{p=JSON.parse(fs.readFileSync(path.join(g.root,dir,'package.json'),'utf8'));}catch{}g.pkgCache.set(dir,p);return p;}
 const EXT=['.ts','.tsx','.mts','.cts','.js','.jsx','.mjs','.cjs'];
 function resolveFile(g,base){
@@ -231,9 +241,10 @@ export function resolveImport(g,from,src){
  if(m&&ws.has(m[1])){const dir=ws.get(m[1]);const p=resolveFile(g,dir?(m[2]?dir+m[2]:dir):(m[2]?m[2].slice(1):'.'));if(p)return {type:'file',file:p,workspace:m[1]};}
  return {type:'package',name:m?m[1]:src,sub:m?.[2]??''};
 }
-function modCanon(t){if(!t)return null;if(t.type==='builtin')return 'node:'+t.name;if(t.type==='file')return 'file:'+t.file+'|';if(t.type==='package')return 'pkg:'+t.name+(t.sub??'');return null;}
+function modCanon(t){if(!t)return null;if(t.type==='builtin')return (t.py?'py:':'node:')+t.name;if(t.type==='file')return 'file:'+t.file+'|';if(t.type==='package')return 'pkg:'+t.name+(t.sub??'');return null;}
 // Expression -> canonical name. Flat per-file scope (documented limit: shadowed names may mis-resolve).
 function canonOf(g,f,node,unit,depth=0){
+ if(f.lang==='python')return pyCanon(g,f,node,unit,depth,PYH);
  node=unwrap(node);if(!node||depth>12)return null;
  const C=(n,d=depth+1)=>canonOf(g,f,n,unit,d);
  switch(node.type){
@@ -260,6 +271,7 @@ function canonOf(g,f,node,unit,depth=0){
  }
  return null;
 }
+const PYH={normalize:(g,c)=>normalize(g,c),targetsOf:(g,c)=>targetsOf(g,c),findUnit:(g,id)=>findUnit(g,id),capOf:c=>capOf(c),modCanon:t=>modCanon(t)};
 function normalize(g,c){
  c=c.replace(/!d\.default(?=\.|#|$)/,'').replace(/!d/,'');
  c=c.replace(/^node:fs\.promises\./,'node:fs/promises.').replace(/^node:(\w+)\.default(?=\.|$)/,'node:$1');
@@ -272,6 +284,7 @@ function normalize(g,c){
  return c;
 }
 function bindingCanon(g,f,name,b,depth){
+ if(f.lang==='python')return pyBinding(g,f,b,depth,PYH);
  if(b.kind==='unit')return 'local:'+b.id;
  if(b.kind==='class')return 'local:'+f.rel+'::'+b.cls;
  if(b.kind==='module'){const t=resolveImport(g,f.rel,b.src);const base=modCanon(t);if(!base)return null;return b.member?normalize(g,base+'.'+b.member):base;}
@@ -293,6 +306,7 @@ export function targetsOf(g,canon,seen=new Set()){
   let target=null;
   if(e?.unit)target='local:'+e.unit;else if(e?.local){const b=f.bindings.get(e.local);target=b?bindingCanon(g,f,e.local,b,0):null;if(!target&&f.units.has(f.rel+'::'+e.local))target='local:'+f.rel+'::'+e.local;}
   else if(e?.node)target=canonOf(g,f,e.node,f.rel+'::<top>');
+  else if(!e&&exp&&f.lang==='python'&&/(^|\/)__init__\.py$/.test(f.rel)){const dir=path.posix.dirname(f.rel);const sub=['.py','/__init__.py'].map(x=>(dir==='.'?'':dir+'/')+exp+x).find(x=>g.files.has(x));if(sub)return targetsOf(g,'file:'+sub+'|'+rest+inst,seen);if(f.star)for(const s of f.star){const t=resolvePy(g,f.rel,s);if(t.type==='file'){const r=targetsOf(g,'file:'+t.file+'|.'+exp+rest+inst,seen);if(r.length)return r;}}}
   else if(e?.module){const t=resolveImport(g,f.rel,e.module);const b=modCanon(t);target=b?(e.member?b+'.'+e.member:b):null;}
   else if(f.exports.has('')){const whole=canonOf(g,f,f.exports.get('').node,f.rel+'::<top>');target=whole?whole+'.'+exp:null;}
   else if(exp&&f.star){for(const s of f.star){const t=resolveImport(g,f.rel,s);if(t.type==='file'){const r=targetsOf(g,'file:'+t.file+'|.'+exp+rest+inst,seen);if(r.length)return r;}}}
@@ -317,7 +331,7 @@ export function targetsOf(g,canon,seen=new Set()){
 function superOf(g,f,cls){const n=f.supers.get(cls);if(!n)return null;const c=canonOf(g,f,n,f.rel+'::<top>');return c?c.replace(/#$/,''):null;}
 export function superUnits(g,u){const f=g.files.get(u.file);const sc=f?superOf(g,f,u.cls):null;return sc?targetsOf(g,sc+'#'):[];}
 // Reachability from root units; returns parent map for station paths.
-export function reach(g,roots,{classes=null}={}){
+export function reach(g,roots,{classes=null,hints=null}={}){
  const parent=new Map(),queue=[];
  const push=(id,from,edge)=>{if(!id||parent.has(id))return;parent.set(id,{from,...edge});queue.push(id);};
  for(const r of roots)push(r,null,{why:'入口'});
@@ -337,13 +351,20 @@ export function reach(g,roots,{classes=null}={}){
   for(const im of f.imports)if(im.unit===id||(!im.unit&&id.endsWith('::<top>'))){if(im.target?.type==='file')push(im.target.file+'::<top>',id,{why:'載入',file:rel,line:im.line});}
   for(const c of f.calls){if(c.unit!==id)continue;
    const ts=c.canon?targetsOf(g,c.canon):[];
-   for(const t of ts)push(t,id,{why:c.isNew?'建立':'呼叫',file:rel,line:c.line,text:c.text});
+   for(const t of ts)push(t,id,{why:c.isNew?'建立':'呼叫',file:rel,line:c.line,text:c.text,...(c.ctx?.length?{ctx:c.ctx}:{})});
    if(c.isNew)for(const t of ts)instantiate(findUnit(g,t),{from:id,file:rel,line:c.line,text:c.text});
+   if(f.lang==='python')for(const t of ts){const u=findUnit(g,t);if(u?.cls&&u.name===u.cls){const init=u.file+'::'+u.cls+'.__init__';if(findUnit(g,init))push(init,id,{why:'建立',file:rel,line:c.line,text:c.text});instantiate(u,{from:id,file:rel,line:c.line,text:c.text});}}
    if(!ts.length&&c.prop&&!/^(node:|global\.|pkg:)/.test(c.canon??'')&&!c.cap){const e={from:id,file:rel,line:c.line,text:c.text};
     for(const t of methodsByName.get(c.prop)??[])push(t,id,{...e,why:'依方法名推論',inferred:true});
     const list=pendingByName.get(c.prop)??pendingByName.set(c.prop,[]).get(c.prop);if(list.length<3)list.push(e);}
   }
   for(const r of f.refs){if(r.unit!==id||!r.canon)continue;for(const t of targetsOf(g,r.canon))push(t,id,{why:'當成回呼傳入',file:rel,line:r.line});}
+  // Python import_module(f'pkg.parsers.{name}'): pick the module(s) the question names (csv → pkg/parsers/csv.py).
+  for(const d of f.dynImports??[]){if(d.unit!==id)continue;for(const pre of d.prefixes){const dir=pre.replace(/\.$/,'').split('.').join('/');
+   for(const cand of g.files.values()){if(path.posix.dirname(cand.rel)!==dir)continue;const base=path.posix.basename(cand.rel,'.py');
+    if(hints!==true&&!hints?.some(h=>h===base))continue;const e={file:rel,line:d.line,text:'動態載入 '+pre+base,why:hints===true?'動態載入（前綴下的模組都算）':'動態載入（依問句推論）',inferred:true};
+    (parent.dynPicked??=[]).push({file:cand.rel,from:rel,line:d.line,prefix:pre});
+    push(cand.rel+'::<top>',id,e);for(const u of cand.units.values())if(!u.cls&&u.name!=='<top>'&&u.name!=='<main>'&&!u.name.startsWith('_')&&!u.name.includes('.'))push(u.id,id,e);}}}
  }
  parent.classes=[...seenCls].map(k=>k.split('::')[0]+'::'+k.split('::')[1]);
  return parent;
@@ -353,7 +374,7 @@ export function exportRoots(g,file,seen=new Set()){
  const f=g.files.get(file);if(!f||seen.has(file))return [];seen.add(file);const out=[file+'::<top>'];
  for(const u of f.units.values())if(u.name!=='<top>')out.push(u.id);
  for(const name of f.exports.keys())for(const t of targetsOf(g,'file:'+file+'|'+(name?'.'+name:'')))out.push(t);
- for(const s of f.star??[]){const t=resolveImport(g,file,s);if(t.type==='file')out.push(...exportRoots(g,t.file,seen));}
+ for(const s of f.star??[]){const t=f.lang==='python'?resolvePy(g,file,s):resolveImport(g,file,s);if(t.type==='file')out.push(...exportRoots(g,t.file,seen));}
  // an exported class: its methods are callable by the user
  const extra=[];for(const id of out){const u=findUnit(g,id);if(u?.cls&&u.name===u.cls)for(const v of g.files.get(u.file).units.values())if(v.cls===u.cls)extra.push(v.id);}
  return [...new Set([...out,...extra])];

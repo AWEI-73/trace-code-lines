@@ -23,15 +23,15 @@ node scripts/trace.mjs next --card <卡片.json>
 node scripts/trace.mjs status --card <卡片.json>
 ```
 
-從用途開始（JS/TS，最快拿到「怎麼接」）：把「我想怎麼用」縮成一句，`route` 從 README／package.json 找真正的入口，沿語法樹一站一站追到讀檔、轉換、輸出與錯誤；只有這條路真的走到的連網、跑程式、寫檔才算接入條件，repo 別處有的另列。加 `--trial` 在隔離副本、無網路下用假檔試跑正常、重跑、格式錯、檔案不存在四種情況。只想確認「功能有沒有接好」用 `wired`。
+從用途開始（JS/TS/Python，最快拿到「怎麼接」）：把「我想怎麼用」縮成一句，`route` 從 README／package.json／pyproject、setup.cfg、setup.py 的 console_scripts、`__main__.py` 找真正的入口，沿語法樹一站一站追到讀檔、轉換、輸出與錯誤；只有這條路真的走到的連網、跑程式、寫檔才算接入條件，repo 別處有的另列。加 `--trial` 在隔離副本、無網路下用假檔試跑正常、重跑、格式錯、檔案不存在四種情況；`--run` 寫 `< {input}` 時改從標準輸入餵檔，第四種換成空輸入。Python 試跑只用機器上已有的套件（不安裝），缺套件會列出來。只想確認「功能有沒有接好」用 `wired`。
 
 ```text
-node scripts/trace.mjs route --root <repo> --question "給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？" --out <路線.json> --html <報告.html> [--trial] [--entry bin:名稱|library|檔] [--fn 檔:函式]
+node scripts/trace.mjs route --root <repo> --question "給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？" --out <路線.json> --html <報告.html> [--trial --run "python3 -m 套件 --csv < {input}"] [--entry bin:名稱|library|檔] [--fn 檔:函式]
 node scripts/trace.mjs wired --root <repo> --from 檔:函式 --to 函式 --out <路線.json> [--html <報告.html>]
 node scripts/trace.mjs route-report --route <路線.json> --out <報告.html> --answer "讀碼後改寫的怎麼接"
 ```
 
-語法樹要先在 skill 資料夾跑一次 `npm install --ignore-scripts`（web-tree-sitter＋JS/TS 語法，免編譯）；沒裝時自動退回文字比對，報告會標明。讀不出來的動態呼叫、沒追進的外部套件、推論接上的站都列在「未知」；推論的站要讀碼或試跑確認。
+語法樹要先在 skill 資料夾跑一次 `npm install --ignore-scripts`（web-tree-sitter＋JS/TS/Python 語法，免編譯）；沒裝時自動退回文字比對，報告會標明。Python 的 `importlib.import_module(f'pkg.parsers.{x}')` 這類動態載入，會依問句的字挑對應模組（標成推論），前綴對不到 repo 的會標成「載入 repo 以外的程式碼」。讀不出來的動態呼叫、沒追進的外部套件、推論接上的站都列在「未知」；推論的站要讀碼或試跑確認。
 
 開卡前先問清楚（接入或要試跑時必做）：`preflight` 只讀掃環境與受查 repo，印出給負責人的問題原文（甲乙丙一鍵回、附建議）；掃描能決定的不問。
 

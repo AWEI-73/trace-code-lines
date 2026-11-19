@@ -38,7 +38,7 @@ import {languageChecks} from './language-self-test.mjs';
 import {census} from './record-census.mjs';
 import {classifyRecords} from './classify-records.mjs';
 import {loadAst,buildGraph,reach as astReach,touches as astTouches,targetsOf as astTargets} from './ast-graph.mjs';
-import {traceRoute,traceWired,runTrial,astPreflight} from './usage-route.mjs';
+import {traceRoute,traceWired,runTrial,astPreflight,draftAnswer} from './usage-route.mjs';
 import {renderRouteHtml} from './route-report-html.mjs';
 import {preflight as tracePreflight,resolveScope,scopeNotes,answersFrom,relayText,parseCapability} from './preflight.mjs';
 import {buildReport as buildTraceReport,safeSnippet} from './trace-report-html.mjs';
@@ -81,6 +81,7 @@ try {
   if(process.env.TRACE_P4_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:p4Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G360_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g360Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G350_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g350Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G390_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g390Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G380_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g380Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G370_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g370Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G340_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g340Checks(root)}));process.exit(0);}
@@ -562,7 +563,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
+  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2589,6 +2590,65 @@ function g370Checks(root){
 }
 
 // 1.38 usage-route: AST call graph, aliases, reachability, route stations, isolated trial, report, fallback.
+async function g390Checks(root){
+ const checks=[],area=join(root,'g390'),repo=join(area,'repo');for(const d of ['minipy/plugins'])fs.mkdirSync(join(repo,d),{recursive:true});
+ const put=(name,body)=>fs.writeFileSync(join(repo,name),body,'utf8');
+ const ast=await loadAst();
+ if(!ast.ok||!ast.langs.python){checks.push('G390 SKIPPED: tree-sitter-python not installed');return checks;}
+ const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G390 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G390 '+name);};
+ put('pyproject.toml','[project]\nname = "minipy"\nversion = "0.1.0"\n\n[project.scripts]\nminipy = "minipy.cli:main"\n');
+ put('README.md','# minipy\n\n```\n$ cat input.csv | minipy > out.json\n```\n');
+ put('minipy/__init__.py','from .core import convert as convert\n');
+ put('minipy/__main__.py','from .cli import main\nmain()\n');
+ put('minipy/cli.py',"import sys, json\nimport subprocess as sp\nfrom .plugins import loader\n\ndef main():\n    data = sys.stdin.read()\n    if '--upload' in sys.argv:\n        sp.run(['curl', 'x'])\n    try:\n        rows = loader.load('csv').parse(data)\n    except ValueError as e:\n        print('bad', e, file=sys.stderr)\n        sys.exit(2)\n    print(json.dumps(rows))\n\nif __name__ == '__main__':\n    main()\n");
+ put('minipy/plugins/__init__.py','');
+ put('minipy/plugins/loader.py',"import importlib\n\ndef load(name):\n    return importlib.import_module(f'minipy.plugins.{name}')\n");
+ put('minipy/plugins/csv.py','from ..core import convert\n\ndef parse(text):\n    return convert(text)\n');
+ put('minipy/plugins/xml.py','import socket\n\ndef parse(text):\n    socket.create_connection(("example.invalid", 80))\n');
+ put('minipy/core.py',"import csv, io\ndef convert(text):\n    rows = list(csv.reader(io.StringIO(text)))\n    if not rows:\n        raise ValueError('empty')\n    keys = rows[0]\n    if any(len(r) != len(keys) for r in rows[1:]):\n        raise ValueError('bad row')\n    return [dict(zip(keys, r)) for r in rows[1:]]\n");
+ put('minipy/upload.py',"import requests\nfrom urllib.request import urlopen as fetch\nimport os\ndef push(u):\n    requests.post(u)\n    fetch(u)\n    os.system('echo')\n    with open('out.txt', 'w') as f:\n        f.write('x')\n    open('in.txt').read()\n    token = os.environ.get('API_TOKEN')\ndef shadow(subprocess):\n    subprocess.run('x')\n");
+ const git=args=>spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...args],{cwd:repo,encoding:'utf8',windowsHide:true});
+ for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(git(a).status,0);
+ const g=buildGraph(ast,repo);
+ await check('Python capabilities: aliases (urlopen as fetch, subprocess as sp), open() modes, environ names, every hit with exact lines; a parameter named subprocess is not one',()=>{
+  const all=astTouches(g,null),at=(f,cap)=>all.filter(t=>t.file===f&&t.cap===cap).map(t=>t.line);
+  assert.deepEqual(at('minipy/upload.py','network'),[5,6]);assert.deepEqual(at('minipy/upload.py','subprocess'),[7]);
+  assert.deepEqual(at('minipy/upload.py','write-file'),[8]);assert.deepEqual(at('minipy/upload.py','read-file'),[10]);
+  assert(all.some(t=>t.file==='minipy/upload.py'&&t.cap==='env'&&t.envName==='API_TOKEN'&&t.line===11));
+  assert.equal(at('minipy/upload.py','subprocess').filter(l=>l===13).length,0,'parameter shadows the module');
+  assert.deepEqual(at('minipy/cli.py','subprocess'),[8]);assert.deepEqual(at('minipy/cli.py','stderr'),[12]);
+ });
+ await check('Python imports: relative, package __init__ re-export, submodule via from-import; entries from [project.scripts] and __main__.py',async()=>{
+  assert.deepEqual(astTargets(g,'file:minipy/__init__.py|.convert'),['minipy/core.py::convert']);
+  assert.deepEqual(astTargets(g,'file:minipy/plugins/__init__.py|.loader.load'),['minipy/plugins/loader.py::load']);
+  const {findEntries}=await import('./usage-route.mjs');const e=findEntries(repo).entries;
+  assert(e.some(x=>x.kind==='bin'&&x.name==='minipy'&&x.file==='minipy/cli.py'&&x.fn==='main'&&x.declared.file==='pyproject.toml'));
+  assert(e.some(x=>x.name==='python -m minipy'&&x.file==='minipy/__main__.py'));assert(e.some(x=>x.kind==='library'&&x.file==='minipy/__init__.py'));
+ });
+ const q='給它一份 CSV，它能不能只讀這份資料，然後把 JSON 交回來？';
+ const m=await traceRoute(repo,{question:q,ast});
+ await check('Python route: console script → stdin → dynamically loaded csv plugin (picked by the question) → print; upload/xml plugin stay off the route; subprocess is conditional',()=>{
+  assert.equal(m.entry.name,'minipy');assert.deepEqual(m.dynPicked.map(d=>d.file),['minipy/plugins/csv.py']);
+  const roles=m.stations.map(s=>s.role);for(const r of ['usage','entry','input','transform','output','error'])assert(roles.includes(r),r);
+  assert(m.stations.some(s=>s.role==='input'&&s.file==='minipy/cli.py'&&s.line===6));assert(m.stations.some(s=>s.role==='output'&&s.line===14));
+  assert(!m.touches.route.some(t=>t.cap==='network'));assert(m.touches.elsewhere.some(t=>t.cap==='network'&&t.file==='minipy/plugins/xml.py'));
+  assert(m.answer.text.includes('只在特定情況')&&m.answer.text.includes('minipy/plugins/csv.py'));
+ });
+ const hasPy=spawnSync('python3',['-c','pass']).status===0;
+ await check('Python trial: stdin input in an isolated copy, no .pyc written, empty-input case, missing dependency reported not installed',()=>{
+  if(!hasPy)return;const t=runTrial(repo,{run:'python3 -m minipy < {input}',question:q});const c=id=>t.cases.find(x=>x.id===id);
+  assert(t.viaStdin&&t.python);assert.equal(c('good').exit,0);assert(c('good').json.shape.startsWith('陣列 2 筆'));assert.deepEqual(c('good').changed,[]);
+  assert.equal(c('bad').exit,2);assert.equal(c('empty').exit,2);assert(!c('missing'));
+  const d=runTrial(repo,{run:'python3 -c "import nosuchmod_tcl" {input}',question:q});assert.equal(d.cases[0].missingDep,'nosuchmod_tcl');
+  m.trial=t;const a=draftAnswer(m);assert(a.text.includes('`python3 -m minipy < <檔案>`（裝好後就是 `minipy`）')&&a.text.includes('標準輸入'));
+ });
+ await check('Python wired mode follows the dynamic import to the target; preflight counts dynamically loadable plugins as reachable; no grammar → .py skipped',async()=>{
+  const w=await traceWired(repo,{from:'minipy/cli.py:main',to:'minipy/core.py:convert',ast});assert(w.answer.text.startsWith('原碼接線完整'),w.answer.text);
+  const sc=await astPreflight(repo);assert(sc.findings.some(f=>f.file==='minipy/plugins/xml.py'&&f.reached));assert(sc.findings.some(f=>f.file==='minipy/upload.py'&&!f.reached));
+  const g0=buildGraph({...ast,langs:{...ast.langs,python:undefined}},repo);assert.equal([...g0.files.keys()].filter(f=>f.endsWith('.py')).length,0);
+ });
+ return checks;
+}
 async function g380Checks(root){
  const checks=[],area=join(root,'g380'),repo=join(area,'repo');for(const d of ['bin','lib'])fs.mkdirSync(join(repo,d),{recursive:true});
  const put=(name,body)=>fs.writeFileSync(join(repo,name),body,'utf8');

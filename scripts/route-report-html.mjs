@@ -6,12 +6,15 @@ const taipei=d=>new Date(d).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour1
 const md=s=>esc(s).replace(/`([^`]+)`/g,'<code>$1</code>');
 const loc=x=>x.file?'<code class="loc">'+esc(x.file)+(x.line?':'+x.line:'')+'</code>':'';
 const RISKY=new Set(['subprocess','network','listen','paid','real-account','write-file','worker','mcp-tools','dynamic']);
+// a touch that only runs under its own `if` (not an else / 不成立 branch) is conditional, not the normal path
+const onlyIf=x=>(x.ownCtx??[]).some(c=>/^當 /.test(c)&&!/不成立/.test(c));
+const riskLabels=R=>{const by=new Map();for(const t of R.filter(x=>RISKY.has(x.cap)&&x.cap!=='dynamic'))(by.get(t.label)??by.set(t.label,[]).get(t.label)).push(t);return [...by].map(([l,ts])=>ts.every(onlyIf)?l+'（只在特定情況）':l);};
 export function verdictOf(m){
  if(!m.entry||m.engine?.name!=='tree-sitter')return {label:'待查',tone:'amber',why:!m.entry?'找不到入口':'沒有語法解析，只能文字比對'};
  const risky=(m.touches?.route??[]).filter(t=>RISKY.has(t.cap)&&t.cap!=='dynamic');
  const cav=m.answer?.parts?.caveats??[],unk=(m.unknowns??[]).filter(u=>u.kind!=='inferred');
  if(risky.some(t=>['paid','real-account'].includes(t.cap)))return {label:'不建議直接接',tone:'red',why:'這條路會花錢或用真帳號'};
- if(risky.length||cav.length||unk.length||!m.trial?.ran)return {label:'有條件可接',tone:'amber',why:[risky.length?'這條路會'+[...new Set(risky.map(t=>t.label))].join('、'):null,cav.length?cav.length+' 個接法注意事項':null,unk.length?unk.length+' 個未知':null,!m.trial?.ran?'還沒試跑':null].filter(Boolean).join('；')};
+ if(risky.length||cav.length||unk.length||!m.trial?.ran)return {label:'有條件可接',tone:'amber',why:[risky.length?'這條路會'+riskLabels(risky).join('、'):null,cav.length?cav.length+' 個接法注意事項':null,unk.length?unk.length+' 個未知':null,!m.trial?.ran?'還沒試跑':null].filter(Boolean).join('；')};
  return {label:'可接',tone:'green',why:'原碼與試跑都對得上'};
 }
 const css=String.raw`
@@ -45,7 +48,7 @@ function touchCards(list,{max=6}={}){
 }
 export function renderRouteHtml(m){
  const v=verdictOf(m),a=m.answer??{},p=a.parts??{},t=m.trial,R=m.touches?.route??[],E=m.touches?.elsewhere??[];
- const riskyRoute=[...new Set(R.filter(x=>RISKY.has(x.cap)&&x.cap!=='dynamic').map(x=>x.label))];
+ const riskyRoute=riskLabels(R);
  const riskyElse=[...new Set(E.filter(x=>RISKY.has(x.cap)&&!R.some(r=>r.cap===x.cap)).map(x=>x.label))];
  const kv=[['入口',p.entry?.replace(/^可以先接/,'')],['給它',p.input],['拿回',p.output],['這條路會碰',riskyRoute.length?riskyRoute.join('、')+'（要准）':'沒看到連網、跑其他程式、開連線埠'+(riskyElse.length?'；repo 別處有 '+riskyElse.join('、')+'，這條路沒走到':'')]].filter(([,x])=>x);
  const edited=a.draft===false;

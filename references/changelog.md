@@ -9,6 +9,11 @@
 - 開卡前檢查改用語法樹偵測執行程式、連網、開連線埠、付費、真帳號、模型工具；只有入口走得到的才問，走不到的列為「repo 有但入口走不到」。沒裝語法樹時退回原本的文字比對並標明。
 - 試用：csvtojson（CSV → JSON）、axios、simple-git。舊的漏抓與誤報：`_fetch(` 別名、每檔只記第一筆、`正則.exec(` 誤報、型別宣告誤報都已由語法樹解決。
 - 既有自測新增七例（G380）。
+- Python（選配 tree-sitter-python，沒裝時 .py 退回文字比對）：`import x`／`from x import y as z`／相對 import／套件 `__init__.py` 轉出口與子模組、`[project.scripts]`／`[tool.poetry.scripts]`／setup.cfg／setup.py console_scripts、`__main__.py`（`python -m`）；`if __name__ == '__main__'` 區塊只在直接執行時算。能力：subprocess／os.system 類、requests／httpx／urllib／socket／aiohttp 等、`open()` 依模式分讀寫、pathlib／shutil／os 寫檔、`print(file=sys.stderr)`、`os.environ`／`getenv`（記變數名）、`sys.exit`／`raise SystemExit`、eval／exec。類別呼叫即建立（`__init__`），`self.x =` 欄位、參數遮蔽同名模組。
+- 動態載入：`import_module(f'{prefix}{name}')` 會解出前綴（含 `prefix = 'a.' if … else 'b.'`），用途路線依問句挑模組（csv → parsers/csv.py），`wired` 依目標挑，開卡前檢查把前綴下的模組都算走得到；前綴對不到 repo 的標成「會載入 repo 以外的程式碼」。
+- 條件更準：能力本身在 `if` 裡標「有條件」；只在 `當 …` 分支才會跑的危險動作，「怎麼接」寫「只在特定情況（檔:行 只在「當 …」時）」，不再一律寫成「這條路會」。呼叫處的條件另列在「有條件才會走的動作」。
+- 試跑：`--run "… < {input}"` 改由標準輸入餵檔，第四種情況換成空輸入；Python 試跑設 PYTHONPATH 指向副本、不寫 .pyc、不用使用者 site-packages，不安裝任何套件，缺的套件記在案例與注意事項。
+- 試用：jc（`jc --csv`，Python）。既有自測新增五例（G390）。
 
 ## 1.37.0-rc.1 (2026-11-19，測試中)
 
