@@ -25,7 +25,9 @@ node scripts/trace.mjs status --card <卡片.json>
 
 從用途開始（JS/TS/Python，最快拿到「怎麼接」）：把「我想怎麼用」縮成一句，`route` 從 README／package.json／pyproject、setup.cfg、setup.py 的 console_scripts、`__main__.py` 找真正的入口，沿語法樹一站一站追到讀檔、轉換、輸出與錯誤；只有這條路真的走到的連網、跑程式、寫檔才算接入條件，repo 別處有的另列。加 `--trial` 在隔離副本、無網路下用假檔試跑正常、重跑、格式錯、檔案不存在四種情況；`--run` 寫 `< {input}` 時改從標準輸入餵檔，第四種換成空輸入。Python 試跑只用機器上已有的套件（不安裝），缺套件會列出來。只想確認「功能有沒有接好」用 `wired`。
 
-`--trial` 沒給 `--run` 時自動推論：在無網路副本跑 `--help`，加上 README／docs 用法（略過 changelog 與斷行續行），挑對到問句的指令與旗標（如 `insert … --csv`），印出「試跑指令（推論）」與依據；`--run` 一律優先。會開連線埠的路線改用只有本機回環的命名空間：等服務起來、用 GET 試讀、再關掉，記下回應與前後檔案變化。click／typer／argparse 子指令、commander／yargs、Express／Fastify／Koa、Flask／FastAPI 的註冊視為入口；問句點名的指令或路由（或由「寫進」等動詞、文件用法推論，標成推論）才進路線。加 `--preflight <答覆.json>` 時，報告「能不能接」逐項標已准／沒准；`report --card <卡片.json> --route <路線.json> --out <報告.html>` 產單一合併報告（怎麼接 → 能不能接 → 路線 → 試跑 → 細節收合）。
+`--trial` 沒給 `--run` 時自動推論：在無網路副本跑 `--help`，加上 README／docs 用法（略過 changelog 與斷行續行），挑對到問句的指令與旗標（如 `insert … --csv`），印出「試跑指令（推論）」與依據；`--run` 一律優先。會開連線埠的路線改用只有本機回環的命名空間：等服務起來、用 GET 試讀、再關掉，記下回應與前後檔案變化。click／typer／argparse 子指令、commander／yargs、Express／Fastify／Koa、Flask／FastAPI 的註冊視為入口；問句點名的指令或路由（或由「寫進」等動詞、文件用法推論，標成推論）才進路線。加 `--preflight <答覆.json>` 時，報告「能不能接」逐項標已准／沒准；`report --card <卡片.json> --route <路線.json> --out <報告.html>` 產單一合併報告（怎麼接 → 能不能接 → 接線 → 路線 → 試跑 → 細節收合）。
+
+多入口與 monorepo：workspaces／packages/*（含 Python src 版面）都列為入口，依問句字、主套件或範例外掛、文件用法次數排序，只挑一個，其餘放「其他候選」（附分數與理由，`--entry` 可換）；多條路由對上時也只挑最相關的一條。外掛式註冊（多個類別都有 `convert()`）依問句挑類別（docx → DocxConverter），標成推論。試跑依問句做假檔（CSV／JSON／DOCX／PDF／HTML／Markdown），好檔帶標記字串，用來確認內容真的轉出來；在空的工作資料夾執行（repo 自己的設定檔不套用）。報告的「接線」一節是可直接拿去接的合約：呼叫方式、給什麼、拿回什麼、成功失敗訊號（含逾時建議）、動到的檔、要准的能力、還要試的未知，加一份步驟描述（輸入／輸出／execution_class／停下條件）；JSON 版在路線檔的 `adapter`。
 
 ```text
 node scripts/trace.mjs route --root <repo> --question "給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？" --out <路線.json> --html <報告.html> [--trial [--run "python3 -m 套件 --csv < {input}"]] [--preflight <答覆.json>] [--entry bin:名稱|library|檔] [--fn 檔:函式]

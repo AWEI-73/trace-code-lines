@@ -6,6 +6,7 @@ import {initChain,checkChainAnchor} from './chain-card.mjs';
 import {reviewUnknowns} from './unknowns.mjs';
 import {noLinks} from './walker.mjs';
 import {gitRead} from './git-evidence.mjs';
+import {adapterContract} from './adapter-contract.mjs';
 import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun} from './usage-route.mjs';
 import {renderRouteHtml} from './route-report-html.mjs';
 import {preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,relayText,capLabel,parseCapability} from './preflight.mjs';
@@ -228,6 +229,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
    // --preflight 答覆.json: what the owner granted, so the page says 已准／沒准 per capability on this route
    if(get('--preflight')){const af=path.resolve(get('--preflight')),ans=JSON.parse(fs.readFileSync(af,'utf8')),qs=JSON.parse(fs.readFileSync(path.resolve(path.dirname(af),ans.questionsFile),'utf8')),r=resolveScope(qs,ans);
     m.scope={granted:r.scope.capabilities.map(x=>parseCapability?parseCapability(x).capability??x:x),pending:r.pending,pendingLabels:r.pendingLabels,simulated:r.simulated,answeredBy:r.answeredBy};}
+   if(m.stations&&command!=='wired')m.adapter=adapterContract(m);
    const html=command==='route-report'?path.resolve(out):get('--html')&&path.resolve(get('--html'));
    if(command!=='route-report'){noLinks(path.resolve(out));fs.writeFileSync(path.resolve(out),JSON.stringify(m,null,1)+'\n');}
    if(html){noLinks(html);fs.writeFileSync(html,renderRouteHtml(m));}
@@ -244,7 +246,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
    const paths=(get('--paths')??'').split(',').map(x=>x.trim()).filter(Boolean),mode=get('--mode')??'integrate';
    noLinks(target);const astScan=args.includes('--no-ast')?null:await astPreflight(root,{entry:get('--entry')});const q=preflight(root,{paths,mode,ast:astScan});fs.writeFileSync(target,JSON.stringify(q,null,2)+'\n',{encoding:'utf8',flag:'wx'});
    const live=q.target.findings.filter(f=>!f.test&&!f.retired&&!f.typesOnly&&!f.unreached).length,unreached=q.target.findings.filter(f=>f.unreached&&!f.test).length;
-   const eng=q.target.engine;console.log(eng.name==='tree-sitter'?'掃描方式：語法樹（tree-sitter '+eng.version+'，'+eng.files+' 個 JS/TS 檔）；入口 '+((q.target.entries??[]).map(e=>e.kind+':'+e.name).join('、')||'找不到，全部列入')+(unreached?'；repo 有但入口走不到的線索 '+unreached+' 項，不問':''):'掃描方式：文字比對（'+(eng.reason??'')+'）');
+   const eng=q.target.engine;console.log(eng.name==='tree-sitter'?'掃描方式：語法樹（tree-sitter '+eng.version+'，'+eng.files+' 個 JS/TS/Python 檔）；入口 '+((q.target.entries??[]).map(e=>e.kind+':'+e.name).join('、')||'找不到，全部列入')+(unreached?'；repo 有但入口走不到的線索 '+unreached+' 項，不問':''):'掃描方式：文字比對（'+(eng.reason??'')+'）');
    console.log(['開卡前檢查：讀 '+q.target.fileCount+' 檔'+(paths.length?'（只看 '+paths.join('、')+'）':'')+'；需要負責人知道的線索 '+live+' 項（另有測試、退役、型別宣告或入口走不到 '+(q.target.findings.length-live)+' 項）。'+(!paths.length&&q.target.fileCount>500?'\n範圍很大（'+q.target.fileCount+' 檔）：若只要接其中一部分，請重做並加 --paths 子目錄，問題和報告都會小很多。':''),'',relayText(q),'',
     '給 agent：把上面原文轉給負責人；收到回覆後執行',
     '  node scripts/trace.mjs answer --questions '+JSON.stringify(target)+' --out <答覆.json> --by "回覆者" --accept-defaults [--set 題號=甲乙丙]',

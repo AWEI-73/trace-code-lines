@@ -10,7 +10,7 @@ import {PY_FILE,parsePy,resolvePy,pyCanon,pyBinding} from './ast-python.mjs';
 const sha256=s=>crypto.createHash('sha256').update(s).digest('hex');
 const SKILL_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export const JS_FILE=/\.(m?js|cjs|jsx|ts|mts|cts|tsx)$/;
-const SKIP_DIR=/(^|\/)(node_modules|\.git|coverage|\.next|\.nuxt|\.venv|venv|\.tox|__pycache__|site-packages)(\/|$)/;
+const SKIP_DIR=/(^|\/)(node_modules|\.git|coverage|\.next|\.nuxt|\.venv|venv|\.tox|__pycache__|site-packages|vendor|third_party|bower_components|\.mypy_cache|\.pytest_cache|_build)(\/|$)/;
 const TYPE_DECL=/\.d\.(ts|mts|cts)$/;
 let cached=null;
 // Search order: $TCL_AST_DIR (a folder with node_modules), then this skill's own node_modules.
@@ -42,9 +42,9 @@ const GLOBALS=new Set(['fetch','XMLHttpRequest','WebSocket','EventSource','proce
 // canon string -> capability. Canon forms: node:fs.readFile  global.fetch  pkg:axios.get  (instances end with #)
 const CAPS=[
  ['subprocess',/^node:child_process\.(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)$|^pkg:(execa|cross-spawn|shelljs)(\.|$)|^py:subprocess\.(run|call|check_call|check_output|Popen|getoutput|getstatusoutput)$|^py:os\.(system|popen|exec\w*|spawn\w*|posix_spawn\w*)$|^pkg:(sh|plumbum|pexpect)(\.|$)/],
- ['network',/^global\.(fetch|XMLHttpRequest#?|WebSocket#?|EventSource#?)$|^node:(http|https|http2)\.(request|get|connect)$|^node:(net|tls)\.(connect|createConnection|Socket#?)$|^node:dgram\.createSocket$|^node:dns(\/promises)?\.\w+$|^pkg:(axios|node-fetch|got|undici|request|superagent|ws|cross-fetch|isomorphic-fetch|ky|follow-redirects)(\.|#|$)|^py:(urllib\.request\.(urlopen|urlretrieve|build_opener)|http\.client\.\w*Connection|socket\.(socket|create_connection)|smtplib\.SMTP\w*|ftplib\.FTP\w*|imaplib\.IMAP4\w*|poplib\.POP3\w*|xmlrpc\.client\.ServerProxy)$|^pkg:(requests|httpx|aiohttp|urllib3|websockets|websocket|boto3|botocore|grpc|paramiko|pycurl)(\.|#|$)/],
+ ['network',/^global\.(fetch|XMLHttpRequest#?|WebSocket#?|EventSource#?)$|^node:(http|https|http2)\.(request|get|connect)$|^node:(net|tls)\.(connect|createConnection|Socket#?)$|^node:dgram\.createSocket$|^node:dns(\/promises)?\.\w+$|^pkg:(axios|node-fetch|got|undici|request|superagent|ws|cross-fetch|isomorphic-fetch|ky|follow-redirects)(\.|#|$)|^py:(urllib\.request\.(urlopen|urlretrieve|build_opener)|http\.client\.\w*Connection|socket\.(socket|create_connection)|smtplib\.SMTP\w*|ftplib\.FTP\w*|imaplib\.IMAP4\w*|poplib\.POP3\w*|xmlrpc\.client\.ServerProxy)$|^pkg:(requests|httpx)(\.(get|post|put|patch|delete|head|options|request|stream)|\.(Session|Client|AsyncClient)(\(\))?#?\.(get|post|put|patch|delete|head|options|request|send|stream))$|^pkg:(aiohttp|urllib3|websockets|websocket|boto3|botocore|grpc|paramiko|pycurl)(\.|#|$)/],
  ['listen',/^node:(http|https|http2|net|tls)\.createServer$|\.createServer\(\)#?\.listen$|^(pkg|local|file):.*[.)#]\.?listen$|^pkg:(express|koa|fastify)(\(\))?#?\.listen$|^py:(http\.server|socketserver)\.\w+$|^pkg:(flask|fastapi|uvicorn|django|tornado|bottle|sanic|starlette|gunicorn|aiohttp\.web)(\.|#|$)/],
- ['write-file',/^node:fs(\/promises)?\.(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdir|mkdirSync|rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|cp|cpSync|symlink|symlinkSync|chmod|chmodSync|truncate|truncateSync)$|^py:(shutil\.(copy\w*|move|rmtree|make_archive|unpack_archive)|os\.(remove|unlink|rename|replace|makedirs|mkdir|rmdir|removedirs|chmod|chown|symlink|link|truncate))$|^py:pathlib\.\w*Path\(\)\.(write_text|write_bytes|mkdir|unlink|rename|replace|touch|rmdir|symlink_to|chmod)$|^py:(sqlite3\.connect|dbm\.open|shelve\.open)$|^pkg:(better-sqlite3|sqlite3)(\.|#|$)/],
+ ['write-file',/^node:fs(\/promises)?\.(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdir|mkdirSync|rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|cp|cpSync|symlink|symlinkSync|chmod|chmodSync|truncate|truncateSync)$|^py:(shutil\.(copy(?!fileobj)\w*|move|rmtree|make_archive|unpack_archive)|os\.(remove|unlink|rename|replace|makedirs|mkdir|rmdir|removedirs|chmod|chown|symlink|link|truncate))$|^py:pathlib\.\w*Path\(\)\.(write_text|write_bytes|mkdir|unlink|rename|replace|touch|rmdir|symlink_to|chmod)$|^py:(sqlite3\.connect|dbm\.open|shelve\.open)$|^pkg:(better-sqlite3|sqlite3)(\.|#|$)/],
  ['read-file',/^node:fs(\/promises)?\.(readFile|readFileSync|createReadStream|readdir|readdirSync|existsSync|exists|stat|statSync|lstat|lstatSync|access|accessSync|open|openSync|read|readSync|opendir)$|^py:(os\.(listdir|scandir|walk)|glob\.\w+)$|^py:pathlib\.\w*Path\(\)\.(read_text|read_bytes|iterdir|glob|rglob|open)$/],
  ['stdin',/^global\.process\.stdin(\.\w+)?$|^py:sys\.stdin(\.\w+)*$|^global\.input$|^py:fileinput\.input$/],
  ['stdout',/^global\.console\.(log|info|debug|table|dir)$|^global\.process\.stdout\.write$|^global\.print$|^py:sys\.stdout(\.buffer)?\.write$/],
@@ -213,13 +213,16 @@ function parseFile(ast,root,rel){
  return f;
 }
 // ---- graph ----
+export function pyRootsOf(all,set=new Set(all)){const r=new Set(['']);for(const f of all){if(!/\/__init__\.py$/.test(f))continue;const pkg=path.posix.dirname(f),parent=path.posix.dirname(pkg);if(!set.has((parent==='.'?'':parent+'/')+'__init__.py'))r.add(parent==='.'?'':parent);}
+ return [...r].sort((a,b)=>(a!=='')-(b!=='')||(a!=='src')-(b!=='src')||a.split('/').length-b.split('/').length).slice(0,24);}
 export function buildGraph(ast,root,{files=null,focus=[]}={}){
  root=path.resolve(root);if(!ast?.ok)throw Error('AST 未載入');
  const all=(files??listFiles(root)).filter(r=>!SKIP_DIR.test(r));
  const set=new Set(all);
  const g={root,files:new Map(),failed:[],set,pkgCache:new Map()};
  const parseList=all.filter(r=>JS_FILE.test(r)&&!TYPE_DECL.test(r)||ast.langs.python&&PY_FILE.test(r)||isScriptNoExt(root,r,!!ast.langs.python));
- g.pyRoots=['',...(set.has('src/__init__.py')?[]:all.some(r=>/^src\/[^/]+\/__init__\.py$/.test(r))?['src']:[])];
+ // import roots: every folder holding a top-level package (repo root, src/, and monorepo packages/x/src)
+ g.pyRoots=pyRootsOf(all,set);
  for(const r of parseList){const f=parseFile(ast,root,r);if(!f)continue;if(f.ok)g.files.set(r,f);else g.failed.push({file:r,error:f.error,minified:!!f.minified});}
  g.resolveImport=(from,src)=>resolveImport(g,from,src);
  g.canonCache=new Map();
@@ -360,6 +363,13 @@ export function reach(g,roots,{classes=null,hints=null,framework='all'}={}){
  const push=(id,from,edge)=>{if(!id||parent.has(id)||fwOff(id))return;parent.set(id,{from,...edge});queue.push(id);};
  for(const r of roots)push(r,null,{why:'入口'});
  const unitFile=id=>id.split('::')[0];
+ // Many classes share a method name (plugin registries: XConverter.convert): keep the classes the question names
+ // (docx → DocxConverter); words that match most classes (convert) say nothing and are ignored.
+ const hintWords=Array.isArray(hints)?hints.filter(h=>h.length>=3):[];
+ const byHint=(prop,ids)=>{if(!hintWords.length)return ids;const cls=new Map();for(const t of ids){const u=findUnit(g,t);if(u?.cls)cls.set(u.file+'::'+u.cls,u);}if(cls.size<3)return ids;
+  const keep=new Set();for(const h of hintWords){const m=[...cls].filter(([k,u])=>u.cls.toLowerCase().includes(h)||path.posix.basename(u.file).toLowerCase().includes(h));if(m.length&&m.length<=cls.size/2)m.forEach(([k])=>keep.add(k));}
+  if(!keep.size)return ids;const out=ids.filter(t=>{const u=findUnit(g,t);return !u?.cls||keep.has(u.file+'::'+u.cls);});
+  const rec=(parent.methodPicked??=new Map());if(!rec.has(prop))rec.set(prop,{method:prop,picked:[...keep].map(k=>k.split('::')[1]),total:cls.size});return out;};
  // Method calls on values we cannot type (x.chain().push(t)) link by method name to classes this route instantiates.
  const methodsByName=new Map(),pendingByName=new Map(),seenCls=new Set();
  const instantiate=(u,edge)=>{if(!u?.cls)return;const key=u.file+'::'+u.cls;if(seenCls.has(key))return;seenCls.add(key);
@@ -367,7 +377,7 @@ export function reach(g,roots,{classes=null,hints=null,framework='all'}={}){
   for(const v of g.files.get(u.file).units.values()){if(v.cls!==u.cls||v.name===u.cls)continue;const short=v.name.split('.').pop();
    if(PROTOCOL.has(short))push(v.id,edge.from,{...edge,why:'執行環境自動呼叫（推論）',inferred:true});
    (methodsByName.get(short)??methodsByName.set(short,[]).get(short)).push(v.id);
-   for(const p of pendingByName.get(short)??[])push(v.id,p.from,{...p,why:'依方法名推論',inferred:true});}};
+   for(const p of pendingByName.get(short)??[])if(byHint(short,[...methodsByName.get(short)]).includes(v.id))push(v.id,p.from,{...p,why:'依方法名推論',inferred:true});}};
  // Context from a wider reach (e.g. the whole API): classes it instantiates are live objects this route may call into.
  for(const cid of classes??[]){const u=findUnit(g,cid);if(!u?.cls)continue;for(const v of g.files.get(u.file).units.values())if(v.cls===u.cls&&v.name!==u.cls)(methodsByName.get(v.name.split('.').pop())??methodsByName.set(v.name.split('.').pop(),[]).get(v.name.split('.').pop())).push(v.id);}
  while(queue.length){
@@ -379,7 +389,7 @@ export function reach(g,roots,{classes=null,hints=null,framework='all'}={}){
    if(c.isNew)for(const t of ts)instantiate(findUnit(g,t),{from:id,file:rel,line:c.line,text:c.text});
    if(f.lang==='python')for(const t of ts){const u=findUnit(g,t);if(u?.cls&&u.name===u.cls){const init=u.file+'::'+u.cls+'.__init__';if(findUnit(g,init))push(init,id,{why:'建立',file:rel,line:c.line,text:c.text});instantiate(u,{from:id,file:rel,line:c.line,text:c.text});}}
    if(!ts.length&&c.prop&&!/^(node:|global\.|pkg:)/.test(c.canon??'')&&!c.cap){const e={from:id,file:rel,line:c.line,text:c.text};
-    for(const t of methodsByName.get(c.prop)??[])push(t,id,{...e,why:'依方法名推論',inferred:true});
+    for(const t of byHint(c.prop,methodsByName.get(c.prop)??[]))push(t,id,{...e,why:'依方法名推論',inferred:true});
     const list=pendingByName.get(c.prop)??pendingByName.set(c.prop,[]).get(c.prop);if(list.length<3)list.push(e);}
   }
   for(const r of f.refs){if(r.unit!==id||!r.canon)continue;for(const t of targetsOf(g,r.canon))push(t,id,{why:'當成回呼傳入',file:rel,line:r.line});}
@@ -391,6 +401,7 @@ export function reach(g,roots,{classes=null,hints=null,framework='all'}={}){
     (parent.dynPicked??=[]).push({file:cand.rel,from:rel,line:d.line,prefix:pre});
     push(cand.rel+'::<top>',id,e);for(const u of cand.units.values())if(!u.cls&&u.name!=='<top>'&&u.name!=='<main>'&&!u.name.startsWith('_')&&!u.name.includes('.'))push(u.id,id,e);}}}
  }
+ if(parent.methodPicked)parent.methodPicked=[...parent.methodPicked.values()];
  parent.classes=[...seenCls].map(k=>k.split('::')[0]+'::'+k.split('::')[1]);
  return parent;
 }

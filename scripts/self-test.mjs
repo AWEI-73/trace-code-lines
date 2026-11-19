@@ -81,6 +81,7 @@ try {
   if(process.env.TRACE_P4_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:p4Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G360_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g360Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G350_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g350Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G410_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g410Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G400_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g400Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G390_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g390Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G380_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g380Checks(root)}));process.exit(0);}
@@ -564,7 +565,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
+  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2591,6 +2592,79 @@ function g370Checks(root){
 }
 
 // 1.38 usage-route: AST call graph, aliases, reachability, route stations, isolated trial, report, fallback.
+async function g410Checks(root){
+ const checks=[],area=join(root,'g410');const ast=await loadAst();
+ if(!ast.ok){checks.push('G410 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G410 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G410 '+name);};
+ const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body);};
+ const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
+ const {findEntries,rankEntries,inferRun}=await import('./usage-route.mjs');const {adapterContract}=await import('./adapter-contract.mjs');const {fakeInput,formatOf,MARKER}=await import('./fake-inputs.mjs');
+ // --- JS workspaces monorepo: cli + core + an example plugin; a repo-local config that only applies inside the repo ---
+ const mj=join(area,'mono-js');
+ put(mj,'package.json','{"name":"mono","private":true,"workspaces":["packages/*"]}\n');
+ put(mj,'README.md','# mono\n\n```sh\n$ cd mono\n$ mono --list-themes\n$ mono input.html > out.md\n```\n');
+ put(mj,'packages/mono-cli/package.json','{"name":"mono-cli","version":"2.0.0","bin":{"mono":"./cli.js"}}\n');
+ put(mj,'packages/mono-cli/cli.js',"#!/usr/bin/env node\nconst fs = require('fs');\nconst {convert} = require('../mono-core/index.js');\nif (fs.existsSync('.monorc')) { console.error('bad config'); process.exit(3); }\nconst file = process.argv[2];\nif (!fs.existsSync(file)) { console.error('missing'); process.exit(2); }\nprocess.stdout.write(convert(fs.readFileSync(file, 'utf8')));\nconsole.error('done: no issues');\n");
+ put(mj,'packages/mono-core/package.json','{"name":"mono-core","version":"2.0.0","main":"index.js"}\n');
+ put(mj,'packages/mono-core/index.js',"function convert(t){ return t.replace(/<[^>]+>/g, ''); }\nmodule.exports = {convert};\n");
+ put(mj,'packages/mono-sample-plugin/package.json','{"name":"mono-sample-plugin","version":"0.0.1","main":"index.js"}\n');
+ put(mj,'packages/mono-sample-plugin/index.js',"module.exports = () => require('child_process').execSync('ls');\n");
+ put(mj,'.monorc','strict\n');
+ gitInit(mj);
+ const fj=findEntries(mj);
+ await check('monorepo: workspace packages give entries with package-prefixed files; cd/install lines are not usage; ranking prefers the CLI over libraries and sample plugins',()=>{
+  assert(fj.entries.some(e=>e.kind==='bin'&&e.name==='mono'&&e.file==='packages/mono-cli/cli.js'&&e.pkg==='packages/mono-cli'));
+  assert(fj.entries.some(e=>e.kind==='library'&&e.name==='mono-core'&&e.file==='packages/mono-core/index.js'));
+  assert(!fj.usage.some(u=>/\$ cd /.test(u.text)));
+  const r=rankEntries(fj,'給它一份 HTML 檔，拿回純文字');assert.equal(r[0].e.name,'mono');assert(r.at(-1).e.name==='mono-sample-plugin',r.map(x=>x.e.name).join());
+ });
+ const m=await traceRoute(mj,{question:'能不能當一個步驟：給它一份 HTML 檔，拿回純文字，而且不連網、不動其他檔？',ast});
+ await check('trial: README line with an input file beats a flags-only line; runs from an empty work folder so the repo config does not apply; marker proves content came through',()=>{
+  assert.equal(m.entry.name,'mono');assert(m.stations.some(s=>s.file==='packages/mono-core/index.js'),'route crosses into the sibling package');
+  const plan=inferRun(mj,m);assert.equal(plan.run,'node packages/mono-cli/cli.js {input}');assert(plan.why.some(w=>/README\.md:6/.test(w)),plan.why.join());
+  const t=runTrial(mj,{run:plan.run,plan,question:m.question});const g=t.cases.find(c=>c.id==='good');
+  assert.equal(t.inputs.format,'html');assert.equal(g.exit,0,g.stderr);assert.equal(g.marker,true);assert.deepEqual(g.changed,[]);
+  m.trial=t;m.answer=draftAnswer(m);assert(/錯誤輸出也有字/.test(m.answer.text),m.answer.text);
+ });
+ await check('接線合約: invoke, input format, stdout text, exit signals, timeout hint, grants and a step stub; HTML shows it after 能不能接 and before 路線, with 其他候選',()=>{
+  const a=adapterContract(m);assert.equal(a.invoke.kind,'command');assert(/mono <輸入檔>|cli\.js <輸入檔>/.test(a.invoke.command));assert.equal(a.inputs[0].format,'html');
+  assert(a.outputs.some(o=>o.channel==='標準輸出'&&o.checked==='試跑'));assert(a.signals.failure.some(f=>f.case==='檔案不存在'&&f.exit===2));assert(a.signals.timeoutSuggestMs>=5000);
+  assert.equal(a.step.execution_class,'deterministic');assert(!a.grants.some(g=>g.need==='執行其他程式'),'sample plugin is not on the route');
+  const h=renderRouteHtml(m);const i=k=>h.indexOf(k);assert(i('id="how"')<i('能不能接')&&i('能不能接')<i('id="wire"')&&i('id="wire"')<i('<h2>路線'));assert(h.includes('id="others"')&&h.includes('mono-sample-plugin'));
+ });
+ // --- Python src-layout monorepo with a converter registry ---
+ if(!ast.langs.python){checks.push('G410 python SKIPPED');return checks;}
+ const mp=join(area,'mono-py');
+ put(mp,'README.md','# conv\n\n```\nconv path-to-file.docx > out.md\nconv-mcp --http\n```\n');
+ put(mp,'packages/conv/pyproject.toml','[project]\nname = "conv"\nversion = "1.2.0"\n\n[project.scripts]\nconv = "conv.__main__:main"\n');
+ put(mp,'packages/conv/src/conv/__init__.py','from ._core import Conv\n');
+ put(mp,'packages/conv/src/conv/__main__.py',"import sys\nfrom ._core import Conv\n\n\ndef main():\n    print(Conv().convert(sys.argv[1]))\n\n\nif __name__ == '__main__':\n    main()\n");
+ put(mp,'packages/conv/src/conv/_core.py',"import requests\nimport shutil\nimport io\nfrom .converters import DocxConverter, PdfConverter, ImageConverter\n\n\nclass Conv:\n    def __init__(self):\n        self.session = requests.Session()\n        self.convs = [DocxConverter(), PdfConverter(), ImageConverter()]\n\n    def convert(self, path):\n        buf = io.BytesIO()\n        shutil.copyfileobj(open(path, 'rb'), buf)\n        for c in self.convs:\n            if c.accepts(path):\n                return c.convert(buf)\n\n    def fetch(self, url):\n        return self.session.get(url)\n");
+ put(mp,'packages/conv/src/conv/converters.py',"import subprocess\n\n\nclass DocxConverter:\n    def accepts(self, p):\n        return p.endswith('.docx')\n\n    def convert(self, b):\n        return b.getvalue().decode('latin1')\n\n\nclass PdfConverter:\n    def accepts(self, p):\n        return p.endswith('.pdf')\n\n    def convert(self, b):\n        return 'pdf'\n\n\nclass ImageConverter:\n    def accepts(self, p):\n        return p.endswith('.png')\n\n    def convert(self, b):\n        return subprocess.run(['exiftool', '-'], input=b.getvalue()).stdout\n");
+ put(mp,'packages/conv-mcp/pyproject.toml','[project]\nname = "conv-mcp"\nversion = "0.1.0"\n\n[project.scripts]\nconv-mcp = "conv_mcp.__main__:main"\n');
+ put(mp,'packages/conv-mcp/src/conv_mcp/__init__.py','');
+ put(mp,'packages/conv-mcp/src/conv_mcp/__main__.py',"def main():\n    pass\n");
+ gitInit(mp);
+ const q='能不能當一個步驟：給它一份 DOCX，拿回 Markdown，而且不連網？';
+ const mm=await traceRoute(mp,{question:q,ast});
+ await check('python monorepo: src-layout packages resolve, the main CLI is picked over the MCP server unless the question says mcp',async()=>{
+  assert.equal(mm.entry.name,'conv');assert.equal(mm.entry.file,'packages/conv/src/conv/__main__.py');
+  assert(mm.stations.some(s=>s.file==='packages/conv/src/conv/converters.py'),'import across src/ resolved');
+  const m2=await traceRoute(mp,{question:'能不能接它的 mcp 伺服器',ast});assert.equal(m2.entry.name,'conv-mcp');
+ });
+ await check('registry narrowing: docx picks DocxConverter.convert, so the image converter subprocess is off the route; requests.Session() and copyfileobj into memory are not network/writes',()=>{
+  assert(!mm.touches.route.some(t=>t.cap==='subprocess'),'exiftool only for images');assert(mm.methodPicked?.some(p=>p.method==='convert'&&p.picked.includes('DocxConverter')));
+  assert(!mm.touches.route.some(t=>t.cap==='network'&&/Session$/.test(t.canon)));assert(!mm.touches.route.some(t=>t.cap==='write-file'));
+  const all=astTouches(buildGraph(ast,mp),null);assert(all.some(t=>t.cap==='network'&&/Session\(\)#?\.get$/.test(t.canon)),'session.get is network');
+ });
+ await check('fake inputs: DOCX is a real zip with word/document.xml, PDF has a text object, both carry the marker; format comes from the sentence',()=>{
+  assert.equal(formatOf(q),'docx');assert.equal(formatOf('給它一份 PDF'),'pdf');assert.equal(formatOf('給它一份 CSV，拿回 JSON'),'csv');
+  const d=fakeInput('docx').good;assert.equal(d.slice(0,2).toString(),'PK');assert(d.includes(Buffer.from('word/document.xml')));
+  const p=fakeInput('pdf').good.toString('latin1');assert(p.startsWith('%PDF')&&p.includes(MARKER)&&p.includes('startxref'));
+  const py=spawnSync('python3',['-c','import zipfile,sys,io;z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read()));print(z.read("word/document.xml").decode())'],{input:d,encoding:'utf8'});if(py.status===0)assert(py.stdout.includes(MARKER));
+ });
+ return checks;
+}
 async function g400Checks(root){
  const checks=[],area=join(root,'g400'),py=join(area,'fwpy'),js=join(area,'fwjs');
  const ast=await loadAst();

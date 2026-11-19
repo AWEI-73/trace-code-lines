@@ -19,6 +19,11 @@
 - 框架入口：click／typer（群組與 `name=`）、argparse `set_defaults(func=…)`、commander `.command().action()`、yargs `.command(…, handler)`、Express／Fastify／Koa（含 `router.route().get().post()`）、Flask／FastAPI 路由。問句點名或由動詞／文件用法推論的才進路線；`wired` 從群組函式能走到子指令。
 - 修正：`require('./')` 結尾斜線、`module.exports = function`、bin 指向未建置的 `lib/` 時退回 `src/`、`.venv`／site-packages 不再被掃、`from .utils import sqlite3` 這類轉出口與 try/except 備援 import 追到標準庫、`sqlite3.connect` 算寫檔、`express()` 本身不再算開連線埠（只有 `.listen`）、只在特定條件才連網的會標「只在特定情況」。
 - 試用：sqlite-utils（click）、json-server（yargs＋Express）；jc、csvtojson 不再需要手寫 `--run`。既有自測新增 G400。
+- 接線合約：報告新增「接線」（呼叫、給它、拿回、成功／失敗、動到的檔、要准、還要試的、步驟描述），路線檔多 `adapter`。
+- 多入口：monorepo（npm workspaces、pnpm／lerna／nx／turbo、packages/*、Python src 版面）入口自動列出並排序，其餘入口與路由放「其他候選」；多條路由對上時挑最相關的一條（問句字、文件、測試、內部路由降分）。
+- 試跑：依問句做 DOCX／PDF／HTML／Markdown 假檔並檢查內容有沒有帶出；在空的工作資料夾執行；記錄每種情況耗時；文件用法略過 cd／pip 等安裝行，偏好帶輸入檔、旗標少的行。
+- 修正：`requests.Session()` 本身不算連網、`shutil.copyfileobj` 不算寫檔、套件資料夾裡 `__main__.py` 旁的轉換程式不再被略過、vendor／third_party 等不掃、只交給外部套件的薄路線會直說。
+- 試用：markitdown（Python monorepo，DOCX → Markdown）、remark（npm workspaces，Markdown 整理）。既有自測新增 G410。
 
 ## 1.37.0-rc.1 (2026-11-19，測試中)
 
