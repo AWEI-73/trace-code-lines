@@ -37,6 +37,9 @@ import {evidenceChecks} from './evidence-self-test.mjs';
 import {languageChecks} from './language-self-test.mjs';
 import {census} from './record-census.mjs';
 import {classifyRecords} from './classify-records.mjs';
+import {loadAst,buildGraph,reach as astReach,touches as astTouches,targetsOf as astTargets} from './ast-graph.mjs';
+import {traceRoute,traceWired,runTrial,astPreflight} from './usage-route.mjs';
+import {renderRouteHtml} from './route-report-html.mjs';
 import {preflight as tracePreflight,resolveScope,scopeNotes,answersFrom,relayText,parseCapability} from './preflight.mjs';
 import {buildReport as buildTraceReport,safeSnippet} from './trace-report-html.mjs';
 import {spawnSync} from 'node:child_process';
@@ -78,6 +81,7 @@ try {
   if(process.env.TRACE_P4_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:p4Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G360_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g360Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G350_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g350Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G380_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g380Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G370_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g370Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G340_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g340Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G240_ONLY){console.log(JSON.stringify({status:'PASS',checks:await g240Checks(root)}));process.exit(0);}
@@ -558,7 +562,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
+  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2580,6 +2584,74 @@ function g370Checks(root){
   r=run('fix','--card',cf,'--remove','interface:1','--class','1=沒去跑');assert.equal(r.status,0,r.stderr);assert(r.stdout.includes('已刪除'));
   c=JSON.parse(fs.readFileSync(cf,'utf8'));assert.equal(c.integration.interfaces.length,0);assert.equal(c.unknowns[0].class,'not-run');
   assert.notEqual(run('fix','--card',cf,'--remove','interface:5').status,0);assert.notEqual(run('fix','--card',cf,'--class','1=亂寫').status,0);assert.notEqual(run('fix','--card',cf).status,0);
+ });
+ return checks;
+}
+
+// 1.38 usage-route: AST call graph, aliases, reachability, route stations, isolated trial, report, fallback.
+async function g380Checks(root){
+ const checks=[],area=join(root,'g380'),repo=join(area,'repo');for(const d of ['bin','lib'])fs.mkdirSync(join(repo,d),{recursive:true});
+ const put=(name,body)=>fs.writeFileSync(join(repo,name),body,'utf8');
+ const ast=await loadAst();
+ if(!ast.ok){checks.push('G380 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ const check=async(name,fn)=>{await fn();checks.push('G380 '+name);};
+ put('package.json','{"name":"mini","version":"1.0.0","bin":{"mini":"./bin/mini.js"},"main":"./lib/index.js"}\n');
+ put('README.md','# mini\n\n```\n$ mini input.csv > out.json\n```\n');
+ put('bin/mini.js',"#!/usr/bin/env node\nconst fs = require('fs');\nconst {convert} = require('../lib/index.js');\nconst file = process.argv[2];\nif (!file || !fs.existsSync(file)) { console.error('no file'); process.exit(2); }\nconst text = fs.readFileSync(file, 'utf8');\ntry { process.stdout.write(JSON.stringify(convert(text))); } catch (e) { console.error(e.message); process.exit(1); }\n");
+ put('lib/index.js',"const {parse} = require('./parse');\nfunction convert(t){ return parse(t); }\nmodule.exports = {convert};\n");
+ put('lib/parse.js',"const re = /,/;\nfunction parse(t){\n  const rows = t.trim().split('\\n');\n  if (re.exec(rows[0]) === null) throw new Error('bad header');\n  const [h, ...rest] = rows; const keys = h.split(',');\n  return rest.map(r => Object.fromEntries(r.split(',').map((v, i) => [keys[i], v])));\n}\nmodule.exports = {parse};\n");
+ put('lib/upload.js',"const https = require('https');\nconst {exec: run} = require('child_process');\nconst _fetch = fetch;\nfunction upload(u){\n  _fetch(u);\n  _fetch(u + '/2');\n  https.request(u);\n  run('curl ' + u);\n}\nmodule.exports = {upload};\n");
+ put('lib/alias.mjs',"export {upload as send} from './upload.js';\n");
+ put('lib/scoped.js',"function a(){ const {fetch} = {fetch: () => 1}; return fetch(); }\nfunction b(exec){ return exec('x'); }\nmodule.exports = {a, b};\n");
+ const git=args=>spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...args],{cwd:repo,encoding:'utf8',windowsHide:true});
+ for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(git(a).status,0);
+ const g=buildGraph(ast,repo);
+ await check('aliases, destructuring renames and every hit per file are capabilities with exact lines; regex .exec( and shadowed names are not',()=>{
+  const all=astTouches(g,null),at=(f,cap)=>all.filter(t=>t.file===f&&t.cap===cap).map(t=>t.line);
+  assert.deepEqual(at('lib/upload.js','network'),[5,6,7],'_fetch alias twice + https.request');
+  assert.deepEqual(at('lib/upload.js','subprocess'),[8],'exec renamed to run via destructuring');
+  assert.equal(at('lib/parse.js','subprocess').length,0,'re.exec( is a RegExp, not a program');
+  assert.equal(at('lib/scoped.js','network').length+at('lib/scoped.js','subprocess').length,0,'local fetch / parameter exec shadow the globals');
+  assert(all.every(t=>/^[0-9a-f]{64}$/.test(t.lineSha256)));
+ });
+ await check('re-exports resolve across files; reachability from the CLI entry excludes the unused upload module',()=>{
+  const ids=astTargets(g,'file:lib/alias.mjs|.send');assert.deepEqual(ids,['lib/upload.js::upload']);
+  const p=astReach(g,['bin/mini.js::<top>']);assert(p.has('lib/parse.js::parse')&&p.has('lib/index.js::convert'));assert(!p.has('lib/upload.js::upload'));
+ });
+ const q='給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？';
+ const m=await traceRoute(repo,{question:q,ast});
+ await check('usage route: README → bin → read file → stdout, error exit; touches split route vs elsewhere; answer leads with how to connect',()=>{
+  assert.equal(m.entry.kind,'bin');assert.equal(m.entry.name,'mini');assert.equal(m.engine.name,'tree-sitter');
+  const roles=m.stations.map(s=>s.role);for(const r of ['usage','entry','input','output','error'])assert(roles.includes(r),r);
+  assert(m.stations.some(s=>s.role==='input'&&s.file==='bin/mini.js'&&s.line===6));assert(m.stations.some(s=>s.role==='output'&&s.line===7));
+  assert(!m.touches.route.some(t=>['network','subprocess'].includes(t.cap)));
+  assert(m.touches.elsewhere.some(t=>t.cap==='network'&&t.file==='lib/upload.js')&&m.touches.elsewhere.some(t=>t.cap==='subprocess'));
+  assert(m.answer.text.startsWith('可以先接命令列入口 `mini <檔案>`'));assert(m.answer.text.includes('標準輸出')&&m.answer.text.includes('待試跑'));
+ });
+ await check('isolated trial runs a fake CSV in a copy, records exit codes, JSON shape, rerun equality and no writes',()=>{
+  const t=runTrial(repo,{run:'node bin/mini.js {input}',question:q});const c=id=>t.cases.find(x=>x.id===id);
+  assert.equal(c('good').exit,0);assert(c('good').json.ok&&c('good').json.shape.startsWith('陣列 2 筆'));assert.equal(c('good-again').sameStdout,true);
+  assert.equal(c('missing').exit,2);assert.deepEqual(c('good').changed,[]);assert(!JSON.stringify(t).includes('/tcl-trial-'));
+  m.trial=t;
+ });
+ await check('route HTML: 怎麼接 before the route, Taipei time, embedded JSON, nothing external; fallback is labelled',async()=>{
+  const {draftAnswer}=await import('./usage-route.mjs');m.answer=draftAnswer(m);assert(m.answer.text.includes('試跑'));
+  const h=renderRouteHtml(m);assert(h.indexOf('怎麼接')<h.indexOf('<h2>路線'));assert(h.includes('台北時間')&&h.includes('id="trace-route-data"'));
+  assert(!/<(script|link|img)[^>]+(src|href)=/i.test(h));
+  const fb=await traceRoute(repo,{question:q,ast:{ok:false,engine:'regex-fallback',reason:'沒有裝 tree-sitter'}});
+  assert.equal(fb.engine.name,'regex-fallback');assert(fb.unknowns.some(u=>u.kind==='no-ast'));assert(renderRouteHtml(fb).includes('class="warn"'));
+ });
+ await check('preflight with the syntax tree asks only about capabilities a real entry reaches; regex alone still flags upload',async()=>{
+  const sc=await astPreflight(repo);const q1=tracePreflight(repo,{ast:sc}),q0=tracePreflight(repo,{});
+  assert(q1.target.findings.some(f=>f.file==='lib/upload.js'&&f.unreached&&f.engine==='ast'));
+  assert.deepEqual(q1.questions.find(x=>x.id==='capabilities').needs,[]);
+  assert(q0.questions.find(x=>x.id==='capabilities').needs.includes('network'));
+  assert(!q1.target.findings.some(f=>f.file==='lib/parse.js'&&f.kind==='subprocess'));
+ });
+ await check('wired mode reports 原碼接線完整 with stations, and names a missing link honestly; library route narrows to the named function',async()=>{
+  const w=await traceWired(repo,{from:'bin/mini.js',to:'parse',ast});assert(w.answer.text.startsWith('原碼接線完整'));assert(w.stations.length>=3);
+  const w2=await traceWired(repo,{from:'bin/mini.js',to:'upload',ast});assert(w2.answer.text.startsWith('原碼沒接上'));
+  const lib=await traceRoute(repo,{question:'呼叫它的 convert() 函式，會不會連網？',entry:'library',ast});assert.deepEqual(lib.target.units,['lib/index.js::convert']);assert(!lib.touches.route.some(t=>t.cap==='network'));
  });
  return checks;
 }

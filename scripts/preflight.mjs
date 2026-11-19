@@ -53,12 +53,16 @@ const RULES=[
  {kind:'secret-files',label:'機密檔名',file:SECRET_NAME,line:null}
 ];
 const inFocus=(f,paths)=>!paths?.length||paths.some(p=>{p=p.replaceAll('\\','/').replace(/\/$/,'');return f===p||f.startsWith(p+'/');});
-export function scanTarget(root,{paths=[]}={}){
+// 1.38: when the JS/TS syntax tree is available, `ast` = {files:Set, findings:[...]} replaces the regex rules below
+// for those files; each finding says whether the chosen entry route reaches it (unreached ones never raise a question).
+export const AST_KINDS=new Set(['subprocess','network','listen','paid','real-account','mcp-tools']);
+export function scanTarget(root,{paths=[],ast=null}={}){
  root=path.resolve(root);const all=listFiles(root),files=all.files.filter(f=>inFocus(f,paths)),found=[],retired=new Map();let tests=0;
  for(const f of files){
   const test=TEST_PATH.test(f);if(test)tests++;
   const rm=f.match(RETIRED_DIR);if(rm)retired.set(rm[1],(retired.get(rm[1])??0)+1);
-  for(const r of RULES){if(!r.file.test(f))continue;
+  if(ast?.findings)for(const x of ast.findings)if(x.file===f)found.push({kind:x.kind,label:x.label,file:f,test,retired:!!rm,line:x.line,lineSha256:x.lineSha256,engine:'ast',reach:x.reached===null?'no-entry':x.reached?'route':'unreached',...(x.reached===false?{unreached:true}:{}),...(x.ctx?.length?{when:x.ctx}:{})});
+  for(const r of RULES){if(!r.file.test(f))continue;if(ast?.files?.has(f)&&AST_KINDS.has(r.kind))continue;
    const base={kind:r.kind,label:r.label,file:f,test,retired:!!rm,...(TYPE_DECL.test(f)?{typesOnly:true}:{})};
    if(r.kind==='secret-files'||r.kind==='agent-instructions'){found.push({...base,line:null,note:'只列檔名，不讀內容'});continue;}
    if(!r.line){found.push({...base,line:null});continue;}
@@ -76,7 +80,7 @@ const opt=(value,label)=>({value,label});
 // A local socket or pipe listener is not outbound network; it is reported as a finding, not a capability need.
 const CAP_NEED={subprocess:'exec',network:'network',paid:'paid','real-account':'real-account'};
 export function buildQuestions(env,target,{mode='integrate'}={}){
- const k=target.byKind,live=x=>(k[x]??[]).filter(f=>!f.test&&!f.retired&&!f.typesOnly),has=x=>live(x).length>0,ev=x=>live(x).slice(0,5).map(f=>f.file+(f.line?':'+f.line:''));
+ const k=target.byKind,live=x=>(k[x]??[]).filter(f=>!f.test&&!f.retired&&!f.typesOnly&&!f.unreached),has=x=>live(x).length>0,ev=x=>live(x).slice(0,5).map(f=>f.file+(f.line?':'+f.line:''));
  const available=env.scanners.filter(s=>s.found).map(s=>s.name),missing=env.scanners.filter(s=>!s.found).map(s=>s.name);
  const q=[],settled=[];
  q.push({id:'run',decide:'能不能實際跑這份程式，看它真的做了什麼？',why:'不跑就只能讀程式碼猜；跑也只在隔離副本、限時、不碰你的帳號。'+(has('install-scripts')?'這份程式有安裝時自動跑的腳本，試跑也不會執行它。':''),default:'none',scope:'只影響這次查線',
@@ -110,10 +114,10 @@ export function parseCapability(value){
  return hit?{capability:hit[0],refine,text:hit[1]+(refine?(/[（）()]/.test(refine)?'：'+refine:'（'+refine+'）'):'')}:{capability:null,refine:null,text:String(value??'').trim()};
 }
 export const capLabel=v=>CAP_LABEL[v]??v;
-export function preflight(root,{paths=[],mode='integrate'}={}){
- const environment=scanEnvironment(),target=scanTarget(root,{paths}),{questions,settled}=buildQuestions(environment,target,{mode});
+export function preflight(root,{paths=[],mode='integrate',ast=null}={}){
+ const environment=scanEnvironment(),target=scanTarget(root,{paths,ast}),{questions,settled}=buildQuestions(environment,target,{mode});
  const body={schema:'trace-preflight-questions-v2',createdAt:new Date().toISOString(),root:target.root,mode,focus:paths,environment,
-  target:{git:target.git,fileCount:target.fileCount,totalFiles:target.totalFiles,testFiles:target.testFiles,retiredDirs:target.retiredDirs,findings:target.findings},questions,settled,
+  target:{engine:ast?.engine??{name:'regex',reason:'沒有提供語法樹；只用文字比對'},entries:ast?.entries??null,git:target.git,fileCount:target.fileCount,totalFiles:target.totalFiles,testFiles:target.testFiles,retiredDirs:target.retiredDirs,findings:target.findings},questions,settled,
   rules:['只讀；不安裝、不下載、不執行受查程式。','agent 只提議；負責人決定。','未回覆的項目一律視為未授權；接入結論最多「有條件可接」。','問題只在開卡前問，查到一半不再追問；中途發現的新項目記未知（只有負責人能答）。']};
  body.questionsSha256=sha256(JSON.stringify(body.questions));return body;
 }

@@ -23,6 +23,16 @@ node scripts/trace.mjs next --card <卡片.json>
 node scripts/trace.mjs status --card <卡片.json>
 ```
 
+從用途開始（JS/TS，最快拿到「怎麼接」）：把「我想怎麼用」縮成一句，`route` 從 README／package.json 找真正的入口，沿語法樹一站一站追到讀檔、轉換、輸出與錯誤；只有這條路真的走到的連網、跑程式、寫檔才算接入條件，repo 別處有的另列。加 `--trial` 在隔離副本、無網路下用假檔試跑正常、重跑、格式錯、檔案不存在四種情況。只想確認「功能有沒有接好」用 `wired`。
+
+```text
+node scripts/trace.mjs route --root <repo> --question "給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？" --out <路線.json> --html <報告.html> [--trial] [--entry bin:名稱|library|檔] [--fn 檔:函式]
+node scripts/trace.mjs wired --root <repo> --from 檔:函式 --to 函式 --out <路線.json> [--html <報告.html>]
+node scripts/trace.mjs route-report --route <路線.json> --out <報告.html> --answer "讀碼後改寫的怎麼接"
+```
+
+語法樹要先在 skill 資料夾跑一次 `npm install --ignore-scripts`（web-tree-sitter＋JS/TS 語法，免編譯）；沒裝時自動退回文字比對，報告會標明。讀不出來的動態呼叫、沒追進的外部套件、推論接上的站都列在「未知」；推論的站要讀碼或試跑確認。
+
 開卡前先問清楚（接入或要試跑時必做）：`preflight` 只讀掃環境與受查 repo，印出給負責人的問題原文（甲乙丙一鍵回、附建議）；掃描能決定的不問。
 
 ```text

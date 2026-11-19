@@ -171,7 +171,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break
 @media print{nav.toc{display:none}section.card{break-inside:avoid}details{display:block}}`;
  const decCls=decision==='不建議'?'bad':decision==='可接'||decision==='查完'?'ok':'part';
  const pf=p?'<p class="muted">問題只在開卡前問；沒回覆就當作不准。agent 只建議工具，不安裝。</p>'+preflightSvg(p,questions):preflightSvg(null);
- const findings=(questions?.target?.findings??[]),liveF=findings.filter(f=>!f.test&&!f.retired&&!f.typesOnly),otherF=findings.length-liveF.length;
+ const findings=(questions?.target?.findings??[]),liveF=findings.filter(f=>!f.test&&!f.retired&&!f.typesOnly&&!f.unreached),otherF=findings.length-liveF.length;
  const html='<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+
  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; base-uri \'none\'; form-action \'none\'">'+
  '<title>'+esc(title??c.question??'查線報告')+'</title><style>'+css+'</style></head><body><main>'+

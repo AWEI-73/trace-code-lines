@@ -6,6 +6,8 @@ import {initChain,checkChainAnchor} from './chain-card.mjs';
 import {reviewUnknowns} from './unknowns.mjs';
 import {noLinks} from './walker.mjs';
 import {gitRead} from './git-evidence.mjs';
+import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight} from './usage-route.mjs';
+import {renderRouteHtml} from './route-report-html.mjs';
 import {preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,relayText,capLabel,parseCapability} from './preflight.mjs';
 // Dogfood ext round: the step hints say 超出範圍 etc. in Chinese, so --unknown accepts the Chinese class labels too.
 const UNKNOWN_CLASS_ZH={'沒去跑':'not-run','沒跑':'not-run','未試跑':'not-run','由模型決定':'model-choice','單次異常':'one-off','資料沒了':'evidence-lost','要負責人判斷':'owner-only','負責人判斷':'owner-only','範圍或授權外':'out-of-scope','超出範圍':'out-of-scope'};
@@ -167,8 +169,9 @@ export function fillTrace(c,args,errors=[]){
 }
 export function traceHelp(){
  return [
-  '用法：node scripts/trace.mjs <preflight|answer|start|fill|fix|next|status|report> [參數]；--help 顯示本說明。',
-  '開卡前三步：preflight --root <repo> --out <問題.json> [--paths 目錄,檔] [--mode 情境]，把印出的問題原文轉給負責人；',
+  '用法：node scripts/trace.mjs <route|wired|route-report|preflight|answer|start|fill|fix|next|status|report> [參數]；--help 顯示本說明。',
+  '用途路線：route --root <repo> --question "一句用途" --out <路線.json> [--html 報告] [--entry bin:名稱|library|檔] [--trial --run "node bin/x {input}"]；',
+  '  功能接好沒：wired --from 檔:函式 --to 函式；改寫答案：route-report --route <路線.json> --out <報告.html> --answer "…"。',  '開卡前三步：preflight --root <repo> --out <問題.json> [--paths 目錄,檔] [--mode 情境]，把印出的問題原文轉給負責人；',
   '  answer --questions <問題.json> --out <答覆.json> --by "誰回的" [--accept-defaults] [--set 1=乙]… [--simulated]；',
   '  start … --preflight <答覆.json>。未回覆＝未授權，接入結論最多「有條件可接」。',
   '走完：report --card <卡片.json> --out <報告.html>：自動跑唯讀分診、套用不查範圍、產鏈卡與單檔網頁報告。',
@@ -204,15 +207,38 @@ export function traceOutput(c,command,file,books=playbooks){
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  const [command,...args]=process.argv.slice(2),get=k=>args.includes(k)?args[args.indexOf(k)+1]:undefined;
  if(command==='--help'||args.includes('--help'))console.log(traceHelp());
+ else if(command==='route'||command==='wired'||command==='route-report'){
+  try{
+   const out=get('--out');if(!out)throw Error('請給 --out <路線.json 或 報告.html>。');
+   let m;
+   if(command==='route-report'){m=JSON.parse(fs.readFileSync(path.resolve(get('--route')??''),'utf8'));if(get('--answer'))m.answer={...(m.answer??{}),text:get('--answer'),draft:false,editedAt:new Date().toISOString()};}
+   else{
+    const root=path.resolve(get('--root')??'.'),rel=path.relative(root,path.resolve(out));
+    if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('路線檔請放在受查資料夾外。');
+    if(command==='wired'){if(!get('--from')||!get('--to'))throw Error('wired 要給 --from 檔案:函式 與 --to 函式');m=await traceWired(root,{from:get('--from'),to:get('--to'),question:get('--question')});}
+    else{m=await traceRoute(root,{question:get('--question')??'',entry:get('--entry'),fn:get('--fn')});
+     if(args.includes('--trial')){const run=get('--run')??(m.entry?.kind==='bin'?'node '+m.entry.file+' {input}':null);if(!run)throw Error('這個入口不是命令列，試跑要給 --run');m.trial=runTrial(root,{run,input:get('--fake-input')&&path.resolve(get('--fake-input')),badInput:get('--bad-input')&&path.resolve(get('--bad-input')),question:m.question});
+      if(m.trial.cases.find(c=>c.id==='good')?.json?.ok){for(const s of m.stations)if(/^推論/.test(s.status))s.status+='；試跑有正確輸出，間接支持';for(const u of m.unknowns)if(u.kind==='inferred')u.text+='試跑有正確輸出，間接支持這些推論。';}
+      m.answer=draftAnswer(m);}}
+   }
+   const html=command==='route-report'?path.resolve(out):get('--html')&&path.resolve(get('--html'));
+   if(command!=='route-report'){noLinks(path.resolve(out));fs.writeFileSync(path.resolve(out),JSON.stringify(m,null,1)+'\n');}
+   if(html){noLinks(html);fs.writeFileSync(html,renderRouteHtml(m));}
+   console.log(['怎麼接：'+(m.answer?.text??'（沒有）'),'路線 '+m.stations.length+' 站：'+m.stations.map(s=>s.label+' '+s.file+(s.line?':'+s.line:'')).join(' → '),
+    '這條路會碰：'+([...new Set(m.touches.route.map(t=>t.label))].join('、')||'無')+'；未知 '+m.unknowns.length+' 項'+(m.engine.name!=='tree-sitter'?'；【沒有語法解析】'+m.engine.reason:''),
+    ...(command!=='route-report'?['路線資料：'+path.resolve(out)]:[]),...(html?['報告：'+html]:[]),...(m.answer?.draft?['給 agent：讀過路線上的原碼後，可用 route-report --route <路線.json> --out <報告.html> --answer "…" 改寫怎麼接。']:[])].join('\n'));
+  }catch(e){console.error('路線未建立：'+e.message);process.exitCode=1;}
+ }
  else if(command==='preflight'){
   try{
    const root=path.resolve(get('--root')??'.'),out=get('--out');if(!out)throw Error('請給 --out <問題.json>。');
    const target=path.resolve(out),rel=path.relative(root,target);
    if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('問題清單請放在受查資料夾外。');
    const paths=(get('--paths')??'').split(',').map(x=>x.trim()).filter(Boolean),mode=get('--mode')??'integrate';
-   noLinks(target);const q=preflight(root,{paths,mode});fs.writeFileSync(target,JSON.stringify(q,null,2)+'\n',{encoding:'utf8',flag:'wx'});
-   const live=q.target.findings.filter(f=>!f.test&&!f.retired&&!f.typesOnly).length;
-   console.log(['開卡前檢查：讀 '+q.target.fileCount+' 檔'+(paths.length?'（只看 '+paths.join('、')+'）':'')+'；需要負責人知道的線索 '+live+' 項（另有測試、退役或型別宣告 '+(q.target.findings.length-live)+' 項）。'+(!paths.length&&q.target.fileCount>500?'\n範圍很大（'+q.target.fileCount+' 檔）：若只要接其中一部分，請重做並加 --paths 子目錄，問題和報告都會小很多。':''),'',relayText(q),'',
+   noLinks(target);const astScan=args.includes('--no-ast')?null:await astPreflight(root,{entry:get('--entry')});const q=preflight(root,{paths,mode,ast:astScan});fs.writeFileSync(target,JSON.stringify(q,null,2)+'\n',{encoding:'utf8',flag:'wx'});
+   const live=q.target.findings.filter(f=>!f.test&&!f.retired&&!f.typesOnly&&!f.unreached).length,unreached=q.target.findings.filter(f=>f.unreached&&!f.test).length;
+   const eng=q.target.engine;console.log(eng.name==='tree-sitter'?'掃描方式：語法樹（tree-sitter '+eng.version+'，'+eng.files+' 個 JS/TS 檔）；入口 '+((q.target.entries??[]).map(e=>e.kind+':'+e.name).join('、')||'找不到，全部列入')+(unreached?'；repo 有但入口走不到的線索 '+unreached+' 項，不問':''):'掃描方式：文字比對（'+(eng.reason??'')+'）');
+   console.log(['開卡前檢查：讀 '+q.target.fileCount+' 檔'+(paths.length?'（只看 '+paths.join('、')+'）':'')+'；需要負責人知道的線索 '+live+' 項（另有測試、退役、型別宣告或入口走不到 '+(q.target.findings.length-live)+' 項）。'+(!paths.length&&q.target.fileCount>500?'\n範圍很大（'+q.target.fileCount+' 檔）：若只要接其中一部分，請重做並加 --paths 子目錄，問題和報告都會小很多。':''),'',relayText(q),'',
     '給 agent：把上面原文轉給負責人；收到回覆後執行',
     '  node scripts/trace.mjs answer --questions '+JSON.stringify(target)+' --out <答覆.json> --by "回覆者" --accept-defaults [--set 題號=甲乙丙]',
     '  回「照建議」就只加 --accept-defaults；模擬演練一定要加 --simulated。'].join('\n'));
