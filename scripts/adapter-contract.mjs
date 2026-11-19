@@ -33,6 +33,16 @@ export function adapterContract(m){
  const hard=grants.filter(g=>!g.conditional&&/連外網|花錢|用真帳號|模型工具/.test(g.need));
  const step={id:'cap.'+String(m.repo?.name??'tool').replace(/[^a-z0-9]+/gi,'_').toLowerCase()+'.'+String(e.name).replace(/^python -m /,'').replace(/[^a-z0-9]+/gi,'_').toLowerCase()+'.v1',
   inputs:[fmt?fmt+'_file':'input_file'],outputs:[good?.json?.ok?'json':good?.marker?'text':good?.server?'http':'output'],
-  execution_class:hard.length?'hybrid':'deterministic',stop_if:'結束碼非 0'+(bad?.exit===0?'，或輸出不含預期內容（壞檔也回 0）':'')+(miss?.changed?.length?'，或輸入檔不存在（它會自己建檔）':'')};
- return {invoke,inputs,outputs,signals,files,grants,unknowns,step,basis:t?'讀碼＋隔離試跑':'只讀碼（未試跑）'};
+  execution_class:hard.length||t?.cases?.some(x=>x.timedOut)?'hybrid':'deterministic',stop_if:'結束碼非 0'+(bad?.exit===0?'，或輸出不含預期內容（壞檔也回 0）':'')+(miss?.changed?.length?'，或輸入檔不存在（它會自己建檔）':'')};
+ // scaffolders and project tools (init / component / upgrade …): no input file; what they write is the output
+ if(t?.scaffold||t?.project){const cs=t.cases.filter(x=>t.project||x.id!=='good-again'),own=x=>(x.changed??[]).filter(f=>!/^<家目錄或暫存>\//.test(f));
+  invoke.command=t.display;if(t.project)invoke.commands=t.multi.map(x=>x.display);
+  inputs.splice(0,inputs.length,{name:t.project?'所在專案（工作目錄）':'目標資料夾名稱',format:null,how:t.project?'在專案資料夾執行（cwd）':'命令列參數'});
+  outputs.splice(0,outputs.length,...cs.map(x=>({channel:own(x).length?'檔案':'標準輸出',format:own(x).length?own(x).slice(0,6).join('、')+(own(x).length>6?' 等 '+own(x).length+' 個':''):'文字（'+x.stdout.trim().split('\n')[0].slice(0,40)+'）',when:x.label,checked:'試跑'})));
+  signals.success=cs.every(x=>x.exit===0)?'結束碼 0':cs.map(x=>x.label+'：結束碼 '+(x.timedOut?'逾時':x.exit)).join('；');signals.failure=cs.filter(x=>x.exit!==0||x.timedOut).map(x=>({case:x.label,exit:x.timedOut?'逾時':x.exit,stderr:!!x.stderr.trim()}));
+  files.trialChanged=cs.flatMap(x=>x.changed??[]).slice(0,30);
+  step.inputs=[t.project?'project_dir':'target_dir'];step.outputs=[t.project?'project_files':'scaffold_dir'];
+  step.stop_if='結束碼非 0'+(cs.some(x=>x.timedOut)?'，或逾時（沒網路時會卡在安裝相依）':'')+(t.cases.some(x=>x.id==='good-again'&&x.exit!==0)?'，或目標資料夾已存在（要 --force）':'');}
+ const th=m.targetHas?{target:m.targetHas.target,has:m.targetHas.has,partial:m.targetHas.partial,gap:m.targetHas.gap,...(m.targetHas.uses?.length?{alreadyUses:m.targetHas.uses.map(u=>u.name+' '+u.version+'（'+u.file+':'+u.line+'）')}:{})}:null;
+ return {invoke,inputs,outputs,signals,files,grants,unknowns,step,...(th?{targetHas:th}:{}),basis:t?'讀碼＋隔離試跑':'只讀碼（未試跑）'};
 }

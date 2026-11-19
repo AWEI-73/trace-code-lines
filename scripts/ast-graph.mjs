@@ -2,6 +2,7 @@
 // Read-only: parses files, never loads or runs target code. If web-tree-sitter or the grammars are missing,
 // loadAst() returns {ok:false,reason} and callers fall back to the old regex scan and say so in the report.
 import fs from 'node:fs';
+import {spawnSync} from 'node:child_process';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
@@ -62,7 +63,7 @@ export const CAP_LABEL={subprocess:'執行其他程式',network:'網路呼叫',l
 export function capOf(canon){if(!canon)return null;for(const [k,re] of CAPS)if(re.test(canon))return k;return null;}
 // Node stream / thenable protocol methods are called by the runtime, not by visible code.
 const PROTOCOL=new Set(['_transform','_flush','_read','_write','_writev','_final','_destroy','then','constructor','__init__','__call__','__enter__','__exit__','__iter__','__next__','__aenter__','__aexit__']);
-function listFiles(root){
+export function listFiles(root){
  const out=[];const walk=(d,rel)=>{let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}
   for(const e of es){const r=rel?rel+'/'+e.name:e.name;if(e.isSymbolicLink()||SKIP_DIR.test(r))continue;if(e.isDirectory())walk(path.join(d,e.name),r);else if(e.isFile()&&out.length<20000)out.push(r);}};
  walk(root,'');return out;
@@ -196,7 +197,11 @@ function parseFile(ast,root,rel){
    if(callee){
     const line=n.startPosition.row+1;
     if(callee.type==='identifier'&&callee.text==='require'&&!f.bindings.has('require',callee.startIndex)){const s=strOf(a0);if(s!=null)f.imports.push({src:s,line,kind:'require',unit:unitOf(n)});else f.dynamic.push({line,unit:unitOf(n),why:'require 的路徑是算出來的：'+n.text.slice(0,60)});}
-    else if(callee.type==='import'){const s=strOf(a0);if(s!=null)f.imports.push({src:s,line,kind:'dynamic-import',unit:unitOf(n)});else f.dynamic.push({line,unit:unitOf(n),why:'import() 的路徑是算出來的：'+n.text.slice(0,60)});}
+    else if(callee.type==='import'){const s=strOf(a0);if(s!=null)f.imports.push({src:s,line,kind:'dynamic-import',unit:unitOf(n)});else{f.dynamic.push({line,unit:unitOf(n),why:'import() 的路徑是算出來的：'+n.text.slice(0,60)});
+     // `const importSrc = rel => import(join(binDir,'..',rel))`: a helper whose import path is its own parameter;
+     // calls like importSrc('run.mjs') are then resolved from the literal (the `'..'` pieces kept)
+     for(let p=n.parent,d=0;p&&d<6;p=p.parent,d++){if(p.type==='variable_declarator'&&/arrow_function|function_expression|^function$/.test(p.childForFieldName('value')?.type??'')||p.type==='function_declaration'){const fn=p.type==='function_declaration'?p:p.childForFieldName('value');const prm=(fn.childForFieldName('parameters')??fn.childForFieldName('parameter'))?.text.replace(/[()\s]/g,'').split(',')[0];const nm=p.childForFieldName('name')?.text;
+      if(nm&&prm&&new RegExp('\\b'+prm+'\\b').test(a0?.text??'')){(f.importHelpers??=new Map()).set(nm,{line,ups:(a0.text.match(/['"]\.\.['"]/g)??[]).length});}break;}}}}
     else{
      if(unwrap(callee)?.type==='subscript_expression'){const idx=unwrap(callee).childForFieldName('index');if(!strOf(idx)&&idx?.type!=='number')f.dynamic.push({line,unit:unitOf(n),call:true,why:'用算出來的名稱呼叫：'+n.text.replace(/\s+/g,' ').slice(0,60)});}
      f.calls.push({node:callee,prop:unwrap(callee)?.type==='member_expression'?propName(unwrap(callee).childForFieldName('property')):null,isNew:n.type==='new_expression',line,col:n.startPosition.column,unit:unitOf(n),text:n.text.replace(/\s+/g,' ').slice(0,90),arg0:a0?a0.text.replace(/\s+/g,' ').slice(0,40):null,ctx:context(n)});
@@ -209,15 +214,25 @@ function parseFile(ast,root,rel){
   for(const c of n.namedChildren)visit2(c);
  }
  visit2(tree.rootNode);
+ if(f.importHelpers)for(const c of f.calls){const nm=c.node?.type==='identifier'?c.node.text:null,h=nm&&f.importHelpers.get(nm);if(!h||!c.arg0||!/^['"`][^'"`$]+['"`]$/.test(c.arg0))continue;
+  const lit=c.arg0.slice(1,-1),src=(h.ups?'../'.repeat(h.ups):'')+lit.replace(/^\.\//,'');f.imports.push({src:src.startsWith('.')?src:'./'+src,line:c.line,kind:'dynamic-import',helper:nm,unit:c.unit});
+  const i=f.dynamic.findIndex(d=>d.line===h.line);if(i>=0)f.dynamic[i].resolvedByHelper=nm;}
+ if(f.importHelpers)f.dynamic=f.dynamic.filter(d=>!d.resolvedByHelper);
  f.tree=tree;f.bodySha=sha256(body);
  return f;
 }
 // ---- graph ----
 export function pyRootsOf(all,set=new Set(all)){const r=new Set(['']);for(const f of all){if(!/\/__init__\.py$/.test(f))continue;const pkg=path.posix.dirname(f),parent=path.posix.dirname(pkg);if(!set.has((parent==='.'?'':parent+'/')+'__init__.py'))r.add(parent==='.'?'':parent);}
  return [...r].sort((a,b)=>(a!=='')-(b!=='')||(a!=='src')-(b!=='src')||a.split('/').length-b.split('/').length).slice(0,24);}
+// Build output the repo itself ignores (packages/x/dist/ when packages/x/src/ exists): read the source, not the bundle.
+const _ign=new Map();
+export function ignoredBuild(root){root=path.resolve(root);if(_ign.has(root))return _ign.get(root);let dirs=[];
+ const r=spawnSync('git',['-C',root,'ls-files','-o','-i','--exclude-standard','--directory'],{encoding:'utf8',maxBuffer:32*1024*1024});
+ if(r.status===0)dirs=r.stdout.split('\n').filter(d=>/(^|\/)(dist|build|out|lib|esm|cjs)\/$/.test(d)&&!/node_modules/.test(d)&&fs.existsSync(path.join(root,d.replace(/(dist|build|out|lib|esm|cjs)\/$/,'src'))));
+ const f=rel=>dirs.some(d=>rel.startsWith(d));_ign.set(root,f);return f;}
 export function buildGraph(ast,root,{files=null,focus=[]}={}){
  root=path.resolve(root);if(!ast?.ok)throw Error('AST 未載入');
- const all=(files??listFiles(root)).filter(r=>!SKIP_DIR.test(r));
+ const ign=ignoredBuild(root);const all=(files??listFiles(root)).filter(r=>!SKIP_DIR.test(r)&&!ign(r));
  const set=new Set(all);
  const g={root,files:new Map(),failed:[],set,pkgCache:new Map()};
  const parseList=all.filter(r=>JS_FILE.test(r)&&!TYPE_DECL.test(r)||ast.langs.python&&PY_FILE.test(r)||isScriptNoExt(root,r,!!ast.langs.python));
@@ -258,10 +273,22 @@ function resolveFile(g,base){
 function pickExport(pkg){let e=pkg?.exports;if(!e)return null;if(typeof e==='string')return e;if(e['.']!==undefined)e=e['.'];const walk=x=>typeof x==='string'?x:Array.isArray(x)?walk(x[0]):x&&typeof x==='object'?walk(x.require??x.node??x.import??x.default??Object.values(x)[0]):null;return walk(e);}
 // Workspace packages (monorepo): name -> folder, so `import x from '@scope/pkg'` resolves inside the repo.
 function workspaceDirs(g){if(g.ws)return g.ws;g.ws=new Map();for(const r of g.set){if(!r.endsWith('package.json'))continue;const dir=path.posix.dirname(r);const p=readPkg(g,dir==='.'?'':dir);if(p?.name)g.ws.set(p.name,dir==='.'?'':dir);}return g.ws;}
+// tsconfig/jsconfig `paths` (e.g. "@/*": ["./src/app/*"]) from the nearest config above the importing file.
+function tsPaths(g,dir){g.tsp??=new Map();if(g.tsp.has(dir))return g.tsp.get(dir);let r=null;
+ for(const n of ['tsconfig.json','jsconfig.json']){const f=dir?dir+'/'+n:n;if(!g.set.has(f)&&!fs.existsSync(path.join(g.root,f)))continue;
+  try{const t=fs.readFileSync(path.join(g.root,f),'utf8').replace(/\/\*[\s\S]*?\*\//g,'').replace(/(^|[^:"'])\/\/.*$/gm,'$1').replace(/,(\s*[}\]])/g,'$1');const co=JSON.parse(t).compilerOptions??{};
+   if(co.paths){r={base:path.posix.join(dir,co.baseUrl??'.'),paths:co.paths,file:f};break;}}catch{}}
+ if(!r&&dir&&dir!=='.')r=tsPaths(g,path.posix.dirname(dir)==='.'?'':path.posix.dirname(dir));g.tsp.set(dir,r);return r;}
+function aliasResolve(g,from,src){const d=path.posix.dirname(from);const tp=tsPaths(g,d==='.'?'':d);if(!tp)return null;
+ for(const [k,vs] of Object.entries(tp.paths)){const star=k.endsWith('*'),pre=star?k.slice(0,-1):k;if(star?!src.startsWith(pre):src!==k)continue;
+  for(const v of [].concat(vs)){const p=resolveFile(g,path.posix.join(tp.base,star?v.replace('*',src.slice(pre.length)):v));if(p)return {type:'file',file:p,alias:tp.file};}
+  return {type:'unresolved',src,alias:tp.file};}
+ return null;}
 export function resolveImport(g,from,src){
  const name=src.replace(/^node:/,'');
  if(src.startsWith('node:')||BUILTINS.has(name))return {type:'builtin',name:name==='fs/promises'?'fs/promises':name};
  if(src.startsWith('.')){const p=resolveFile(g,path.posix.join(path.posix.dirname(from),src));return p?{type:'file',file:p}:{type:'unresolved',src};}
+ const al=aliasResolve(g,from,src);if(al)return al;
  const m=src.match(/^(@[^/]+\/[^/]+|[^/]+)(\/.*)?$/);const ws=workspaceDirs(g);
  if(m&&ws.has(m[1])){const dir=ws.get(m[1]);const p=resolveFile(g,dir?(m[2]?dir+m[2]:dir):(m[2]?m[2].slice(1):'.'));if(p)return {type:'file',file:p,workspace:m[1]};}
  return {type:'package',name:m?m[1]:src,sub:m?.[2]??''};
@@ -418,11 +445,17 @@ export function exportRoots(g,file,seen=new Set()){
 export function findUnit(g,id){const f=g.files.get(id.split('::')[0]);return f?.units.get(id)??null;}
 export function pathTo(parent,id){const out=[];let cur=id,guard=0;while(cur&&guard++<60){const p=parent.get(cur);if(!p)break;out.unshift({unit:cur,...p});cur=p.from;}return out;}
 // All capability touches in the repo, split by whether the route reaches their unit.
+const AGENT_CLI=/(spawn\w*|exec\w*|findSpawnableCli|which|cliCommand|command|bin|cli)\b[^\n]{0,40}?['"`](claude|codex|gemini|cursor-agent|aider|opencode|copilot)['"`]/i;
+const AGENT_CLI_STRONG=/findSpawnableCli|cliCommand\s*:/;
 export function touches(g,parent){
  const out=[];
  for(const f of g.files.values())for(const c of f.calls){if(!c.cap)continue;const line=f.lines[c.line-1]??'';
   out.push({cap:c.cap,label:CAP_LABEL[c.cap],canon:c.canon,file:f.rel,line:c.line,unit:c.unit,text:c.text,arg0:c.arg0,ctx:c.ctx,envName:c.envName,reached:parent?parent.has(c.unit):null,lineSha256:sha256(line)});}
  const seen=new Set();for(let i=out.length-1;i>=0;i--){const k=out[i].cap+'|'+out[i].file+'|'+out[i].line;if(seen.has(k))out.splice(i,1);else seen.add(k);}
+ // Launching an AI agent CLI (claude, codex …) runs on the user's own login and quota: a real-account touch, not just a subprocess.
+ for(const f of g.files.values()){if(!f.calls.some(c=>c.cap==='subprocess')&&!AGENT_CLI_STRONG.test(f.lines.join('\n')))continue;const i=f.lines.findIndex(l=>AGENT_CLI.test(l)&&!/^\s*(\/\/|\*|#)/.test(l));if(i<0)continue;
+  const near=f.calls.filter(c=>c.cap==='subprocess').sort((a,b)=>Math.abs(a.line-i-1)-Math.abs(b.line-i-1))[0];const unit=near?.unit??[...f.units.keys()][0];
+  out.push({cap:'real-account',label:'啟動 AI 代理 CLI（'+f.lines[i].match(AGENT_CLI)[2]+'，用你的登入與額度）',agentCli:f.lines[i].match(AGENT_CLI)[2],file:f.rel,line:i+1,unit,text:f.lines[i].trim().slice(0,120),reached:parent?(parent.has(unit)||[...f.units.keys()].some(u=>parent.has(u))):null,lineSha256:sha256(f.lines[i])});}
  for(const f of g.files.values())for(const d of f.dynamic)out.push({cap:d.call?'dynamic-call':'dynamic',label:CAP_LABEL[d.call?'dynamic-call':'dynamic'],file:f.rel,line:d.line,unit:d.unit,text:d.why,reached:parent?parent.has(d.unit):null,lineSha256:sha256(f.lines[d.line-1]??'')});
  return out;
 }

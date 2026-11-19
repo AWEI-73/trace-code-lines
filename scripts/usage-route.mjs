@@ -5,15 +5,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {toolTerms} from './target-has.mjs';
 import {formatOf,fakeInput,MARKER} from './fake-inputs.mjs';
 import {pyEntries} from './ast-python.mjs';
 import {spawnSync} from 'node:child_process';
-import {pyRootsOf,loadAst,buildGraph,reach,touches,pathTo,findUnit,externalCalls,stats,exportRoots,CAP_LABEL,JS_FILE} from './ast-graph.mjs';
+import {listFiles,ignoredBuild,pyRootsOf,loadAst,buildGraph,reach,touches,pathTo,findUnit,externalCalls,stats,exportRoots,CAP_LABEL,JS_FILE} from './ast-graph.mjs';
 import {TEST_PATH,scanTarget} from './preflight.mjs';
 const sha256=s=>crypto.createHash('sha256').update(s).digest('hex');
 const readJson=p=>{try{return JSON.parse(fs.readFileSync(p,'utf8'));}catch{return null;}};
 const git=(root,args)=>{const r=spawnSync('git',['--no-pager','-C',root,...args],{encoding:'utf8',env:{...process.env,GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0'}});return r.status===0?r.stdout.trim():null;};
 const lineOf=(body,needle)=>{const i=body.indexOf(needle);return i<0?null:body.slice(0,i).split('\n').length;};
+const BIG_REPO=+(process.env.TRACE_BIG_REPO??3000);
+// a workspace package plus every workspace package it depends on (dependencies / peer / optional, not dev), by folder
+function wsClosure(root,start){const byName=new Map();const dirs=subPackages(root);for(const d of dirs){const p=readJson(path.join(root,d,'package.json'));if(p?.name)byName.set(p.name,d);}
+ const seen=new Set([start]),q=[start];while(q.length){const d=q.shift(),p=readJson(path.join(root,d,'package.json'))??{};for(const n of Object.keys({...p.dependencies,...p.peerDependencies,...p.optionalDependencies})){const x=byName.get(n);if(x&&!seen.has(x)){seen.add(x);q.push(x);}}}
+ return [...seen];}
+const CMD_WORDS=[[/元件/,'component'],[/模板|範本|樣板/,'template'],[/查.{0,4}文件|參考文件/,'docs'],[/AGENTS\.md|CLAUDE\.md|初始化/,'init'],[/codemod|改原碼|升級/i,'upgrade'],[/主題/,'theme'],[/搜尋/,'search']];
+const SCAFFOLD=/^(init|create|new|scaffold|generate|setup|bootstrap|upgrade|migrate|codemod|add)$/;
 const OTHER_PROGRAM=new Set(['subprocess','network','listen','paid','real-account','worker','mcp-tools']);
 // Entries a stranger would use: package.json bin / main / exports, plus README usage lines.
 export function findEntries(root,{nested=false}={}){
@@ -25,10 +33,10 @@ export function findEntries(root,{nested=false}={}){
  const targets=[],walk=(x,k='')=>{if(typeof x==='string'){if(!/\.d\.[cm]?ts$/.test(x)&&k!=='types')targets.push(x);}else if(Array.isArray(x))x.forEach(y=>walk(y,k));else if(x&&typeof x==='object')for(const [kk,v] of Object.entries(x))if(kk!=='types'&&!kk.startsWith('./')||kk==='.')walk(v,kk);};
  const exp=pkg?.exports;if(exp)walk(typeof exp==='object'&&!Array.isArray(exp)&&Object.keys(exp).some(k=>k.startsWith('.'))?exp['.']:exp);
  for(const x of [pkg?.main,pkg?.module])if(typeof x==='string')targets.push(x);targets.push('index.js','index.ts','src/index.ts');
- const exists=f=>{f=norm(f);if(fs.existsSync(path.join(root,f))&&fs.statSync(path.join(root,f)).isFile())return f;const ts=f.replace(/\.(m?js|cjs)$/,'.ts');if(ts!==f&&fs.existsSync(path.join(root,ts)))return ts;
+ const ign=ignoredBuild(root);const exists=f=>{f=norm(f);if(fs.existsSync(path.join(root,f))&&fs.statSync(path.join(root,f)).isFile()&&!ign(f))return f;const ts=f.replace(/\.(m?js|cjs)$/,'.ts');if(ts!==f&&fs.existsSync(path.join(root,ts)))return ts;
   // built output not in the repo (lib/ dist/ build/): read the source it is built from
   const src=f.replace(/^(lib|dist|build)\//,'src/');if(src!==f)for(const c of [src,src.replace(/\.(m?js|cjs)$/,'.ts')])if(fs.existsSync(path.join(root,c)))return c;return null;};
- for(const e of out)if(e.kind==='bin'&&!fs.existsSync(path.join(root,e.file))){const s=exists(e.file);if(s){e.builtFrom=e.file;e.file=s;}}
+ for(const e of out)if(e.kind==='bin'&&(!fs.existsSync(path.join(root,e.file))||ign(e.file))){const s=exists(e.file);if(s){e.builtFrom=e.file;e.file=s;}}
  const lib=targets.map(t=>[t,exists(t)]).find(([,f])=>f);
  const missing=[...new Set(targets.filter(t=>!exists(t)&&!/^(index\.(js|ts)|src\/index\.ts)$/.test(t)))];
  if(lib)out.push({kind:'library',name:pkg?.name??path.basename(root),file:lib[1],declared:{file:pkg?'package.json':'(預設)',line:pkg?lineOf(pkgBody,JSON.stringify(lib[0])):null},...(missing.length?{notBuilt:missing.slice(0,4)}:{})});
@@ -42,14 +50,15 @@ export function findEntries(root,{nested=false}={}){
  const subUsage=[];
  if(!nested&&(!out.length||pkg?.workspaces||['pnpm-workspace.yaml','lerna.json','nx.json','turbo.json'].some(f=>fs.existsSync(path.join(root,f)))||/\[tool\.uv\.workspace\]/.test((()=>{try{return fs.readFileSync(path.join(root,'pyproject.toml'),'utf8');}catch{return '';}})()))){
   for(const sub of subPackages(root)){const s=findEntries(path.join(root,sub),{nested:true});const pre=f=>f&&!/^\(/.test(f)?sub+'/'+f:f;
-   for(const e of s.entries)out.push({...e,file:pre(e.file),declared:{...e.declared,file:pre(e.declared?.file)},pkg:sub,pkgName:s.pkg?.name??path.basename(sub),...(s.pkg?.version?{version:s.pkg.version}:{})});
+   for(const e of s.entries)out.push({...e,file:pre(e.file),...(e.builtFrom?{builtFrom:pre(e.builtFrom)}:{}),declared:{...e.declared,file:pre(e.declared?.file)},pkg:sub,pkgName:s.pkg?.name??path.basename(sub),...(s.pkg?.version?{version:s.pkg.version}:{})});
    subUsage.push(...s.usage.map(u=>({...u,file:pre(u.file)})));}}
  const readme=['README.md','readme.md','Readme.md','README.rst','README'].find(f=>fs.existsSync(path.join(root,f)));
  const usage=[...subUsage];
  if(readme){const lines=fs.readFileSync(path.join(root,readme),'utf8').split(/\r?\n/);let fence=false;
   lines.forEach((l,i)=>{if(/^\s*```/.test(l)){fence=!fence;return;}if(!fence)return;
    for(const e of out){const n=e.kind==='bin'||e.lang==='python'?e.name:pkg?.name;if(!n)continue;const esc=n.replace(/[.*+?^${}()|[\]\\/]/g,'\\$&');
-    const re=e.kind==='bin'?new RegExp('(^|[\\s$|>])'+esc+'(\\s|$)'):e.lang==='python'?new RegExp('^(>>>\\s*)?(import\\s+'+esc+'\\b|from\\s+'+esc+'(\\.|\\s))'):new RegExp('(require\\(|from\\s+)[\'"]'+esc+'[\'"]');
+    const pn=e.kind==='bin'&&(e.pkgName??pkg?.name)?(e.pkgName??pkg?.name).replace(/[.*+?^${}()|[\]\\/]/g,'\\$&'):null;
+    const re=e.kind==='bin'?new RegExp('(^|[\\s$|>])'+esc+'(\\s|$)'+(pn?'|(^|[\\s$|>])(npx|bunx|pnpx|pnpm\\s+dlx|yarn\\s+dlx|npm\\s+exec)\\s+(-y\\s+|--yes\\s+)?'+pn+'(@\\S+)?(\\s|$)':'')):e.lang==='python'?new RegExp('^(>>>\\s*)?(import\\s+'+esc+'\\b|from\\s+'+esc+'(\\.|\\s))'):new RegExp('(require\\(|from\\s+)[\'"]'+esc+'[\'"]');
     if(re.test(l)&&!/npm\s+(i|install)|yarn\s+add|pnpm\s+add/.test(l)&&!/^\s*(\$\s*)?(cd|pip3?|pipx|uv|git|brew|conda|docker|apt(-get)?|sudo|python3? -m pip)\s/.test(l))usage.push({entry:e.kind+':'+e.name,file:readme,line:i+1,text:l.trim().slice(0,120)});}});}
  // docs/: `$ name …` lines in .md / .rst (sqlite-utils keeps its CLI examples there, not in the README)
  const docs=[];const walkD=(d,rel,depth)=>{let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}for(const x of es){if(docs.length>40)return;const r=rel+'/'+x.name;if(x.isDirectory()&&depth<2&&!/^[._]/.test(x.name))walkD(path.join(d,x.name),r,depth+1);else if(/\.(md|rst|txt)$/.test(x.name))docs.push(r.slice(1));}};walkD(path.join(root,'docs'),'/docs',0);
@@ -57,6 +66,9 @@ export function findEntries(root,{nested=false}={}){
   lines.forEach((l,i)=>{for(const e of out.filter(e=>e.kind==='bin')){const esc=e.name.replace(/[.*+?^${}()|[\]\\/]/g,'\\$&');if(!/changelog|history|release/i.test(f)&&!/\\$/.test(l)&&new RegExp('^(\\s*\\$\\s+|\\s{2,}|>\\s*)(?:[^|]+\\|\\s*)?'+esc+'(\\s|$)').test(l)&&usage.filter(u=>u.file===f).length<80)usage.push({entry:'bin:'+e.name,file:f,line:i+1,text:l.trim().slice(0,120)});}});}
  return {pkg:pkg?{name:pkg.name,version:pkg.version}:pyMeta.name?pyMeta:null,entries:out,usage};
 }
+// Every package name this repo publishes (root + workspace packages, private ones skipped), for "the target already uses it".
+export function packageNames(root){root=path.resolve(root);const out=new Set();for(const d of ['',...subPackages(root)]){const p=readJson(path.join(root,d,'package.json'));if(p?.name&&!p.private)out.add(p.name);}
+ const py=pyProjectMeta(root);if(py.name)out.add(py.name);return [...out].slice(0,60);}
 // Folders (depth ≤ 3) that are their own package; tests, examples, docs, vendored and installed code skipped.
 const SUB_SKIP=/^(node_modules|\.git|\.venv|venv|\.tox|__pycache__|site-packages|vendor|third_party|dist|build|coverage|tests?|__tests__|e2e|examples?|samples?|docs?|fixtures|benchmarks?|\..*)$/;
 function subPackages(root){const out=[];const walk=(d,rel,depth)=>{if(out.length>=40)return;let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}
@@ -111,7 +123,11 @@ export async function traceRoute(root,{question='',entry:hint=null,fn=null,ast=n
   // Regex fallback: whole-repo hints, not split by route (says so in the report).
   try{model.touches.elsewhere=scanTarget(root).findings.filter(f=>f.line&&!f.test&&!f.typesOnly&&['subprocess','network','listen','paid','real-account'].includes(f.kind)).map(f=>({cap:f.kind,label:f.label,file:f.file,line:f.line,ctx:['文字比對，沒分這條路']}));}catch{}
   model.answer=draftAnswer(model);return model;}
- const g=buildGraph(ast,root);model.stats=stats(g);
+ // Big monorepo: parse only the entry's package and the workspace packages it depends on (said in unknowns).
+ let files=null;{const fl=listFiles(root);const code=fl.filter(f=>JS_FILE.test(f)).length;
+  if(entry.pkg&&code>BIG_REPO){const keep=wsClosure(root,entry.pkg);files=fl.filter(f=>!f.includes('/')||keep.some(d=>f.startsWith(d+'/')));
+   model.parseScope={packages:keep,files:files.length,of:fl.length};model.unknowns.push({kind:'scope',text:'repo 很大（'+code+' 個程式檔），只解析入口所在的 '+entry.pkg+' 和它依賴的 workspace 套件（'+keep.filter(d=>d!==entry.pkg).slice(0,5).join('、')+(keep.length>6?' 等':'')+'），共 '+files.length+' 檔；其他套件裡的東西這次沒看。'});}}
+ const g=buildGraph(ast,root,{files});model.stats=stats(g);model.toolTerms=toolTerms(g,question);
  const entryFile=g.files.has(entry.file)?entry.file:[...g.files.keys()].find(f=>f===entry.file.replace(/\.(m?js|cjs)$/,'.ts'))??null;
  if(!entryFile){model.unknowns.push({kind:'entry-missing',text:'入口檔 '+entry.file+' 不在 repo 裡（可能要先建置才會產生）；這條路無法追。'});model.answer=draftAnswer(model);return model;}
  // Library entry: every export is API surface, so all exported units are roots.
@@ -166,6 +182,7 @@ export async function traceRoute(root,{question='',entry:hint=null,fn=null,ast=n
   if(hit.length){fwSel=new Set([...hit,...(hit.every(e=>e.kind==='command')?fwAll.filter(e=>e.kind==='route'):[]),...(g.framework??[]).filter(e=>!fwAll.includes(e))].map(e=>e.unit));model.framework={total:fwAll.length,picked:hit.map(e=>({kind:e.kind,framework:e.framework,name:e.name,file:e.file,line:e.line,unit:e.unit})),how,...(fwOthers.length?{others:fwOthers.slice(0,12),pickedWhy:routeHit.why}:{})};if(how!=='依問句')model.unknowns.push({kind:'framework',text:'問句沒點名指令，'+how+'挑了 '+hit.map(e=>e.name).join('、')+'（共 '+fwAll.length+' 個指令）；不對就在問句寫指令名。'});}
   else{model.framework={total:fwAll.length,picked:[],how:'全部'};if(fwAll.length>1)model.unknowns.push({kind:'framework',text:'repo 用 '+[...new Set(fwAll.map(e=>e.framework))].join('、')+' 註冊了 '+fwAll.length+' 個'+(fwAll.some(e=>e.kind==='route')?'路由／':'')+'指令（例：'+fwAll.slice(0,4).map(e=>e.name).join('、')+'），問句沒點名，這次全部算進路線，範圍會偏大；在問句寫指令名或路徑即可縮小。'});}}
  const parent=reach(g,roots,{classes:model.apiClasses??null,hints:KEYWORDS(question),framework:fwSel});if(parent.dynPicked)model.dynPicked=parent.dynPicked;if(parent.methodPicked){model.methodPicked=parent.methodPicked;for(const p of parent.methodPicked)model.unknowns.push({kind:'inferred',text:'有 '+p.total+' 個類別都有 '+p.method+'()，依問句只接 '+p.picked.join('、')+'（推論）；其他格式的處理不算這條路。'});}model.reachedUnits=parent.size;delete model.apiClasses;
+ model.capabilities=whereIs(g,parent,model.toolTerms??[]);
  const all=touches(g,parent).filter(t=>!(t.file===entryFile&&t.cap==='dynamic'&&false));
  const test=t=>TEST_PATH.test(t.file);
  // A touch with no condition of its own may still sit in a function only called under a condition (if magic: run()).
@@ -221,6 +238,18 @@ export async function traceRoute(root,{question='',entry:hint=null,fn=null,ast=n
  model.conditional=R.filter(t=>t.ctx?.length&&!isHelpUnit(t.unit)&&['read-file','write-file','stdin',...OTHER_PROGRAM].includes(t.cap)).map(t=>({cap:t.cap,label:t.label,file:t.file,line:t.line,when:t.ctx}));
  model.answer=draftAnswer(model);return model;
 }
+// Where the question's capability (pdf, pptx, export, codemod …) lives in this repo, and whether this route reaches it.
+// Off-route ones name who loads them (a .tsx/.jsx loader means a browser UI button, not a CLI/function step).
+export function whereIs(g,parent,terms){const out=[];const reached=new Set([...parent.keys()].map(id=>id.split('::')[0]));
+ const importers=rel=>{const r=[];for(const f of g.files.values()){if(TEST_PATH.test(f.rel))continue;for(const im of f.imports)if(im.target?.file===rel){r.push({file:f.rel,line:im.line});break;}}return r;};
+ for(const term of terms){const re=new RegExp('(^|[-_/.])'+term+'([-_/.]|s?\\.)','i');
+  const mods=[...g.files.keys()].filter(f=>!TEST_PATH.test(f)&&!/\.d\.ts$/.test(f)&&re.test(f.split('/').pop())).sort((a,b)=>a.length-b.length).slice(0,3);
+  for(const file of mods){const on=reached.has(file);let via=on?[]:importers(file),hop=via;
+   // one more hop when the direct loader is a helper (lib/…): show what the person actually clicks or runs
+   if(!on&&via.length&&!via.some(v=>/\.(tsx|jsx|vue|svelte)$/.test(v.file)))hop=via.flatMap(v=>importers(v.file)).slice(0,3);
+   const all=[...via,...hop.filter(h=>!via.some(v=>v.file===h.file))].slice(0,4);
+   out.push({term,file,onRoute:on,via:all,ui:all.some(v=>/\.(tsx|jsx|vue|svelte)$/.test(v.file)||/(^|\/)(app|ui|components|routes|pages|renderer)\//.test(v.file))});}}
+ return out;}
 function firstCodeLine(f){if(!f)return 1;const i=f.lines.findIndex(l=>l.trim()&&!/^\s*(#!|\/\/|\/\*|\*|['"]use strict)/.test(l));return i<0?1:i+1;}
 const short=c=>String(c??'').replace(/^global\.|^node:|^py:|^pkg:/,'').replace(/^(local|file):[^:|]*(::|\|\.?)/,'');
 // The one-paragraph "怎麼接" answer, built only from stations, touches and trial facts.
@@ -250,7 +279,25 @@ export function draftAnswer(m){
  const leak=R.filter(t=>t.cap==='stdout'&&errCtx(t));
  parts.error=errs.length?'出錯時'+(errs.some(t=>t.cap==='stderr')?'把錯誤印到錯誤輸出':'')+(errs.some(t=>t.cap==='exit')?(errs.some(t=>t.cap==='stderr')?'並':'')+'以非 0 結束':'')+(leak.length?'，但有錯誤訊息印到標準輸出（'+leak.slice(0,2).map(t=>t.file+':'+t.line).join('、')+'），別把標準輸出整段當 JSON':''):(e.kind==='bin'?'錯誤處理讀碼看不出來':'出錯時是拋例外還是回傳錯誤，讀碼沒確認')+'，待試跑';
  const t=m.trial,caveats=[];
- if(t?.ran){const good=t.cases.find(c=>c.id==='good'),bad=t.cases.find(c=>c.id==='bad'),miss=t.cases.find(c=>c.id==='missing'),again=t.cases.find(c=>c.id==='good-again');
+ if(t?.ran&&t.project){const cs=t.cases;const nm=c=>'`'+(t.multi.find(x=>x.cmd===c.id)?.display??c.id)+'`';
+  const own=c=>c.changed.filter(f=>!/^<家目錄或暫存>\//.test(f)),wf=c=>/--(apply|write)\b/.test(c.id),ro=cs.filter(c=>c.exit===0&&!own(c).length&&!wf(c)),wr=cs.filter(c=>own(c).length),idle=cs.filter(c=>c.exit===0&&!own(c).length&&wf(c));
+  parts.entry='可以先接命令列，各指令分開接：'+cs.map(nm).join('、');parts.input='這些指令讀的是所在專案（package.json、原始碼），不吃另外的輸入檔';
+  parts.output=(ro.length?'在假專案試跑，只讀不寫的：'+ro.map(nm).join('、'):'沒有一個指令是只讀的')+(wr.length?'；會寫檔的：'+wr.map(c=>nm(c)+'（'+own(c).slice(0,5).join('、')+(own(c).length>5?' 等 '+own(c).length+' 個':'')+'）').join('；'):'');
+  for(const c of idle)caveats.push(nm(c)+' 是會改檔的寫法，這次沒改到任何檔（假專案沒有它要改的寫法），不代表它不會改原碼');
+  for(const c of cs){if(c.timedOut)caveats.push(nm(c)+' 在沒網路時卡到逾時，代表它要連網');else if(c.exit!==0)caveats.push(nm(c)+' 回結束碼 '+c.exit+'（'+((c.stderr||c.stdout).replace(/\u001b\[[0-9;]*m/g,'').trim().split('\n').filter(l=>!/^astryx: answered|^\s*$/.test(l)).find(l=>/error|錯|not|cannot|fail|outside|no /i.test(l))?.slice(0,90)??'').trim()+'）');}
+  const home=[...new Set(cs.flatMap(c=>c.changed.filter(f=>/^<家目錄或暫存>\//.test(f)).map(f=>f.split('/').slice(0,2).join('/'))))];if(home.length)caveats.push('專案以外還寫了 '+home.join('、')+'（家目錄或暫存資料夾）');
+  parts.verified='已在隔離副本（無網路）的假專案（package.json＋src/App.tsx'+(Object.keys(t.peers??{}).length?'，連上 repo 裡的 '+Object.keys(t.peers).join('、'):'')+'）依序跑 '+cs.length+' 個指令確認。';}
+ else if(t?.ran&&t.scaffold){const g0=t.cases.find(c=>c.id==='good'),again=t.cases.find(c=>c.id==='good-again'),off=t.cases.find(c=>c.id==='offline');
+  const shown=(t.display??t.run).replace(/\{input\}/,'<檔案>');parts.entry='可以先接命令列 `'+shown+'`（建立專案的指令，不吃輸入檔）';parts.input='它不讀你的資料，把自帶的範本複製出去';
+  const tops=c=>[...new Set(c.changed.map(f=>f.split('/').slice(0,2).join('/')))].slice(0,6).join('、');
+  const okRun=[g0,off].find(c=>c&&c.exit===0);
+  parts.output=okRun?'試跑在空資料夾寫了 '+okRun.changedCount+' 個檔（'+tops(okRun)+'）':'試跑寫了 '+(g0?.changedCount??0)+' 個檔（'+tops(g0)+'）';
+  if(g0&&(g0.timedOut||g0.exit!==0))caveats.push('直接跑'+(g0.timedOut?'在沒網路時卡到逾時（最後一步：'+(g0.stdout.replace(/\u001b\[[0-9;]*m/g,'').trim().split('\n').pop()??'').replace(/^[│◇◆┌└\s]+/,'').slice(0,40)+'）':'回結束碼 '+g0.exit)+'，代表它要連網');
+  if(off)caveats.push(off.exit===0?'加 '+off.label.replace(/^加 | 再跑$/g,'')+' 就不需要網路（'+off.ms+' ms 完成）':'加 '+off.label.replace(/^加 | 再跑$/g,'')+' 仍失敗（結束碼 '+off.exit+'）');
+  if(again)caveats.push(again.exit===0?'同一資料夾再跑會照寫（改了 '+again.changedCount+' 個檔）':'同一資料夾再跑會拒絕（結束碼 '+again.exit+(/--force/.test(again.stdout+again.stderr)?'，要加 --force 才會覆蓋':'')+'）');
+  if(g0?.changed.some(f=>/^<repo>/.test(f)))caveats.push('它也改了 repo 自己的檔');
+  parts.verified='已在隔離副本（無網路）的空資料夾跑 '+t.cases.length+' 次確認寫了什麼。';}
+ else if(t?.ran){const good=t.cases.find(c=>c.id==='good'),bad=t.cases.find(c=>c.id==='bad'),miss=t.cases.find(c=>c.id==='missing'),again=t.cases.find(c=>c.id==='good-again');
   if(good?.json?.ok&&!writes.length)parts.output='結果是標準輸出的 JSON（試跑：'+good.json.shape+'），這條路不寫檔';
   else if(good?.marker&&!good.json?.ok&&good.exit===0)parts.output='結果印到標準輸出（試跑：假 '+(t.inputs?.format??'').toUpperCase()+' 裡的「'+t.inputs.marker+'」有出現在輸出）'+(good.changed.length?'':'，試跑沒寫任何檔')+(writes.length&&writes.every(onlyIfW)?'；只在「'+(writes[0].ownCtx??writes[0].ctx)[0].replace(/^當 /,'').slice(0,30)+'」時寫檔（'+writes[0].file+':'+writes[0].line+'）':'');
   else if(good&&good.marker===false&&good.exit===0&&t.inputs?.marker)caveats.push('正常輸入結束碼 0，但輸出裡找不到假檔的內容（「'+t.inputs.marker+'」），要確認它真的有轉');
@@ -260,7 +307,9 @@ export function draftAnswer(m){
   if(good&&good.exit!==0&&!(srv?.stoppedByProbe))caveats.push('正常輸入卻回結束碼 '+good.exit+'，先看試跑紀錄');
   const named=srv?[]:good?.changed.filter(f=>!/^</.test(f)&&(t.run??'').split(/\s+/).includes(f))??[];
   if(srv){}else if(good?.changed.length&&named.length===good.changed.length)parts.output='試跑只寫了指令裡指定的 '+named.join('、')+'，沒動其他檔'+(good.stdout.trim()?'；標準輸出另有內容':'');
-  else if(good?.changed.length)caveats.push('試跑時改了 '+good.changed.length+' 個檔（'+good.changed.slice(0,3).join('、')+'）'+(named.length?'，其中 '+named.join('、')+' 是指令指定的':''));
+  else if(good?.changed.length){const hm=good.changed.filter(f=>/^<家目錄或暫存>\//.test(f)),ot=good.changed.filter(f=>!/^<家目錄或暫存>\//.test(f));
+   if(ot.length)caveats.push('試跑時改了 '+ot.length+' 個檔（'+ot.slice(0,3).join('、')+'）'+(named.length?'，其中 '+named.join('、')+' 是指令指定的':''));
+   if(hm.length)caveats.push('試跑時在家目錄或暫存資料夾寫了 '+hm.length+' 個檔（'+hm.slice(0,2).map(f=>f.replace(/^<家目錄或暫存>\//,'~/')).join('、')+'），不是專案檔，但接進來時要給它可寫的家目錄或關掉這些快取');}
   if(good?.exit===0&&good.stderr.trim()&&!srv)caveats.push('正常時錯誤輸出也有字（'+good.stderr.replace(/\u001b\[[0-9;]*m/g,'').trim().split('\n').pop().slice(0,40)+'），不能用「錯誤輸出有字」判斷失敗，要看結束碼');
   if(again&&again.sameStdout===false&&!srv)caveats.push('同一份重跑輸出不同');
   if(bad){if(bad.exit!==0)caveats.push('格式錯時結束碼 '+bad.exit+(bad.stderr.trim()?'、錯誤在錯誤輸出':'')+(bad.stdout.trim()&&!bad.json.ok?'，但標準輸出已印出半截內容，要用結束碼判斷成功，不要只看輸出':''));
@@ -279,7 +328,15 @@ export function draftAnswer(m){
  else parts.verified='原碼 '+(m.stations?.length??0)+' 站已核對，實際輸出格式待試跑確認。';
  if(m.dynPicked?.length)parts.input+='，再交給 '+m.dynPicked.slice(0,2).map(d=>d.file).join('、')+' 解析（原碼是動態載入，依問句挑的）';
  parts.caveats=caveats;
- const text=[parts.entry+'。'+parts.input+'；'+parts.output+'。',parts.touches+'。',caveats.length?caveats.join('；')+'。':parts.error+'。',parts.verified].join('');
+ // the question asks about logging in to an AI agent (Claude / Codex …): say where the repo launches one, on this route or not
+ if(/登入|login|claude|codex|gemini|模型|agent/i.test(m.question??'')){const ag=x=>x.filter(t=>t.agentCli);const onR=ag(R),els=ag(m.touches?.elsewhere??[]);
+  parts.agent=onR.length?'這條路會啟動 '+[...new Set(onR.map(t=>t.agentCli))].join('、')+'（'+onR[0].file+':'+onR[0].line+'），要用你的登入與額度':els.length?'這條路不用登入 AI 代理；repo 另一處會啟動 '+[...new Set(els.map(t=>t.agentCli))].join('、')+'（'+els.slice(0,2).map(t=>t.file+':'+t.line).join('、')+'，不在這條路上），用到那部分才要你的登入':'沒看到它啟動 Claude、Codex 等 AI 代理 CLI';}
+ // the question asks for something this route never reaches (export in a UI button, a codemod in another command …)
+ const FMT=/^(pdf|pptx|ppt|docx|xlsx|html|csv|epub|png|svg|codemod|scaffold|template|theme)$/,caps=(m.capabilities??[]).filter(c=>FMT.test(c.term)||c.term==='export'&&!(m.capabilities??[]).some(x=>FMT.test(x.term)));
+ const off=caps.filter(c=>!c.onRoute),on=new Set(caps.filter(c=>c.onRoute).map(c=>c.term));const offT=[...new Set(off.filter(c=>!on.has(c.term)).map(c=>c.term))];
+ if(offT.length&&t?.project)parts.offRoute='原碼路線只追到入口與指令分派，'+offT.slice(0,3).map(x=>x.toUpperCase()).join('、')+' 的實作（'+off.filter(c=>offT.includes(c.term)).slice(0,2).map(c=>c.file).join('、')+'）由指令執行時載入，以上各指令的行為以試跑為準';
+ else if(offT.length)parts.offRoute='問句要的 '+offT.slice(0,3).map(t=>t.toUpperCase()+' 在 '+off.filter(c=>c.term===t).slice(0,2).map(c=>c.file+(c.via.length?'（由 '+c.via.slice(0,2).map(v=>v.file+':'+v.line).join('、')+' 載入'+(c.ui?'，介面功能':'')+'）':'（沒找到誰載入）')).join('、')).join('；')+'，這條入口走不到，不能當成這個步驟的輸出';
+ const text=[parts.entry+'。'+parts.input+'；'+parts.output+'。',parts.touches+'。',caveats.length?caveats.join('；')+'。':parts.error+'。',parts.offRoute?parts.offRoute+'。':'',parts.agent?parts.agent+'。':'',parts.verified].join('');
  return {text,parts,draft:true};
 }
 // ---- isolated trial ----
@@ -287,7 +344,11 @@ const DEFAULT_CSV='name,age,city\nAmy,30,Taipei\nBob,25,"Kaohsiung, TW"\n';
 const DEFAULT_JSON='{"posts": [{"id": 1, "title": "hello"}, {"id": 2, "title": "world"}]}\n';
 const BAD_CSV='name,age\n"Amy,30\nBob,25,extra,,\n';
 function copyRepo(root,dest){const skip=/(^|\/)(\.git|node_modules|\.venv|venv|__pycache__)$/;const walk=(s,d)=>{fs.mkdirSync(d,{recursive:true});for(const e of fs.readdirSync(s,{withFileTypes:true})){if(skip.test(e.name)||e.isSymbolicLink())continue;const a=path.join(s,e.name),b=path.join(d,e.name);if(e.isDirectory())walk(a,b);else if(e.isFile())fs.copyFileSync(a,b);}};walk(root,dest);}
-function snapshot(dir){const m=new Map();const walk=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){if(e.name==='node_modules')continue;const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()){const st=fs.statSync(p);m.set(path.relative(dir,p),st.size+':'+st.mtimeMs);}}};walk(dir);return m;}
+function snapshot(dir){const m=new Map();const walk=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){if(e.name==='node_modules')continue;const p=path.join(d,e.name);if(e.isSymbolicLink()){let t='';try{t=fs.readlinkSync(p);}catch{}m.set(path.relative(dir,p)+' →link',t);}else if(e.isDirectory())walk(p);else if(e.isFile()){const st=fs.statSync(p);m.set(path.relative(dir,p),st.size+':'+st.mtimeMs);}}};walk(dir);return m;}
+// HOME and TMPDIR of a trial point at its own folder: what lands there outside the repo copy, inputs and work folders
+function snapOther(base){const m=new Map();for(const e of fs.readdirSync(base,{withFileTypes:true})){if(/^(repo|inputs|work-.*)$/.test(e.name))continue;const p=path.join(base,e.name);if(e.isDirectory()){for(const [k,v] of snapshot(p))m.set(e.name+'/'+k,v);}else if(e.isFile())m.set(e.name,String(fs.statSync(p).size));}return m;}
+// many files under one folder (a compile cache) → one line with a count
+const squash=list=>{const by=new Map();for(const f of list){const k=f.split('/').slice(0,2).join('/');by.set(k,(by.get(k)??0)+1);}return [...by].map(([k,n])=>n>3?k+'/…（'+n+' 個檔）':null).filter(Boolean).concat(list.filter(f=>(by.get(f.split('/').slice(0,2).join('/'))??0)<=3));};
 const diff=(a,b)=>[...b.keys()].filter(k=>a.get(k)!==b.get(k)).concat([...a.keys()].filter(k=>!b.has(k)).map(k=>k+'（被刪）'));
 function jsonShape(s){try{const v=JSON.parse(s);return {ok:true,shape:Array.isArray(v)?'陣列 '+v.length+' 筆'+(v[0]&&typeof v[0]==='object'?'，欄位 '+Object.keys(v[0]).slice(0,6).join('/'):''):typeof v==='object'&&v?'物件，欄位 '+Object.keys(v).slice(0,6).join('/'):typeof v,sample:JSON.stringify(Array.isArray(v)?v.slice(0,2):v).slice(0,300)};}catch(e){return {ok:false,error:String(e.message).slice(0,120)};}}
 // ---- trial arguments: README usage → --help in the isolated copy → the flag / subcommand the sentence names ----
@@ -296,7 +357,7 @@ const FILEISH=/^(<?\[?)(file|files|input|infile|source|src|path_to_file|csv|json
 export function inferRun(root,m,{timeoutMs=8000}={}){
  root=path.resolve(root);const e=m.entry;if(e?.kind!=='bin')return null;
  const top=e.module?.split('.')[0],why=[];
- const base=e.lang==='python'?(e.name.startsWith('python -m ')?['python3','-m',e.module]:/\.__main__$/.test(e.module??'')?['python3','-m',e.module.replace(/\.__main__$/,'')]:fs.existsSync(path.join(root,top,'__main__.py'))?['python3','-m',top]:['python3','-c',`import sys; sys.argv[0]='${e.name}'; from ${e.module} import ${e.fn}; sys.exit(${e.fn}())`]):['node',e.file];
+ const base=e.lang==='python'?(e.name.startsWith('python -m ')?['python3','-m',e.module]:/\.__main__$/.test(e.module??'')?['python3','-m',e.module.replace(/\.__main__$/,'')]:fs.existsSync(path.join(root,top,'__main__.py'))?['python3','-m',top]:['python3','-c',`import sys; sys.argv[0]='${e.name}'; from ${e.module} import ${e.fn}; sys.exit(${e.fn}())`]):['node',e.builtFrom&&fs.existsSync(path.join(root,e.builtFrom))?e.builtFrom:e.file];
  const shown=e.lang==='python'?e.name:e.name;
  const kw=KEYWORDS(m.question??'').filter(k=>!['convert','transform','parse','process','render','compile','format','handle','json','give','file'].includes(k)||/csv|xml|yaml|tsv/.test(k));
  const cmd=m.framework?.picked?.find(x=>x.kind==='command')?.name??null;
@@ -304,11 +365,33 @@ export function inferRun(root,m,{timeoutMs=8000}={}){
  const iso=isoCopy(root),help=args=>{const r=execIso(iso,root,[...base,...args],{timeoutMs});return ((r.stdout??'')+'\n'+(r.stderr??'')).slice(0,20000);};
  let h='',sub='';try{h=help(['--help']);if(cmd)sub=help([cmd,'--help']);}finally{fs.rmSync(iso.base,{recursive:true,force:true});}
  const text=sub||h;
+ // The sentence names several of the tool's own commands (元件→component, 模板→template, AGENTS.md→init …):
+ // try each one in order inside one throw-away project, to see which files each command writes.
+ const cmdList=[...((h.match(/\nCommands:\n([\s\S]*?)(\n\s*\n|$)/)?.[1]??'').matchAll(/^\s{2}([a-z][\w-]*)\b/gm))].map(x=>x[1]).filter(c=>c!=='help');
+ const wantCmd=new Set();const q=(m.question??'').toLowerCase();
+ for(const c of cmdList)if(new RegExp('(^|[^a-z])'+c+'([^a-z]|$)').test(q.replace(/[\w-]+\.(json|md|ya?ml|toml)\b/g,' ')))wantCmd.add(c);
+ for(const [re,c] of CMD_WORDS)if(re.test(m.question??'')&&cmdList.includes(c))wantCmd.add(c);
+ let multi=null;
+ if(wantCmd.size>=2){const order=c=>/^(init|setup|create|new)$/.test(c)?0:/^(upgrade|codemod|migrate|swizzle|add|eject)$/.test(c)?2:1;
+  const normU=u=>{const pn=(e.pkgName??m.repo?.name??'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');return pn?{...u,text:u.text.replace(new RegExp('(^|[\\s$|>])(?:npx|bunx|pnpx|pnpm\\s+dlx|pnpm\\s+exec|yarn\\s+dlx|npm\\s+exec)\\s+(?:-y\\s+)?'+pn+'(?:@\\S+)?(?=\\s|$)'),'$1'+e.name)}:u;};let uses0=(m.usage??[]).map(normU);
+  // each command's own --help "Examples:" lines count as usage too (upgrade --from 0.1.0 --apply)
+  const i3=isoCopy(root);try{for(const c of wantCmd){const r=execIso(i3,root,[...base,c,'--help'],{timeoutMs});const ht=(r.stdout??'')+(r.stderr??'');const ex=ht.split(/\n/).slice(ht.split(/\n/).findIndex(l=>/^Examples?:/i.test(l))+1).filter(l=>/^\s+\S/.test(l)&&!/^\s*#/.test(l)).map(l=>l.trim());
+    if(/^Examples?:/im.test(ht))for(const l of ex.slice(0,8))uses0.push(normU({file:c+' --help',line:0,text:l}));}}finally{fs.rmSync(i3.base,{recursive:true,force:true});}
+  multi=[...wantCmd].sort((a,b)=>order(a)-order(b)).slice(0,5).map(c=>{const re=new RegExp('(^|\\s)'+e.name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s+'+c+'(\\s|$)');
+   const u=uses0.filter(u=>re.test(u.text)&&!/[<\[]/.test(u.text.split(re)[3]??'')).sort((a,b)=>{const ap=x=>/--(apply|write)\b/.test(x.text),fv=x=>(x.text.match(/--[\w-]+\s+[^-\s]\S*/g)??[]).length,fo=x=>/--force/.test(x.text);
+    return fo(a)-fo(b)||(order(c)===2?(ap(b)-ap(a))||(fv(b)-fv(a)):ap(a)-ap(b))||a.text.length-b.text.length;})[0];
+   const args=u?u.text.replace(/#.*$/,'').split(re).pop().trim().split(/\s+/).filter(Boolean):[];
+   const w=u?(u.line?u.file+':'+u.line:u.file+' 的範例')+'：'+u.text.slice(0,80):'問句提到 '+c+'，文件沒有範例，只跑指令本身';
+   // a writer example (--apply / --write): run it once without the flag (preview) and once with it, to see what it changes
+   const wf=args.find(a=>/^--(apply|write)$/.test(a));if(wf)return [{cmd:c,args:[c,...args.filter(a=>a!==wf)],why:w+'（先不加 '+wf+' 預覽）'},{cmd:c+' '+wf,args:[c,...args],why:w}];
+   return [{cmd:c,args:[c,...args],why:w}];}).flat();
+  why.push('問句提到 '+multi.length+' 個指令（'+multi.map(x=>x.cmd).join('、')+'），依序在同一個假專案裡各跑一次，看每個寫了什麼');}
  // flags whose name is one of the sentence's words (--csv), exact first
  const flags=[...text.matchAll(/(?:^|[\s,])(--[a-z][\w-]*)/gim)].map(x=>x[1]);
  const flag=kw.map(k=>flags.find(f=>f==='--'+k)).find(Boolean)??null;
  // 2. README usage lines for this entry that mention the sentence's words
- const esc=e.name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),uses=(m.usage??[]).filter(u=>new RegExp('(^|[\\s|$>])'+esc+'(\\s|$)').test(u.text));
+ const pn=(e.pkgName??m.repo?.name??'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),npx=pn?new RegExp('(^|[\\s$|>])(?:npx|bunx|pnpx|pnpm\\s+dlx|yarn\\s+dlx|npm\\s+exec)\\s+(?:-y\\s+|--yes\\s+)?'+pn+'(?:@\\S+)?(?=\\s|$)'):null;
+ const esc=e.name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),uses=(m.usage??[]).map(u=>npx?{...u,text:u.text.replace(npx,'$1'+e.name)}:u).filter(u=>new RegExp('(^|[\\s|$>])'+esc+'(\\s|$)').test(u.text));
  // rank: names the sentence's words, is a concrete example (not `[options] <file>`), matches the named command, gives a file when the sentence says 檔
  const nameToks=new Set(e.name.toLowerCase().split(/[^a-z0-9]+/));const kwU=kw.filter(k=>!nameToks.has(k)&&!e.name.toLowerCase().includes(k));
  const template=t=>/\[[\w -]+\]|<[\w -]+>/.test(t),score=u=>{const t=u.text.toLowerCase();const tk=u.text.replace(/^\$\s*/,'').split(/\s+/).slice(1);return -tk.filter(x=>/^--?[a-z]/i.test(x)&&!kwU.some(k=>x.toLowerCase().includes(k))).length*1.5+(tk.some(x=>FILEISH.test(x.replace(/^['"]|['"]$/g,''))||/<[\w -]*(file|path|input|source)[\w -]*>/i.test(u.text))?3:/[|<]/.test(u.text)?0:tk.every(x=>x.startsWith('-'))?-4:0)+kwU.filter(k=>t.includes(k)).length*3+(template(u.text)?0:2)+(cmd&&u.text.includes(' '+cmd)?4:cmd?-4:0)-(new RegExp('^\\s*(\\$\\s*)?([^|]*\\|\\s*)?'+esc+'(\\s|$)').test(u.text)?0:3)+(/檔/.test(m.question??'')&&!/\|/.test(u.text)?1:0)-(/https?:\/\//.test(u.text)?3:0)-((u.text.match(/'/g)??[]).length%2||(u.text.match(/"/g)??[]).length%2?6:0)-u.text.split(/\s+/).length/8;};
@@ -317,7 +400,11 @@ export function inferRun(root,m,{timeoutMs=8000}={}){
  if(pickUse){const line=pickUse.text.replace(/^\$\s*/,'');const line2=line.replace(/<[\w -]+>/g,'X');stdin=new RegExp('\\|\\s*'+esc+'\\b').test(line2)||new RegExp(esc+'\\b[^|>]*<\\s*\\S').test(line2);
   const after=(line.split(new RegExp('(?:^|\\s)'+esc+'(?=\\s|$)'))[1]??'').replace(/<([\w -]+)>/g,(x,y)=>'⟨'+y.trim().replace(/\s+/g,'_')+'⟩').replace(/\[[^\]]*\]/g,' ');const toks=after.split(/\s*[|>]\s*/)[0].replace(/<\s*\S+/,'').trim().split(/\s+/).filter(Boolean);
   let gave=false;args=toks.map(t=>{const ph=/^⟨.*⟩$/.test(t),n=t.replace(/[⟨⟩]/g,'');if(!gave&&!t.startsWith('-')&&(FILEISH.test(n)||ph&&/file|path|source|input/i.test(n))&&!stdin&&!(cmd&&t===cmd)){gave=true;return '{input}';}return ph?n.toLowerCase():t;});
-  if(!stdin&&!gave&&!args.some(a=>a==='{input}'))args.push('{input}');
+  const scaffold=SCAFFOLD.test(args[0]??'')&&!/給它一份.*(檔|file)|這份檔/.test('');
+  if(scaffold)why.push('「'+args[0]+'」是建立專案的指令，不吃輸入檔；在空資料夾跑，看它寫了什麼');
+  // flags that keep a scaffolder off the network (skip install / git) — tried as a second run if the first one needs network
+  var offline=null;if(scaffold){const i2=isoCopy(root);try{const r=execIso(i2,root,[...base,args[0],'--help'],{timeoutMs});const ht=(r.stdout??'')+(r.stderr??'');offline=[...new Set([...ht.matchAll(/(--(?:no-install|skip-install|no-deps|offline|no-git|skip-git|no-network))\b/g)].map(x=>x[1]))];}finally{fs.rmSync(i2.base,{recursive:true,force:true});}}
+  if(!stdin&&!gave&&!scaffold&&!args.some(a=>a==='{input}'))args.push('{input}');
   why.push((/^readme/i.test(pickUse.file)?'README 用法 ':'文件用法 ')+pickUse.file+':'+pickUse.line+'：'+pickUse.text.slice(0,80));}
  else{
   if(cmd){args.push(cmd);why.push('問句點名指令 '+cmd+'（框架註冊）');}
@@ -332,7 +419,10 @@ export function inferRun(root,m,{timeoutMs=8000}={}){
  const run=[...base.map(x=>/\s/.test(x)?'"'+x+'"':x),...args.filter(a=>a!=='{input}'||!stdin),...(stdin?['<','{input}']:[])].join(' ').replace(/(\S+) < \{input\}$/,'$1 < {input}');
  const display=[shown,...args.filter(a=>a!=='{input}'||!stdin),...(stdin?['<','{input}']:[])].join(' ');
  if(!why.length)why.push('沒有 README 用法也讀不到 --help，只用入口加檔案');
- return {run,display,why,inferred:true,help:(sub||h).split('\n').filter(Boolean).slice(0,12).join('\n').slice(0,900),sure:!!(pickUse||flag||cmd)};
+ if(multi){why.splice(0,why.length,...why.filter(w=>/^問句提到 \d+ 個指令/.test(w)));const q2=x=>/\s/.test(x)?'"'+x+'"':x;for(const x of multi){x.run=[...base.map(q2),...x.args.map(q2)].join(' ');x.display=[shown,...x.args].join(' ');}
+  const own=e.pkg?readJson(path.join(root,e.pkg,'package.json')):null;const ws=new Map(subPackages(root).map(d=>[readJson(path.join(root,d,'package.json'))?.name,d]));
+  var peers=Object.fromEntries(Object.keys(own?.peerDependencies??{}).filter(n=>ws.has(n)).map(n=>[n,ws.get(n)]));}
+ return {run:multi?multi[0].run:run,display:multi?multi.map(x=>x.display).join(' → '):display,...(multi?{multi,peers}:{}),why,inferred:true,...(typeof offline!=='undefined'&&offline?.length?{offlineFlags:offline}:{}),help:(sub||h).split('\n').filter(Boolean).slice(0,12).join('\n').slice(0,900),sure:!!(pickUse||flag||cmd)};
 }
 // PYTHONPATH for the copy: every folder that holds a top-level package (root, src/, packages/x/src …)
 function pyPathOf(copy){const inits=[];const walk=(d,rel,depth)=>{if(depth>6||inits.length>4000)return;let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}
@@ -342,7 +432,12 @@ function pyPathOf(copy){const inits=[];const walk=(d,rel,depth)=>{if(depth>6||in
 function listTestText(root){let out='',n=0;const walk=(d,rel,depth)=>{if(depth>4||n>200)return;let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}
   for(const x of es){if(x.isDirectory()){if(!/^(node_modules|\.git|\.venv|venv|dist|build)$/.test(x.name))walk(path.join(d,x.name),rel+'/'+x.name,depth+1);}else if(/(^|\/)(tests?|__tests__|spec)(\/|$)|\.(test|spec)\.[cm]?[jt]s$|^test_.*\.py$/.test(rel+'/'+x.name)&&n++<200){try{out+=fs.readFileSync(path.join(d,x.name),'utf8').slice(0,40000);}catch{}}}};
  walk(root,'',0);return out;}
-function isoCopy(root){const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo');copyRepo(root,copy);if(fs.existsSync(path.join(root,'node_modules')))fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'dir');return {base,copy};}
+// node_modules of the root and of each workspace package (pnpm keeps one per package), linked read-through into the copy
+function linkModules(root,copy){const walk=(rel,depth)=>{let es;try{es=fs.readdirSync(path.join(root,rel),{withFileTypes:true});}catch{return;}
+  for(const x of es){if(!x.isDirectory())continue;const r=rel?rel+'/'+x.name:x.name;
+   if(x.name==='node_modules'){if(fs.existsSync(path.join(copy,rel))&&!fs.existsSync(path.join(copy,r)))fs.symlinkSync(path.join(root,r),path.join(copy,r),'dir');}
+   else if(depth<4&&!/^(\.git|\.venv|venv|__pycache__|dist|build)$/.test(x.name)&&!x.name.startsWith('.'))walk(r,depth+1);}};walk('',0);}
+function isoCopy(root){const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo');copyRepo(root,copy);linkModules(root,copy);return {base,copy};}
 function trialEnv(iso,cmd0){const env={PATH:process.env.PATH,HOME:iso.base,TMPDIR:iso.base,LANG:'C.UTF-8',NO_COLOR:'1',TERM:'dumb',COLUMNS:'100'};
  if(/(^|\/)python[\d.]*$/.test(cmd0))Object.assign(env,{PYTHONPATH:pyPathOf(iso.copy),PYTHONDONTWRITEBYTECODE:'1',PYTHONNOUSERSITE:'1',PYTHONIOENCODING:'utf-8'});return env;}
 function execIso(iso,root,cmd,{timeoutMs=8000,input}={}){
@@ -352,7 +447,7 @@ function execIso(iso,root,cmd,{timeoutMs=8000,input}={}){
 export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',plan=null,server=null}={}){
  root=path.resolve(root);if(!run)throw Error('試跑要給 --run，例如 --run "node bin/cli.js {input}"');
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo'),inDir=path.join(base,'inputs');copyRepo(root,copy);fs.mkdirSync(inDir);
- if(fs.existsSync(path.join(root,'node_modules')))fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'dir');
+ linkModules(root,copy);
  // fake input in the format the sentence names (CSV, JSON, DOCX, PDF, HTML …); the good one carries MARKER
  const fmt=input?null:formatOf(question)??(/\.csv$/i.test(input??'')?'csv':null),fk=fakeInput(fmt);
  const good=path.join(inDir,'good'+(input?path.extname(input)||'.txt':fk.ext));fs.writeFileSync(good,input?fs.readFileSync(input):fk.good);
@@ -365,11 +460,11 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
  if(py)Object.assign(env,{PYTHONPATH:pyPathOf(copy),PYTHONDONTWRITEBYTECODE:'1',PYTHONNOUSERSITE:'1',PYTHONIOENCODING:'utf-8'});
  // `< {input}` feeds the file on standard input instead of a path argument.
  const viaStdin=/<\s*\{input\}/.test(run);
- const cases=[],runOne=(id,label,file)=>{
+ const cases=[],runOne=(id,label,file,reuse=null)=>{
   // run from an empty work folder, like a caller would (not inside the repo, so the repo's own config files do not apply);
   // repo-relative script paths in the command point into the copy
-  const work=path.join(base,'work-'+id);fs.mkdirSync(work);
-  const before=snapshot(copy),beforeIn=snapshot(inDir),t0=Date.now();let cmd=viaStdin?argv(run.replace(/<\s*\{input\}/,'')):argv(run).map(x=>x.replace('{input}',file));if(py&&venv)cmd=[venv,...cmd.slice(1)];
+  const work=path.join(base,'work-'+(reuse??id));if(!reuse)fs.mkdirSync(work);
+  const before=snapshot(copy),beforeIn=snapshot(inDir),beforeW=snapshot(work),beforeH=snapOther(base),t0=Date.now();let cmd=viaStdin?argv(run.replace(/<\s*\{input\}/,'')):argv(run).map(x=>file?x.replace('{input}',file):x);if(py&&venv)cmd=[venv,...cmd.slice(1)];
   cmd=cmd.map((x,i)=>!x.startsWith('-')&&!path.isAbsolute(x)&&/[\/.]/.test(x)&&fs.existsSync(path.join(copy,x))&&(i===0||fs.statSync(path.join(copy,x)).isFile())?path.join(copy,x):x);
   // servers: loopback only (still no outside network), probe with GETs, then stop it
   const probe=server&&unshare&&!viaStdin;const penv=probe?{...env,TCL_PROBE:JSON.stringify({cmd,paths:server.paths??[],waitMs:8000})}:env;
@@ -378,10 +473,25 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
   let r=r0,srv=null;if(probe){const line=(r0.stdout??'').split('\n').find(l=>l.startsWith('@@TCL_PROBE@@'));if(line){srv=JSON.parse(line.slice(13));r={status:srv.exit,stdout:srv.stdout,stderr:srv.stderr};for(const x of srv.gets)if(x.body)x.body=x.body.replaceAll(base,'<隔離>');}}
   const stdout=r.stdout??'',stderr=r.stderr??'';
   const dep=stderr.match(/(?:ModuleNotFoundError|ImportError): No module named '([\w.]+)'/)?.[1]??stderr.match(/Cannot find (?:module|package) '([^']+)'/)?.[1]??null;
-  cases.push({id,label,ms:Date.now()-t0,command:(cmd.join(' ')+(viaStdin?' < '+file:'')).replaceAll(base,'<隔離>'),missingDep:dep,exit:r.status??(r.signal?'被中止 '+r.signal:'?'),timedOut:r.error?.code==='ETIMEDOUT',stdout:stdout.replaceAll(base,'<隔離>').slice(0,3000),stderr:stderr.replaceAll(base,'<隔離>').slice(0,1500),json:jsonShape(stdout),marker:input?null:stdout.includes(MARKER)||null,changed:[...diff(before,snapshot(copy)).map(f=>'<repo>/'+f),...diff(beforeIn,snapshot(inDir)).map(f=>'<輸入資料夾>/'+f),...diff(new Map(),snapshot(work))].slice(0,20),...(srv?{server:{listened:srv.listened,base:srv.base,gets:srv.gets,stoppedByProbe:srv.stoppedByProbe}}:{})});};
- runOne('good','正常輸入',good);runOne('good-again','同一份重跑',good);runOne('bad','格式錯的輸入',bad);if(viaStdin){const empty=path.join(inDir,'empty'+path.extname(good));fs.writeFileSync(empty,'');runOne('empty','空輸入',empty);}else runOne('missing','檔案不存在',path.join(inDir,'no-such-file'+path.extname(good)));
+  cases.push({id,label,ms:Date.now()-t0,command:(cmd.join(' ')+(viaStdin?' < '+file:'')).replaceAll(base,'<隔離>'),missingDep:dep,exit:r.status??(r.signal?'被中止 '+r.signal:'?'),timedOut:r.error?.code==='ETIMEDOUT',stdout:stdout.replaceAll(base,'<隔離>').slice(0,3000),stderr:stderr.replaceAll(base,'<隔離>').slice(0,1500),json:jsonShape(stdout),marker:input?null:stdout.includes(MARKER)||null,changed:[...diff(before,snapshot(copy)).map(f=>'<repo>/'+f),...diff(beforeIn,snapshot(inDir)).map(f=>'<輸入資料夾>/'+f),...diff(beforeW,snapshot(work)).map(f=>beforeW.has(f)?f+'（改）':f),...squash(diff(beforeH,snapOther(base))).map(f=>'<家目錄或暫存>/'+f)].slice(0,scaffold?80:20),changedCount:diff(before,snapshot(copy)).length+diff(beforeW,snapshot(work)).length,...(srv?{server:{listened:srv.listened,base:srv.base,gets:srv.gets,stoppedByProbe:srv.stoppedByProbe}}:{})});};
+ // scaffolders (init / create / new …) take no input file: run in an empty folder, then again in the same folder
+ const scaffold=!/\{input\}/.test(run);
+ if(plan?.multi){// a small made-up project (package.json + one React file), every command run in it one after another
+  const proj=path.join(base,'work-project');fs.mkdirSync(path.join(proj,'src'),{recursive:true});
+  fs.writeFileSync(path.join(proj,'package.json'),JSON.stringify({name:'trial-app',version:'0.0.0',private:true,type:'module',dependencies:{react:'^19.0.0'}},null,2)+'\n');
+  // peer packages the tool expects in a project (e.g. @astryxdesign/core) and that live in this repo: linked into the made-up project
+  const peers=Object.keys(plan.peers??{});const pj=JSON.parse(fs.readFileSync(path.join(proj,'package.json'),'utf8'));
+  for(const n of peers){const d=plan.peers[n];const dst=path.join(proj,'node_modules',...n.split('/'));fs.mkdirSync(path.dirname(dst),{recursive:true});fs.symlinkSync(path.join(copy,d),dst,'dir');pj.dependencies[n]=JSON.parse(fs.readFileSync(path.join(copy,d,'package.json'),'utf8')).version??'*';}
+  fs.writeFileSync(path.join(proj,'package.json'),JSON.stringify(pj,null,2)+'\n');
+  // project files the sentence names (AGENTS.md, CLAUDE.md …) already exist with the owner's own text, as in a real project
+  for(const f of new Set((question.match(/\b[A-Za-z][\w-]*\.md\b/g)??[])))fs.writeFileSync(path.join(proj,f),'# my rules\n');
+  fs.writeFileSync(path.join(proj,'src','App.tsx'),"export default function App(){return <main><h1>Trial Report 2026</h1><button>OK</button></main>;}\n");
+  const r0=run;for(const x of plan.multi){run=x.run;runOne(x.cmd,'在假專案跑 '+x.display,null,'project');cases.at(-1).fixture=true;}run=r0;}
+ else  if(scaffold){runOne('good','空資料夾跑一次',null);runOne('good-again','同一資料夾再跑',null,'good');
+  const g0=cases[0];if(plan?.offlineFlags?.length&&(g0.timedOut||g0.exit!==0)){const r0=run;run=run+' '+plan.offlineFlags.join(' ');runOne('offline','加 '+plan.offlineFlags.join(' ')+' 再跑',null);run=r0;}}
+ else{runOne('good','正常輸入',good);runOne('good-again','同一份重跑',good);runOne('bad','格式錯的輸入',bad);if(viaStdin){const empty=path.join(inDir,'empty'+path.extname(good));fs.writeFileSync(empty,'');runOne('empty','空輸入',empty);}else runOne('missing','檔案不存在',path.join(inDir,'no-such-file'+path.extname(good)));}
  const a=cases.find(c=>c.id==='good'),b=cases.find(c=>c.id==='good-again');if(a&&b)b.sameStdout=a.stdout===b.stdout;
- const out={ran:true,viaStdin,python:py,...(venv?{venv:path.relative(root,venv)}:{}),...(plan?{inferred:true,display:plan.display,why:plan.why,help:plan.help,sure:plan.sure}:{}),network:unshare?'off':'guarded',...(server&&unshare?{server:true}:{}),isolation:unshare?(server?'獨立網路命名空間（只有本機回環，連不到外面），在 repo 副本裡跑；服務起來後用 GET 試讀再關掉':'獨立網路命名空間（完全沒有網路），在 repo 副本裡跑'):'沒有 unshare，網路沒隔離',run,inputs:{format:input?path.extname(input):fk.fmt,marker:input?null:MARKER,good:/^(docx|pdf)$/.test(fk.fmt??'')&&!input?'（'+fk.fmt+' 二進位檔，內含「'+MARKER+'」）':fs.readFileSync(good,'utf8').slice(0,400),bad:fs.readFileSync(bad,'utf8').slice(0,400).replace(/[\u0000-\u0008]/g,'·')},cases,at:new Date().toISOString()};
+ const out={ran:true,...(plan?.multi?{project:true,peers:plan.peers??{},multi:plan.multi.map(x=>({cmd:x.cmd,display:x.display,why:x.why}))}:scaffold?{scaffold:true}:{}),viaStdin,python:py,...(venv?{venv:path.relative(root,venv)}:{}),...(plan?{inferred:true,display:plan.display,why:plan.why,help:plan.help,sure:plan.sure}:{}),network:unshare?'off':'guarded',...(server&&unshare?{server:true}:{}),isolation:unshare?(server?'獨立網路命名空間（只有本機回環，連不到外面），在 repo 副本裡跑；服務起來後用 GET 試讀再關掉':'獨立網路命名空間（完全沒有網路），在 repo 副本裡跑'):'沒有 unshare，網路沒隔離',run,inputs:{format:input?path.extname(input):fk.fmt,marker:input?null:MARKER,good:/^(docx|pdf)$/.test(fk.fmt??'')&&!input?'（'+fk.fmt+' 二進位檔，內含「'+MARKER+'」）':fs.readFileSync(good,'utf8').slice(0,400),bad:fs.readFileSync(bad,'utf8').slice(0,400).replace(/[\u0000-\u0008]/g,'·')},cases,at:new Date().toISOString()};
  fs.rmSync(base,{recursive:true,force:true});return out;
 }
 // ---- short mode: "is feature X wired?" A → … → B, plus whether a test reaches B. ----

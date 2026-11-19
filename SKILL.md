@@ -29,8 +29,10 @@ node scripts/trace.mjs status --card <卡片.json>
 
 多入口與 monorepo：workspaces／packages/*（含 Python src 版面）都列為入口，依問句字、主套件或範例外掛、文件用法次數排序，只挑一個，其餘放「其他候選」（附分數與理由，`--entry` 可換）；多條路由對上時也只挑最相關的一條。外掛式註冊（多個類別都有 `convert()`）依問句挑類別（docx → DocxConverter），標成推論。試跑依問句做假檔（CSV／JSON／DOCX／PDF／HTML／Markdown），好檔帶標記字串，用來確認內容真的轉出來；在空的工作資料夾執行（repo 自己的設定檔不套用）。報告的「接線」一節是可直接拿去接的合約：呼叫方式、給什麼、拿回什麼、成功失敗訊號（含逾時建議）、動到的檔、要准的能力、還要試的未知，加一份步驟描述（輸入／輸出／execution_class／停下條件）；JSON 版在路線檔的 `adapter`。
 
+要接進自己的系統時加 `--target <系統 repo> [--target-name 名稱]`：先在目標系統找同功能的東西再談缺口（以格式／工作命名的模組或函式、做這件事的知名套件、只接受副檔名或文件提到、已經裝了這個工具的哪個版本），分「讀進來」與「產出」兩個方向，結果寫進「怎麼接」與「接線」的「已有／缺口」表；只看 git 追蹤的檔，測試、退役與暫存副本不算。問句要的能力（PDF、PPTX、codemod…）若在這條入口走不到的地方（例如介面按鈕），報告會點名檔案與誰載入它。工具類 repo：建立專案的指令（init／create…）在空資料夾跑、沒網路卡住時改用 `--help` 列的離線旗標再跑、同資料夾重跑看會不會拒絕；問句點名多個指令時（元件→component、AGENTS.md→init、codemod→upgrade，含各指令 `--help` 的範例），在同一個假專案依序各跑一次，分出只讀與會寫檔的，寫到家目錄或暫存的也列出。pnpm 每個套件的 node_modules、tsconfig `paths` 別名、被忽略的 dist／build 產物（改讀原始碼）、`importSrc('x.mjs')` 這類動態載入小幫手都會處理；很大的 monorepo 只解析入口套件與它依賴的 workspace 套件（會寫在未知）。
+
 ```text
-node scripts/trace.mjs route --root <repo> --question "給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？" --out <路線.json> --html <報告.html> [--trial [--run "python3 -m 套件 --csv < {input}"]] [--preflight <答覆.json>] [--entry bin:名稱|library|檔] [--fn 檔:函式]
+node scripts/trace.mjs route --root <repo> --question "給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？" --out <路線.json> --html <報告.html> [--trial [--run "python3 -m 套件 --csv < {input}"]] [--preflight <答覆.json>] [--target <系統 repo> --target-name 名稱] [--entry bin:名稱|library|檔] [--fn 檔:函式]
 node scripts/trace.mjs wired --root <repo> --from 檔:函式 --to 函式 --out <路線.json> [--html <報告.html>]
 node scripts/trace.mjs route-report --route <路線.json> --out <報告.html> --answer "讀碼後改寫的怎麼接"
 ```

@@ -24,6 +24,11 @@
 - 試跑：依問句做 DOCX／PDF／HTML／Markdown 假檔並檢查內容有沒有帶出；在空的工作資料夾執行；記錄每種情況耗時；文件用法略過 cd／pip 等安裝行，偏好帶輸入檔、旗標少的行。
 - 修正：`requests.Session()` 本身不算連網、`shutil.copyfileobj` 不算寫檔、套件資料夾裡 `__main__.py` 旁的轉換程式不再被略過、vendor／third_party 等不掃、只交給外部套件的薄路線會直說。
 - 試用：markitdown（Python monorepo，DOCX → Markdown）、remark（npm workspaces，Markdown 整理）。既有自測新增 G410。
+- 目標系統已有／缺口：`--target <系統 repo> [--target-name 名稱]` 先在要接進的系統裡找同功能的模組、函式、知名套件（分讀進來／產出）、只接受副檔名或文件提到的地方，以及已經裝了這個工具的哪個版本；只看 git 追蹤的檔，測試／退役／暫存副本不算。結果進「怎麼接」與「接線」。
+- 問句要的能力不在這條路上時（PDF／PPTX 匯出在介面按鈕裡），點名檔案與誰載入它；問到登入 Claude／Codex 時，列出 repo 啟動 AI 代理 CLI 的位置（路線上或別處）。
+- 工具類試跑：建立專案的指令在空資料夾跑、沒網路卡住時用 `--help` 的離線旗標（`--no-install` 等）再跑、同資料夾重跑；問句點名多個指令時在同一個假專案依序跑（連上 repo 裡的 peer 套件），分只讀與會寫檔，含 `--help` 範例與 `--apply` 先預覽再套用；家目錄與暫存資料夾的寫入也記下（快取資料夾收成一行）。
+- 修正：`npx／pnpm dlx <套件>` 用法對到該套件的 bin、pnpm 每個套件的 node_modules 連進副本、tsconfig `paths` 別名、被 git 忽略的 dist／build 產物改讀原始碼（試跑仍用建置好的檔）、`const importSrc = rel => import(…rel)` 動態載入小幫手、檔名裡的 `package.json` 不再算 JSON 格式、大 monorepo 只解析入口套件與依賴的 workspace 套件。
+- 試用：open-slide（pnpm＋Vite／React 簡報框架）、Astryx（pnpm 設計系統 CLI）；markitdown 重驗 DOCX 已有。既有自測新增 G420。
 
 ## 1.37.0-rc.1 (2026-11-19，測試中)
 

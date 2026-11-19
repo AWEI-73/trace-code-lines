@@ -6,8 +6,9 @@ import {initChain,checkChainAnchor} from './chain-card.mjs';
 import {reviewUnknowns} from './unknowns.mjs';
 import {noLinks} from './walker.mjs';
 import {gitRead} from './git-evidence.mjs';
+import {targetHas} from './target-has.mjs';
 import {adapterContract} from './adapter-contract.mjs';
-import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun} from './usage-route.mjs';
+import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun,packageNames} from './usage-route.mjs';
 import {renderRouteHtml} from './route-report-html.mjs';
 import {preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,relayText,capLabel,parseCapability} from './preflight.mjs';
 // Dogfood ext round: the step hints say 超出範圍 etc. in Chinese, so --unknown accepts the Chinese class labels too.
@@ -171,7 +172,7 @@ export function fillTrace(c,args,errors=[]){
 export function traceHelp(){
  return [
   '用法：node scripts/trace.mjs <route|wired|route-report|preflight|answer|start|fill|fix|next|status|report> [參數]；--help 顯示本說明。',
-  '用途路線：route --root <repo> --question "一句用途" --out <路線.json> [--html 報告] [--entry bin:名稱|library|檔] [--trial [--run "node bin/x {input}"]] [--preflight 答覆.json]；',
+  '用途路線：route --root <repo> --question "一句用途" --out <路線.json> [--html 報告] [--entry bin:名稱|library|檔] [--trial [--run "node bin/x {input}"]] [--preflight 答覆.json] [--target 要接進的系統 [--target-name 名稱]]；',
   '  功能接好沒：wired --from 檔:函式 --to 函式；改寫答案：route-report --route <路線.json> --out <報告.html> --answer "…"。',  '開卡前三步：preflight --root <repo> --out <問題.json> [--paths 目錄,檔] [--mode 情境]，把印出的問題原文轉給負責人；',
   '  answer --questions <問題.json> --out <答覆.json> --by "誰回的" [--accept-defaults] [--set 1=乙]… [--simulated]；',
   '  start … --preflight <答覆.json>。未回覆＝未授權，接入結論最多「有條件可接」。',
@@ -229,6 +230,12 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
    // --preflight 答覆.json: what the owner granted, so the page says 已准／沒准 per capability on this route
    if(get('--preflight')){const af=path.resolve(get('--preflight')),ans=JSON.parse(fs.readFileSync(af,'utf8')),qs=JSON.parse(fs.readFileSync(path.resolve(path.dirname(af),ans.questionsFile),'utf8')),r=resolveScope(qs,ans);
     m.scope={granted:r.scope.capabilities.map(x=>parseCapability?parseCapability(x).capability??x:x),pending:r.pending,pendingLabels:r.pendingLabels,simulated:r.simulated,answeredBy:r.answeredBy};}
+   // --target <system repo>: does the system you wire into already do this? (read-only search, before claiming a gap)
+   if(get('--target')&&command!=='route-report'){const GENERIC=/^(slide|deck|export)$/;m.targetHas=targetHas(path.resolve(get('--target')),m.toolTerms??[],{name:get('--target-name'),packages:packageNames(m.root),question:m.question});const th=m.targetHas;
+    if(m.answer&&(th.rows.length||th.uses?.length)){const ev=r=>r.evidence[0]?r.evidence[0].file+':'+r.evidence[0].line:'';const has=th.rows.filter(r=>r.status==='has');
+     const usesTxt=th.uses?.length?th.target+' 已經裝了 '+[...new Map(th.uses.map(u=>[u.name+u.version,u])).values()].slice(0,3).map(u=>u.name+' '+u.version+'（'+u.file+':'+u.line+'）').join('、')+(m.repo?.version||m.entry?.version?'，這次看的是 '+(m.entry?.version??m.repo.version):'')+'；':'';
+     const txt=usesTxt+(has.length?th.target+' 已有 '+has.map(r=>r.term.toUpperCase()+'（'+ev(r)+'）').join('、')+'，這部分不算缺口':th.target+' 沒找到同功能的模組')+([...th.gap,...th.partial].some(x=>!GENERIC.test(x))?'；真正補的是 '+[...th.partial.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase()+'（只看到接受或文件提到）'),...th.gap.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase())].slice(0,6).join('、'):'')+'（文字搜尋，見接線）';
+     m.answer.parts.target=txt;m.answer.text=m.answer.text.replace(/。?$/,'。')+txt+'。';}}
    if(m.stations&&command!=='wired')m.adapter=adapterContract(m);
    const html=command==='route-report'?path.resolve(out):get('--html')&&path.resolve(get('--html'));
    if(command!=='route-report'){noLinks(path.resolve(out));fs.writeFileSync(path.resolve(out),JSON.stringify(m,null,1)+'\n');}

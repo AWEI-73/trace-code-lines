@@ -81,6 +81,7 @@ try {
   if(process.env.TRACE_P4_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:p4Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G360_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g360Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G350_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g350Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G420_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g420Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G410_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g410Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G400_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g400Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G390_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g390Checks(root)}));process.exit(0);}
@@ -565,7 +566,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
+  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...await g420Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2872,6 +2873,94 @@ async function g380Checks(root){
   const w=await traceWired(repo,{from:'bin/mini.js',to:'parse',ast});assert(w.answer.text.startsWith('原碼接線完整'));assert(w.stations.length>=3);
   const w2=await traceWired(repo,{from:'bin/mini.js',to:'upload',ast});assert(w2.answer.text.startsWith('原碼沒接上'));
   const lib=await traceRoute(repo,{question:'呼叫它的 convert() 函式，會不會連網？',entry:'library',ast});assert.deepEqual(lib.target.units,['lib/index.js::convert']);assert(!lib.touches.route.some(t=>t.cap==='network'));
+ });
+ return checks;
+}
+
+// 1.39 tool repos: target already has / gap, capability off the route, scaffold and project trials, pnpm/tsconfig/build-output fixes.
+async function g420Checks(root){
+ const checks=[],area=join(root,'g420');const ast=await loadAst();
+ if(!ast.ok){checks.push('G420 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G420 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G420 '+name);};
+ const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body);};
+ const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
+ const {targetHas,toolTerms,directionOf}=await import('./target-has.mjs');const {inferRun,whereIs,packageNames,findEntries}=await import('./usage-route.mjs');const {adapterContract}=await import('./adapter-contract.mjs');
+ // --- a "system" repo: a DOCX converter, an inbox that only accepts .pdf, a test-only and a retired PDF converter, scratch copies ---
+ const sys=join(area,'sys');
+ put(sys,'scripts/lib/docx-text.mjs',"export const DOCX_CONVERTER={id:'sys-docx-text',version:'1.0.0'};\nexport function docxToMarkdown(b){return String(b);}\n");
+ put(sys,'scripts/lib/inbox.mjs',"export const inboxExtensions=['.md','.pdf','.docx'];\n");
+ put(sys,'scripts/deck.mjs',"const PptxGenJS=require(process.env.PPTX_MODULE);\nmodule.exports=()=>new PptxGenJS();\n");
+ put(sys,'tests/pdf-to-text.test.mjs',"export function pdfToText(){}\n");
+ put(sys,'docs/history/retired/pdf-reader.mjs',"export function readPdf(){}\n");
+ put(sys,'apps/preview/package.json','{\n  "name": "preview",\n  "private": true,\n  "dependencies": {\n    "tool-core": "1.0.0"\n  }\n}\n');
+ gitInit(sys);put(sys,'.tmp/copy/scripts/pdf-convert.mjs',"export function pdfConvert(){}\n");
+ await check('target has: a named converter = 已有; accepted extension only = 部分; test, retired and untracked scratch copies do not count; already-installed packages are found',()=>{
+  const r=targetHas(sys,['docx','pdf','epub'],{name:'Sys',packages:['tool-core'],question:'給它一份 DOCX 或 PDF，拿回 Markdown'});const by=Object.fromEntries(r.rows.map(x=>[x.term,x]));
+  assert.equal(by.docx.status,'has');assert.equal(by.docx.evidence[0].file,'scripts/lib/docx-text.mjs');
+  assert.equal(by.pdf.status,'partial',JSON.stringify(by.pdf));assert(!by.pdf.evidence.some(e=>/tests\/|retired|\.tmp/.test(e.file)));assert(by.pdf.counts.weak>=1);
+  assert.equal(by.epub.status,'gap');assert.deepEqual(r.uses.map(u=>u.name+'@'+u.version),['tool-core@1.0.0']);
+ });
+ await check('direction: PptxGenJS counts when the step must produce PPTX, not when it must read one; accepted-extension lists do not count for producing',()=>{
+  assert.equal(directionOf('pptx','產出 deck 並匯出 PDF 或 PPTX'),'w');assert.equal(directionOf('pptx','給它一份 PPTX'),'r');
+  const w=targetHas(sys,['pptx','pdf'],{question:'匯出 PPTX 或 PDF'}),r=targetHas(sys,['pptx'],{question:'給它一份 PPTX'});
+  assert.equal(w.rows.find(x=>x.term==='pptx').status,'has');assert.equal(w.rows.find(x=>x.term==='pdf').status,'gap');assert.equal(r.rows[0].status,'gap');
+ });
+ await check('tool terms: format words and Chinese task words, not the output format (markdown) or file names (package.json)',()=>{
+  const t=toolTerms(null,'給它一份 DOCX，拿回 Markdown，會不會改 package.json？要匯出 PDF、套模板');
+  assert(t.includes('docx')&&t.includes('pdf')&&t.includes('export')&&t.includes('template'),t.join());assert(!t.includes('markdown')&&!t.includes('json'),t.join());
+ });
+ // --- pnpm-style tool monorepo: CLI scaffolder (init) + a core package whose export lives in a UI file; tsconfig alias; ignored dist/ ---
+ const tr=join(area,'tool');
+ put(tr,'package.json','{"name":"tool-mono","private":true}\n');put(tr,'pnpm-workspace.yaml','packages:\n  - "packages/*"\n');put(tr,'.gitignore','dist/\nnode_modules/\n');
+ put(tr,'README.md','# tool\n\n```bash\nnpx tool-cli init my-deck\n```\n');
+ put(tr,'packages/cli/package.json','{"name":"tool-cli","version":"1.0.0","type":"module","bin":{"tool":"./dist/cli.js"}}\n');
+ put(tr,'packages/cli/src/cli.js',"import fs from 'node:fs';\nimport path from 'node:path';\nimport {spawnSync} from 'node:child_process';\nconst [cmd,dir,...rest]=process.argv.slice(2);\nif(cmd==='--help'||dir==='--help'){console.log('Usage: tool init <dir> [--no-install]');process.exit(0);}\nif(cmd!=='init'){console.error('unknown');process.exit(2);}\nif(fs.existsSync(dir)){console.error(dir+' is not empty. Pass --force');process.exit(1);}\nfs.mkdirSync(dir);fs.writeFileSync(path.join(dir,'AGENTS.md'),'# agents\\n');fs.writeFileSync(path.join(dir,'package.json'),'{}\\n');\nif(!rest.includes('--no-install')){const r=spawnSync('sleep',['30']);}\nconsole.log('created '+dir);\n");
+ put(tr,'packages/cli/dist/cli.js',"import '../src/cli.js';\n");
+ put(tr,'packages/core/package.json','{"name":"tool-core","version":"1.0.0","main":"src/index.ts"}\n');
+ put(tr,'packages/core/tsconfig.json','{\n  // comments are allowed here\n  "compilerOptions": {"paths": {"@/*": ["./src/app/*"]}}\n}\n');
+ put(tr,'packages/core/src/index.ts',"import {helper} from '@/lib/helper';\nexport function render(x: string){return helper(x);}\n");
+ put(tr,'packages/core/src/app/lib/helper.ts',"export function helper(x: string){return x;}\n");
+ put(tr,'packages/core/src/app/lib/export-pdf.ts',"export function exportPdf(){window.print();}\n");
+ put(tr,'packages/core/src/app/routes/slide.tsx',"import {exportPdf} from '../lib/export-pdf';\nexport const Menu=()=> <button onClick={exportPdf}>PDF</button>;\n");
+ put(tr,'packages/core/src/agent/claude.ts',"import {spawn} from 'node:child_process';\nexport const provider={cliCommand: 'claude'};\nexport const run=()=>spawn('claude',['-p','x']);\n");
+ gitInit(tr);fs.mkdirSync(join(tr,'packages/cli/node_modules/dep'),{recursive:true});
+ await check('npx <package> usage maps to its bin; an ignored dist/ bin is read from source; tsconfig "@/…" aliases resolve inside the repo',async()=>{
+  const fe=findEntries(tr);const b=fe.entries.find(e=>e.kind==='bin');assert.equal(b.file,'packages/cli/src/cli.js');assert.equal(b.builtFrom,'packages/cli/dist/cli.js');
+  assert(fe.usage.some(u=>u.entry==='bin:tool'&&/npx tool-cli init/.test(u.text)),JSON.stringify(fe.usage));
+  const g=buildGraph(ast,tr);const im=g.files.get('packages/core/src/index.ts').imports[0].target;assert.equal(im.file,'packages/core/src/app/lib/helper.ts',JSON.stringify(im));
+  assert(!g.files.has('packages/cli/dist/cli.js'),'ignored build output is not parsed');
+ });
+ const m=await traceRoute(tr,{question:'能不能當簡報步驟：產出 deck 並匯出 PDF？會寫哪些檔、要不要連網、要不要登入 Claude？',ast});
+ await check('capability off the route: PDF export found in a UI file (loaded by a .tsx route), named as not reachable from this entry; agent CLI launch reported as off-route',()=>{
+  const c=m.capabilities.find(x=>x.term==='pdf');assert(c&&c.file==='packages/core/src/app/lib/export-pdf.ts'&&!c.onRoute&&c.ui,JSON.stringify(m.capabilities));
+  assert(m.touches.elsewhere.some(t=>t.agentCli==='claude'),'agent cli touch');
+ });
+ await check('scaffold trial: init runs in an empty folder (pnpm per-package node_modules linked), a hang without network is reported, the offline flag from --help is retried, a second run is refused',()=>{
+  const plan=inferRun(tr,m);assert(/init my-deck$/.test(plan.run),plan.run);assert.deepEqual(plan.offlineFlags,['--no-install']);
+  const t=runTrial(tr,{run:plan.run,plan,question:m.question,timeoutMs:3000});assert(t.scaffold);
+  const g=t.cases.find(c=>c.id==='good'),a=t.cases.find(c=>c.id==='good-again'),o=t.cases.find(c=>c.id==='offline');
+  assert(g.timedOut);assert(g.changed.includes('my-deck/AGENTS.md'),g.changed.join());assert.equal(o.exit,0,o.stderr);assert.equal(a.exit,1);
+  m.trial=t;m.answer=draftAnswer(m);assert(/卡到逾時/.test(m.answer.text)&&/--no-install 就不需要網路/.test(m.answer.text)&&/要加 --force/.test(m.answer.text),m.answer.text);
+  assert(/匯出|PDF 在 packages\/core\/src\/app\/lib\/export-pdf\.ts/.test(m.answer.text));assert(/claude/.test(m.answer.text));
+  const ac=adapterContract(m);assert.equal(ac.inputs[0].name,'目標資料夾名稱');assert(ac.outputs.some(x=>/AGENTS\.md/.test(x.format)));assert(/--force/.test(ac.step.stop_if));
+ });
+ // --- a project tool with several commands (init writes AGENTS.md, docs only prints, upgrade --apply rewrites src) ---
+ const pt=join(area,'proj');
+ put(pt,'package.json','{"name":"ptool","version":"2.0.0","bin":{"ptool":"./cli.js"},"peerDependencies":{}}\n');
+ put(pt,'README.md','# ptool\n\n```bash\nnpx ptool init\nnpx ptool component Button\n```\n');
+ put(pt,'cli.js',"#!/usr/bin/env node\nconst fs=require('fs');const a=process.argv.slice(2);\nif(a.includes('--help')){if(a[0]==='upgrade')console.log('Usage: ptool upgrade\\n\\nExamples:\\n  npx ptool upgrade --from 1.0.0 --apply\\n');else console.log('Usage: ptool [command]\\n\\nCommands:\\n  init      set up\\n  component [name]  print docs\\n  upgrade   codemods\\n  help\\n');process.exit(0);}\nif(a[0]==='init'){fs.writeFileSync('AGENTS.md','x');}\nelse if(a[0]==='component'){console.log('# '+a[1]);}\nelse if(a[0]==='upgrade'){if(!a.includes('--from')){console.error('Missing required --from');process.exit(1);}if(a.includes('--apply'))fs.writeFileSync('src/App.tsx','// migrated\\n');console.log('done');}\n");
+ gitInit(pt);
+ await check('project trial: the commands the sentence names (元件→component, AGENTS.md→init, codemod→upgrade with its --help example) run in one made-up project; read-only vs writing per command',async()=>{
+  const mm=await traceRoute(pt,{question:'用 ptool 查元件文件，會動到哪些檔（AGENTS.md、codemod 改原碼）？能不能只讀？',ast});
+  const plan=inferRun(pt,mm);assert.deepEqual(plan.multi.map(x=>x.cmd),['init','component','upgrade','upgrade --apply'],JSON.stringify(plan.multi));
+  const t=runTrial(pt,{run:plan.run,plan,question:mm.question});assert(t.project);const by=Object.fromEntries(t.cases.map(c=>[c.id,c]));
+  assert.deepEqual(by.init.changed,['AGENTS.md（改）'],'AGENTS.md named in the sentence exists first, so the write shows as a change');assert.deepEqual(by.component.changed,[]);assert(by['upgrade --apply'].changed.includes('src/App.tsx（改）'));
+  mm.trial=t;mm.answer=draftAnswer(mm);assert(/只讀不寫的：`ptool component Button`/.test(mm.answer.text),mm.answer.text);assert(/`ptool upgrade --from 1\.0\.0 --apply`（src\/App\.tsx（改））/.test(mm.answer.text),mm.answer.text);
+  assert.deepEqual(packageNames(pt),['ptool']);
+ });
+ await check('HTML: 已有／缺口 table with direction and the already-installed line',()=>{
+  m.targetHas=targetHas(sys,['pdf','docx'],{name:'Sys',packages:['tool-core'],question:'匯出 PDF；給它一份 DOCX'});const h=renderRouteHtml(m);
+  assert(h.includes('Sys 已有／缺口')&&h.includes('已經在用')&&h.includes('tool-core 1.0.0')&&h.includes('產出')&&h.includes('讀進來'));
  });
  return checks;
 }
