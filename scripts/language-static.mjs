@@ -513,18 +513,11 @@ export function languageEdges(path,source,{rows,read,sourceRoots=['.'],followWra
       if(unknown||!found)gap('SUBPROCESS_TARGET_UNKNOWN',t[i].line,expression(source,t.slice(i,a.end+1)));
       gap('SUBPROCESS_CWD_ENV_UNKNOWN',t[i].line,'Literal and tail candidates do not prove runtime cwd/env or execution. '+expression(source,t.slice(i,a.end+1)));
     }
-    // Exclude lexically scoped, explicitly declared local assertion functions named require.
-    const blocks=[{start:0,end:t.length}],stack=[blocks[0]],scopeAt=[];
-    for(let k=0;k<t.length;k++){scopeAt[k]=stack.at(-1);if(t[k].kind==='string')continue;if(t[k].v==='{'){const b={start:k,end:t.length};blocks.push(b);stack.push(b);}else if(t[k].v==='}'&&stack.length>1)stack.pop().end=k;}
-    const locals=[];
-    for(let k=0;k<t.length;k++)if(['const','let','var'].includes(t[k].v)&&t[k+1]?.v==='require'&&t[k+2]?.v==='='){
-      const rhs=t.slice(k+3,k+45);const stop=rhs.findIndex(x=>x.v===';');const body=stop<0?rhs:rhs.slice(0,stop);
-      if(!body.some(x=>x.v==='createRequire')&&(body.some((x,j)=>x.v==='='&&body[j+1]?.v==='>')||body[0]?.v==='function'))locals.push(scopeAt[k]);
-    }
+    const isLocalRequire=localRequirePredicate(t);
     for(let i=0;i<t.length;i++){
       if(t[i].kind!=='name'||t[i-1]?.v==='.')continue;
       const {name,end}=dotted(t,i);
-      if((name==='require'||name==='require.resolve')&&locals.some(b=>i>b.start&&i<b.end))continue;
+      if((name==='require'||name==='require.resolve')&&isLocalRequire(i))continue;
       if(['require','require.resolve','module.require'].includes(name)&&t[end+1]?.v==='('){
         const a=callArgs(t,end+1),spec=literal(a.args[0]);
         if(spec!==null)jsEdge('STATIC_IMPORT',t[i].line,spec,{operation:name,resolutionOnly:name==='require.resolve'});
@@ -1119,4 +1112,32 @@ function annotateMultiReturns(path,source,t,gaps,context){
       g.literalReturn={function:f.name,definitionLine:f.line,returnLines:returns.map(r=>r.line),candidate:true,runtimeVerified:false};
     }
   }
+}
+
+export function localRequirePredicate(t){
+// Exclude lexically scoped, explicitly declared local assertion functions named require.
+const blocks=[{start:0,end:t.length}],stack=[blocks[0]],scopeAt=[];
+for(let k=0;k<t.length;k++){scopeAt[k]=stack.at(-1);if(t[k].kind==='string')continue;if(t[k].v==='{'){const b={start:k,end:t.length};blocks.push(b);stack.push(b);}else if(t[k].v==='}'&&stack.length>1)stack.pop().end=k;}
+const shadowFunctions=[];
+// A nested parameter named require can bind a different value than an outer local.
+function shadowBody(start){while(t[start]?.v==='\n')start++;if(t[start]?.v==='{'){const b=blocks.find(x=>x.start===start);return b?{start,end:b.end}:null;}let end=start,depth=0;for(;end<t.length;end++){const v=t[end].v;if(!depth&&[';',',','\n','}'].includes(v))break;if(['(','[','{'].includes(v))depth++;if([')',']','}'].includes(v)){if(!depth)break;depth--;}}return {start:start-1,end};}
+for(let k=0;k<t.length;k++){
+ let open=-1,body=-1,params=[];
+ if(t[k].v==='function'){open=t[k+1]?.v==='('?k+1:k+2;if(t[open]?.v!=='(')continue;const a=callArgs(t,open);params=a.args.flat();body=a.end+1;}
+ else if(t[k].kind==='name'&&t[k+1]?.v==='('&&['{','}',';','async','\n'].includes(t[k-1]?.v)){const a=callArgs(t,k+1);let n=a.end+1;while(t[n]?.v==='\n')n++;if(t[n]?.v==='{'){params=a.args.flat();body=n;}}
+ else if(t[k].v==='='&&t[k+1]?.v==='>'){body=k+2;if(t[k-1]?.v===')'){let depth=1,j=k-2;for(;j>=0;j--){if(t[j].v===')')depth++;else if(t[j].v==='('&&!--depth)break;}if(j>=0)params=t.slice(j+1,k-1);}else params=[t[k-1]];}
+ if(params.some(x=>x?.v==='require')){const r=shadowBody(body);if(r)shadowFunctions.push(r);}
+}
+const declarations=[];
+for(let k=0;k<t.length;k++)if(t[k].v==='function'&&t[k+1]?.v==='require')declarations.push({block:scopeAt[k],proved:false});
+for(let k=0;k<t.length;k++)if(['const','let','var'].includes(t[k].v)&&t[k+1]?.v==='require'){
+  if(t[k+2]?.v!=='='){declarations.push({block:scopeAt[k],proved:false});continue;}
+  const rhs=t.slice(k+3,k+45);const stop=rhs.findIndex(x=>x.v===';');const body=stop<0?rhs:rhs.slice(0,stop);
+  const block=scopeAt[k],reassigned=t.some((x,j)=>j!==k+1&&j>block.start&&j<block.end&&x.v==='require'&&!['.','const','let','var'].includes(t[j-1]?.v)&&(['=','+','-','*','/','?','|','&'].includes(t[j+1]?.v))&&(t[j+1]?.v==='='||['=','+','-'].includes(t[j+2]?.v)));
+  const value=body.filter(x=>x.v!=='\n');let arrow=false;
+  if(value[0]?.v==='('){const args=callArgs(value,0);arrow=value[args.end+1]?.v==='='&&value[args.end+2]?.v==='>';}
+  else arrow=value[0]?.kind==='name'&&value[1]?.v==='='&&value[2]?.v==='>';
+  declarations.push({block,proved:t[k].v!=='var'&&!reassigned&&!value.some(x=>x.v==='createRequire')&&(arrow||value[0]?.v==='function')});
+}
+ return i=>{if(shadowFunctions.some(b=>i>b.start&&i<b.end))return false;const visible=declarations.filter(d=>i>d.block.start&&i<d.block.end).sort((a,b)=>(a.block.end-a.block.start)-(b.block.end-b.block.start));return visible.length>0&&visible[0].proved&&!visible.slice(1).some(d=>d.block===visible[0].block);};
 }

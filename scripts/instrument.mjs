@@ -40,7 +40,7 @@ export function config(file,overrides={}){
  if(c.stdinFile!==undefined&&c.stdinFile!==null){if(typeof c.stdinFile!=='string'||!path.isAbsolute(c.stdinFile))throw Error('stdinFile must be an absolute path');c.stdinFile=path.resolve(c.stdinFile);noLinks(c.stdinFile);if(!fs.statSync(c.stdinFile).isFile())throw Error('stdinFile must be a regular file');}
  c.network??='deny';c.cwd=path.resolve(c.cwd);c.outputDirectory=path.resolve(c.outputDirectory);c.configSha256=digest(raw);return c;
 }
-export const ENVIRONMENT_ALLOWLIST=['PATH','HOME','USERPROFILE','LANG','LANGUAGE','TZ','TERM','TEMP','TMP','TMPDIR','SYSTEMROOT','WINDIR','COMSPEC','PATHEXT'];
+export const ENVIRONMENT_ALLOWLIST=['PATH','HOME','USERPROFILE','LANG','LANGUAGE','TZ','TERM','TEMP','TMP','TMPDIR','SYSTEMROOT','WINDIR','COMSPEC','PATHEXT','PYTHONUTF8','PYTHONIOENCODING'];
 export function baseEnvironment(c,env=process.env){
  if(!c.cleanEnvironment)return {...env};
  const allow=new Set([...ENVIRONMENT_ALLOWLIST,...(c.environmentAllowlist??[])].map(n=>n.toUpperCase()));

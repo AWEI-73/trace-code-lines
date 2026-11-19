@@ -2,7 +2,7 @@ import {gapList} from './gap-shape.mjs';
 import {buildFrameworkGraph} from './gas-framework.mjs';
 // Preserved MAP-2 loop and bounded path/read helpers; see references/provenance.md.
 import {createHash} from 'node:crypto';
-import {lstatSync,readFileSync} from 'node:fs';
+import {lstatSync,readFileSync,readdirSync} from 'node:fs';
 import {resolve,dirname,isAbsolute,posix} from 'node:path';
 import {isBuiltin} from 'node:module';
 import {languageEdges,jsSupplementalEdges,tokens} from './language-static.mjs';
@@ -24,6 +24,41 @@ export function readBounded(root,name,limit=8*1024*1024){
   safeName(name);const path=resolve(root,name);noLinks(path);const stat=lstatSync(path);
   if(!stat.isFile()||stat.size>limit)fail('UNBOUNDED_FILE','Evidence must be a bounded regular file');
   return readFileSync(path);
+}
+
+// Folder inventory shares the path/link/read boundary; it never opens file contents.
+export function walkDirectory(root,{paths='',nameOnly=()=>false,maxFiles=10000,maxFileBytes=8*1024*1024,maxBytes=64*1024*1024}={}){
+  root=noLinks(root);if(!lstatSync(root).isDirectory())throw Error('DIRECTORY_REQUIRED');
+  for(const n of [maxFiles,maxFileBytes,maxBytes])if(!Number.isSafeInteger(n)||n<1)throw Error('POSITIVE_LIMIT_REQUIRED');
+  const prefixes=paths?paths.split(',').map(p=>safeName(p.replaceAll('\\','/').replace(/\/$/,''))):[];
+  const selected=f=>!prefixes.length||prefixes.some(p=>f===p||f.startsWith(p+'/'));
+  const relevant=f=>selected(f)||prefixes.some(p=>p.startsWith(f+'/'));
+  const excluded=new Set(['.git','node_modules','dist','build','out','target','coverage','.next','.nuxt','.output','.cache','.turbo','.venv','venv','__pycache__']);
+  const binary=/\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|7z|rar|exe|dll|so|dylib|bin|wasm|pyc|woff2?|ttf|mp[34]|mov|sqlite3?|db|lockb)$/i;
+  const files=[],skips=new Map();let bytes=0;
+  const skip=(file,reason)=>{const row=skips.get(reason)??{reason,count:0,files:[]};row.count++;if(row.files.length<5)row.files.push(file);skips.set(reason,row);};
+  function visit(dir=''){
+    let entries;try{noLinks(resolve(root,dir));entries=readdirSync(resolve(root,dir),{withFileTypes:true}).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);}
+    catch{skip(dir||'.','目錄無法讀取；未跟隨連結。');return;}
+    for(const e of entries){
+      const file=dir?dir+'/'+e.name:e.name;if(!relevant(file))continue;
+      try{
+        safeName(file);if(e.isSymbolicLink()){skip(file,'符號連結未跟隨。');continue;}
+        if(e.name.toLowerCase()==='.git'){skip(file,'排除 Git 中繼資料（未走訪或讀取）。');continue;}
+        if(e.isDirectory()){if(excluded.has(e.name.toLowerCase()))skip(file,'排除版本庫、套件或建置目錄（計目錄數，未走訪內部）。');else visit(file);continue;}
+        if(!selected(file))continue;
+        noLinks(resolve(root,file));const stat=lstatSync(resolve(root,file));
+        if(!stat.isFile()){skip(file,'不是一般檔案。');continue;}
+        const onlyName=nameOnly(file);
+        if(!onlyName&&binary.test(file)){skip(file,'二進位副檔名未讀取內容。');continue;}
+        if(files.length>=maxFiles){skip(file,'超過檔數上限。');continue;}
+        if(!onlyName&&stat.size>maxFileBytes){skip(file,'超過單檔位元組上限。');continue;}
+        if(!onlyName&&bytes+stat.size>maxBytes){skip(file,'超過合計位元組上限。');continue;}
+        files.push(file);if(!onlyName)bytes+=stat.size;
+      }catch{skip(file,'路徑、連結或檔案無法安全核對。');}
+    }
+  }
+  visit();files.sort();return {files,skipped:[...skips.values()],bytes,limits:{maxFiles,maxFileBytes,maxBytes}};
 }
 
 // Only literal/PSScriptRoot paths; bounded nested Join-Path, never PowerShell execution.

@@ -54,3 +54,15 @@ deletePaths、anchors 的檔與 tests 先全部納入 map 根，即使超過 max
 init 若因檔數或 bytes 上限而未執行 discover-entries，discovery.status 會是 SKIPPED、reason 為 INCOMPLETE_DISCOVERY_POPULATION，blockedBy 列阻擋檔與觀測值。此時 entries 或 mapRoots 為空不能用來判定不認得某種註冊語法。可更新產出的 limits 並填入明示的 anchors／mapRoots 後執行 audit；若要重做候選探索，可呼叫既有 `initAudit(repo,newConfig,{limits})` 並使用新的設定檔名。
 
 外部收據沿用已授權 recordRoots 與題目 records；若保存的是 `{name,args,result}` 陣列，可用 `kindField: "name"`、`fields: ["name", "args.projectPath"]`、`trigger: {"name":"render_project"}` 做留存統計。selector 不會再解析 `result.content[].text` 裡的 JSON 字串，亦不由 module／artifact hash 推定原碼 commit；沒有歷史綁定就保留 UNKNOWN。接入留存紀錄不會自動升格為現版真實使用或 PASS。
+
+初始化探索對 Git repo 使用 tracked 檔案母體，與 audit 快照一致；非 Git 使用有界檔案系統回退。母體不完整時不探索，保留限制與缺口。
+
+初始化探索對 Git repo 使用 tracked 檔案母體，與 audit 快照一致；非 Git 使用有界檔案系統回退。母體不完整時不探索，保留限制與缺口。
+
+初始化探索對 Git repo 使用 tracked 檔案母體，與 audit 快照一致；非 Git 使用有界檔案系統回退。母體不完整時不探索，保留限制與缺口。
+
+初始化探索對 Git repo 使用 tracked 檔案母體，與 audit 快照一致；非 Git 使用有界檔案系統回退。母體不完整時不探索，保留限制與缺口。
+
+初始化探索對 Git repo 使用 tracked 檔案母體，與 audit 快照一致；非 Git 使用有界檔案系統回退。母體不完整時不探索，保留限制與缺口。
+
+初始化探索對 Git repo 使用 tracked 檔案母體，與 audit 快照一致；非 Git 使用有界檔案系統回退。母體不完整時不探索，保留限制與缺口。

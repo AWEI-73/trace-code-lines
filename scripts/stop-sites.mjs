@@ -1,8 +1,18 @@
 import {displayGroups,renderGroups} from './display-groups.mjs';
 // Declaration comparison only. Lexical candidates never authorize a hard block.
 import {tokens,localFunctions,callArgs} from './language-static.mjs';
-import {sha256,readBounded} from './walker.mjs';
+import {sha256,readBounded,noLinks} from './walker.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 const unique=xs=>[...new Set(xs)];
+// Effect names are review candidates, not evidence of payment or authorization.
+export function effectCategory(name){
+ if(/(?:^|\.)(?:unlink|rm|rmdir|remove|rmtree)(?:Sync)?$/.test(name))return '刪除候選';
+ if(/(?:^|\.)(?:upload|sendMail|sendMessage|publish|deploy)$|^(?:git|repository|remote)\.push$/.test(name))return '傳送或發布候選';
+ if(/(?:payments?|charges?|checkout|completions|responses|embeddings)\.(?:create|complete)$|(?:^|\.)(?:charge|purchase|pay)$/.test(name))return '付費呼叫候選';
+ return null;
+}
 const codeFile=p=>/\.(?:[cm]?[jt]s|tsx|jsx|py)$/i.test(p);
 const words=s=>String(s).replace(/([a-z])([A-Z])/g,'$1 $2').toLowerCase().split(/[^a-z0-9\u3400-\u9fff]+/).filter(Boolean);
 const stem=s=>s.replace(/(?:ations?|tion|ments?|ing|ies|ed|s)$/,'');
@@ -187,4 +197,75 @@ export function stopMaintenanceItems(comparison){
 export function renderStopComparison(c,id='stop-site-comparison'){
  if(!c)return '';
  return '<section id="'+esc(id)+'"><h2>宣告對照：阻擋點</h2><p>'+(c.inventoryOnly?'\u6c92\u6709\u5ba3\u544a\u53ef\u5c0d\u7167\uff1b\u50c5\u5217\u5019\u9078\u3002':'')+Object.entries(c.counts).map(([k,v])=>esc(stopLabels[k])+' '+v).join(' / ')+'</p><p>靜態閉包只是檔案可達上界，不代表站點已經執行。</p>'+renderGroups(displayGroups(c.sites),{labels:stopLabels,json:id.startsWith('card-')?'check-card.json':'health.json'})+'</section>';
+}
+
+// Prompt candidates share this scanner's lexer and bounded source reads.
+export function scanPromptSites(file,body,{pattern:filter}={}){
+ const imperative=/\b(?:must|never|only|do\s+not)\b|不得|禁止|只能|一律/giu;
+ const named=s=>/(?:prompt|instructions|system)/i.test(s),md=/\.md$/i.test(file),sites=[];
+ if(!md&&!codeFile(file))return sites;
+ const t=md?[]:tokens(body,file.endsWith('.py'),{regexLiterals:true}),promptTokens=new Map(),refs=new Set();
+ // Mark prompt assignments/properties/call arguments and their one-hop names.
+ for(let i=0;i<t.length;i++)if(named(t[i].v)&&['name','string'].includes(t[i].kind)&&['=',':','('].includes(t[i+1]?.v)){
+  let depth=0;
+  for(let j=i+2;j<t.length;j++){
+   const x=t[j];if(depth===0&&[';',',','}',')','\n'].includes(x.v))break;
+   promptTokens.set(j,'prompt/instructions/system context: '+t[i].v);
+   if(x.kind==='name')refs.add(x.v);
+   if(x.kind!=='string'&&x.kind!=='regex'){if(['(','[','{'].includes(x.v))depth++;if([')',']','}'].includes(x.v))depth--;}
+  }
+ }
+ const chunks=md?[{raw:body,start:0,line:1,basis:'Markdown prompt candidate (may be ordinary documentation)'}]:t.flatMap((x,i)=>{
+  if(x.kind!=='string')return [];
+  const raw=body.slice(x.start,x.end),previous=t.slice(Math.max(0,i-5),i).filter(x=>x.v!=='\n');
+  const assignment=previous.at(-1)?.v==='='?previous.at(-2)?.v:null;
+  const basis=promptTokens.get(i)??(raw.startsWith('`')&&raw.includes('\n')?'multiline template string':null)??(assignment&&refs.has(assignment)?'one-hop name referenced by prompt: '+assignment:null);
+  return basis?[{raw,start:x.start,line:x.line,basis}]:[];
+ });
+ const rx=filter?new RegExp(filter,'i'):null;
+ for(const chunk of chunks){let offset=chunk.start,line=chunk.line;
+  for(const raw of chunk.raw.split('\n')){
+   // Window around each imperative, not just the first 200 chars of a long line.
+   let lastEnd=-1;
+   for(const match of raw.matchAll(imperative)){
+    if(match.index<lastEnd)continue;
+    const start=Math.max(0,match.index-40),text=Array.from(raw.slice(start)).slice(0,200).join('');lastEnd=start+text.length;
+    if(rx&&!rx.test(file+'\n'+text))continue;
+    sites.push({file,line,column:offset-(body.lastIndexOf('\n',offset-1)+1)+start+1,text,basis:chunk.basis,sourceSha256:sha256(body),anchor:{file,line,expect:text,sha256:sha256(body)}});
+   }
+   offset+=raw.length+1;line++;
+  }
+ }
+ return sites;
+}
+export function promptInventory({root,files,pattern}){
+ root=path.resolve(root);noLinks(root);const skipped=[],groups=[],sourceReads=[];
+ if(!files){files=[];const visit=dir=>{for(const e of fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){
+  const p=path.join(dir,e.name),file=path.relative(root,p).replaceAll('\\','/');
+  if(e.isSymbolicLink()){skipped.push({file,reason:'LINK_SKIPPED'});continue;}
+  if(e.isDirectory()){if(!['.git','node_modules','.venv','venv'].includes(e.name))visit(p);}
+  else if(e.isFile()&&(codeFile(file)||/\.md$/i.test(file)))files.push(file);
+ }};visit(root);}
+ for(const file of unique(files).sort()){
+  try{const bytes=readBounded(root,file),body=bytes.toString('utf8'),sites=scanPromptSites(file,body,{pattern});sourceReads.push({file,sha256:sha256(bytes)});if(sites.length)groups.push({file,sites});}
+  catch(e){skipped.push({file,reason:e.message});}
+ }
+ return {schema:'prompt-sites-v1',root,inventoryOnly:true,status:skipped.length?'UNKNOWN':'PASS',pattern:pattern??null,count:groups.reduce((n,g)=>n+g.sites.length,0),groups,sourceReads,skipped,
+  limitations:['Lexical candidates, not proof of model delivery or a correctness verdict.','One-hop prompt names and multiline templates; computed strings, aliases and nested templates may be missed.','Markdown may be ordinary documentation; inspect the caller. Files over 8 MiB are reported as skipped.']};
+}
+export function renderPromptInventory(c){
+ if(!c)return '';
+ return '## 提示詞清冊（候選，不判對錯）\n\n'+c.groups.map(g=>'### '+g.file+'\n\n'+g.sites.map(s=>`- ${s.file}:${s.line} — ${s.basis}\n  ${JSON.stringify(s.text)}`).join('\n')).join('\n\n')+'\n\n限制：'+c.limitations.join(' ')+'\n跳過：'+JSON.stringify(c.skipped);
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+ try{
+  const args=process.argv.slice(2),value=k=>args[args.indexOf(k)+1];
+  if(args.includes('--help'))console.log('Usage: stop-sites.mjs --prompts --root repo [--pattern regex] [--out prompt-sites.json]');
+  else{
+   if(!args.includes('--prompts')||!args.includes('--root')||!value('--root'))throw Error('Use --help');
+   const c=promptInventory({root:value('--root'),pattern:args.includes('--pattern')?value('--pattern'):undefined});
+   if(args.includes('--out')){const out=path.resolve(value('--out')),rel=path.relative(c.root,out);if(!rel||rel!=='..'&&!rel.startsWith('..'+path.sep)&&!path.isAbsolute(rel))throw Error('Output must be outside inspected root');noLinks(out);fs.writeFileSync(out,JSON.stringify(c,null,2)+'\n','utf8');console.log(JSON.stringify({output:out,count:c.count,status:c.status}));}
+   else console.log(JSON.stringify(c));
+  }
+ }catch(e){console.error(e.message);process.exitCode=1;}
 }

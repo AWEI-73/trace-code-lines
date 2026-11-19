@@ -12,8 +12,10 @@ import {loadRepos,readKey,crossHops,declaredTarget,crossRules,markCross,closureM
 
 export function toolVersion(){
   const skill=fs.readFileSync(new URL('../SKILL.md',import.meta.url),'utf8');
-  const frontmatter=skill.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
-  const version=frontmatter?.match(/^version:\s*(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\s*$/m)?.[1];
+  const frontmatter=skill.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1]?.replaceAll('\r\n','\n');
+  const metadata=frontmatter?.match(/^metadata:[ \t]*\n((?:[ \t]+[^\n]*(?:\n|$)|[ \t]*\n)*)/m)?.[1];
+  const field=/^[ \t]*version:[ \t]*(["']?)(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\1[ \t]*$/m;
+  const version=metadata?.match(field)?.[2]??frontmatter?.match(/^version:[ \t]*(["']?)(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\1[ \t]*$/m)?.[2];
   if(!version)throw Error('SKILL.md requires a version field');
   return version;
 }

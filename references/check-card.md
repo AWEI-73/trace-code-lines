@@ -17,3 +17,10 @@ runnability 不由 exit 0 推斷；納入 water-source 的機器判決與原始�
 ## 1.21.0 閱讀摘要
 
 報告按「同判定、同原因、同檔案」合併，每類預設顯示 20 組，先列正式路線，再按件數排序。每組附件數、出現處數與前三個錨點；不確定按呼叫端合約、執行證據、觸發條件等缺口分小類。省略組數明列，完整清單只放 JSON，不改「壞了」計數與原判定。 體檢卡全量依據在 `check-card.json`，其他欄位的清單預覽最多三筆，並註明省略數。`--help` 不讀設定、不執行受查程式。
+
+## UNKNOWN 與提示詞候選
+
+鏈卡回答一個問題；體檢卡盤點整個 repo，不必先做整輪才能查線。
+新增 `unknowns` 陣列，每項有 question、class、cause、tried、next、understanding；`next` 為 `{action,cost}`，格式與六種類別見[對策表](unknown-playbook.md)。原有欄位中 `status:"UNKNOWN"` 的物件及 UNKNOWN 宣告也可直接附五欄；工具以外層未知為一項，不重算其內部證據缺口。
+JSON 保留原欄位，新增 unknownReview；Markdown／HTML 開頭分列影響結論的未知（含不確定與應先補做數）、不影響且僅記錄數。逐項交代是否影響、類別、原因與解釋；影響或不確定者另列試過與下一步，缺欄就提示。標示不改原判定、不拒絕輸出。
+可加 `promptSites:{files:["src/router.mjs"],pattern:"only|禁止"}`（files 省略則掃 root）；清冊併入 JSON／Markdown／HTML，按檔列候選及理由。見[提示詞清冊](stop-sites.md)。

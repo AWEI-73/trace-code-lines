@@ -7,7 +7,7 @@ import {resolve,relative,isAbsolute,dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {isBuiltin} from 'node:module';
 import {walk,readBounded,noLinks,sha256} from './walker.mjs';
-import {tokens,callArgs,localFunctions} from './language-static.mjs';
+import {tokens,callArgs,localFunctions,localRequirePredicate} from './language-static.mjs';
 import {toolVersion} from './derive-map.mjs';
 import {glob,configuration} from './boundary-rules.mjs';
 export {glob,configuration};
@@ -17,7 +17,7 @@ const compact=t=>t.filter(x=>x.v!=='\n');
 const unique=xs=>[...new Set(xs)];
 const within=(root,p)=>{const r=relative(root,p);return r===''||(!r.startsWith('..'+(process.platform==='win32'?'\\':'/'))&&r!=='..'&&!isAbsolute(r));};
 const git=(repo,args)=>execFileSync('git',['-C',repo,...args],{encoding:'utf8',env:{...process.env,GIT_OPTIONAL_LOCKS:'0'},windowsHide:true,maxBuffer:64*1024*1024});
-function endExpression(t,start){
+export function endExpression(t,start){
  let depth=0,i=start;
  for(;i<t.length;i++){
   const x=t[i];if(x.kind==='string'||x.kind==='regex')continue;
@@ -26,7 +26,7 @@ function endExpression(t,start){
   if([')',']','}'].includes(x.v))depth--;
  }return i;
 }
-function functionRanges(t,source,py){
+export function functionRanges(t,source,py){
  const ranges=localFunctions(t,source,py,true).map(f=>({...f}));
  if(py)return ranges;
  // Include anonymous functions and arrows so assignments never leak from siblings.
@@ -65,6 +65,7 @@ function anchor(file,source,start,end){
 
 export function pathSites(file,source){
  const py=file.endsWith('.py'),t=tokens(source,py,{regexLiterals:true}),ranges=functionRanges(t,source,py);
+ const localRequire=py?()=>false:localRequirePredicate(t);
  const scopes=i=>ranges.filter(f=>i>=f.start&&i<f.end).sort((a,b)=>(a.end-a.start)-(b.end-b.start));
  const scope=i=>scopes(i)[0]??null,assignments=new Map(),writes=new Map();
  for(let i=0;i<t.length;i++){
@@ -165,7 +166,7 @@ export function pathSites(file,source){
   if(t[end+1]?.v==='('){
    const a=callArgs(t,end+1);let kind,argIndices;
    if(!py&&name==='import'){kind='DYNAMIC_IMPORT';argIndices=[0];}
-   else if(!py&&name==='require'){kind='REQUIRE';argIndices=[0];}
+   else if(!py&&name==='require'&&!localRequire(i)){kind='REQUIRE';argIndices=[0];}
    else if(!py&&/(?:^|\.)(?:readFileSync|readFile)$/.test(name)){kind='DATA_READ';argIndices=[0];}
    else if(!py&&/(?:^|\.)(?:spawn|spawnSync|execFile|execFileSync|fork)$/.test(name)){kind='SPAWN';argIndices=[0,1];}
    else if(py&&/^importlib\.(?:import_module|util\.spec_from_file_location)$/.test(name)){kind='PY_IMPORTLIB';argIndices=[name.endsWith('spec_from_file_location')?1:0];}
@@ -241,12 +242,15 @@ export function boundary(config){
   const headAfter=git(r.repo,['rev-parse','HEAD']).trim(),statusAfter=git(r.repo,['status','--porcelain','--untracked-files=all']);
   integrity.push({repo:r.repo,headBefore:r.head,headAfter,statusBefore:r.status,statusAfter,hashedFiles:r.cache.size,changed,status:r.head===headAfter&&r.status===statusAfter&&!changed.length?'PASS':'FAIL'});
  }
+ const categories={CODE_LOAD:['STATIC_IMPORT','DYNAMIC_IMPORT','REQUIRE','PY_IMPORTLIB'],PROCESS:['SPAWN'],DATA_IO:['DATA_READ'],PATH_CONFIG:['PY_SYS_PATH']};
+ for(const f of findings)f.boundaryCategory=Object.entries(categories).find(([,kinds])=>kinds.includes(f.kind))?.[0]??'OTHER';
+ const categoryCounts=Object.fromEntries([...Object.keys(categories),'OTHER'].map(k=>[k,findings.filter(f=>f.boundaryCategory===k).length]));
  const counts=Object.fromEntries(['VIOLATION','DECLARED','ALLOWED','UNKNOWN'].map(k=>[k,findings.filter(r=>r.classification===k).length]));
  const scope={population:'Git tracked files; no target execution; ignored paths are not enumerated',fileCount:[...repos.values()].reduce((n,r)=>n+r.selected.length,0),zones:zones.map(z=>({name:z.name,repo:z.repo,include:z.include,files:repos.get(z.repo).selected.filter(f=>owner(z.repo,f)[0]===z)})),skippedFiles:skipped,parserGaps};
- return {schema:'trace-boundary-v1',toolVersion:toolVersion(),configurationSha256:sha256(JSON.stringify(config)),status:integrity.some(r=>r.status==='FAIL')?'STOPPED_INTEGRITY_FAILURE':counts.UNKNOWN||parserGaps.length?'PARTIAL':'PASS',counts,findings,display:displayGroups(findings,{limit:config.display?.maxGroupsPerCategory??20,productionFiles:config.productionFiles??[]}),scope,readOnly:{status:integrity.every(r=>r.status==='PASS')?'PASS':'FAIL',repos:integrity},negativeConclusion:counts.VIOLATION===0?{text:'No configured violation observed in the reported scope; gaps and skips limit this observation.',fileCount:scope.fileCount,skippedFiles:skipped.length,unknownFindings:counts.UNKNOWN,parserGaps:parserGaps.length}:null,limitations:['Static lexical evidence only; markers are configured routing signals, not evaluated paths or proof of declaration validity.','Only Git tracked source files are scanned. The existing walker supplies same-repo static resolution; cross-repo computed paths use markers.','Single-assignment lexical bindings are traced backward up to eight hops, including enclosing captures; one same-file named call level for caller arguments or a unique top-level helper return; no cross-file dataflow. Conditional assignment, syntax aliases, destructuring, runtime mutation and full AST semantics are not resolved.','Python recognizes literal importlib and sys.path spellings; aliases and unsupported computations remain parser gaps. Templates are lexical marker signals; embedded expressions are not fully parsed.','Findings can support maintenance/check-card evidence at most needs-attention; existing broken counts are unchanged. No deletion or safety verdict is supplied.']};
+ return {schema:'trace-boundary-v1',toolVersion:toolVersion(),configurationSha256:sha256(JSON.stringify(config)),status:integrity.some(r=>r.status==='FAIL')?'STOPPED_INTEGRITY_FAILURE':counts.UNKNOWN||parserGaps.length?'PARTIAL':'PASS',counts,categoryCounts,findings,display:displayGroups(findings,{limit:config.display?.maxGroupsPerCategory??20,productionFiles:config.productionFiles??[]}),scope,readOnly:{status:integrity.every(r=>r.status==='PASS')?'PASS':'FAIL',repos:integrity},negativeConclusion:counts.VIOLATION===0?{text:'No configured violation observed in the reported scope; gaps and skips limit this observation.',fileCount:scope.fileCount,skippedFiles:skipped.length,unknownFindings:counts.UNKNOWN,parserGaps:parserGaps.length}:null,limitations:['Static lexical evidence only; markers are configured routing signals, not evaluated paths or proof of declaration validity.','Only Git tracked source files are scanned. The existing walker supplies same-repo static resolution; cross-repo computed paths use markers.','Single-assignment lexical bindings are traced backward up to eight hops, including enclosing captures; one same-file named call level for caller arguments or a unique top-level helper return; no cross-file dataflow. Conditional assignment, syntax aliases, destructuring, runtime mutation and full AST semantics are not resolved.','Python recognizes literal importlib and sys.path spellings; aliases and unsupported computations remain parser gaps. Templates are lexical marker signals; embedded expressions are not fully parsed.','Findings can support maintenance/check-card evidence at most needs-attention; existing broken counts are unchanged. No deletion or safety verdict is supplied.']};
 }
 export function renderBoundaryMarkdown(result,jsonFile='boundary.json'){
- return '# 邊界檢查\n\n'+Object.entries(result.counts).map(([k,v])=>k+': '+v).join(' / ')+'\n\n'+renderGroupsMarkdown(result.display??displayGroups(result.findings),{json:jsonFile})+'\n\nStatic marker evidence; runtimeVerified=false. Full scope, gaps and integrity are retained in JSON.\n';
+ return '# 邊界檢查\n\n'+Object.entries(result.counts).map(([k,v])=>k+': '+v).join(' / ')+'\n\n'+Object.entries(result.categoryCounts??{}).map(([k,v])=>k+': '+v).join(' / ')+'\n\n'+renderGroupsMarkdown(result.display??displayGroups(result.findings),{json:jsonFile})+'\n\nStatic marker evidence; runtimeVerified=false. Full scope, gaps and integrity are retained in JSON.\n';
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
  try{

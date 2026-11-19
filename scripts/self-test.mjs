@@ -1,3 +1,11 @@
+import {scanIntegration,integrationSummary,redact,dependencies} from './integrate.mjs';
+import {initChain,buildChainCard,writeChainCard,renderChainCard} from './chain-card.mjs';
+import {startTrace,inspectTrace,traceOutput,playbooks,fillTrace} from './trace.mjs';
+import {scanSymptom,writerPattern,compareRecords} from './symptom.mjs';
+import {gitEvidence,parseHistory,summarizeHistory} from './git-evidence.mjs';
+import {reviewUnknowns} from './unknowns.mjs';
+import {scanPromptSites,promptInventory} from './stop-sites.mjs';
+import {baseEnvironment} from './instrument.mjs';
 import {deletionImpact,renderDeletionMarkdown,renderDeletionHTML,retainedAdvice} from './deletion-impact.mjs';
 import {initAudit,runAudit,auditVerdict,renderAudit} from './audit.mjs';
 import {displayGroups,renderGroups,renderGroupsMarkdown,evidenceNeeds} from './display-groups.mjs';
@@ -39,7 +47,8 @@ import {pathToFileURL} from 'node:url';
 // Synthetic regression checks, never an independent calibration of a real repo.
 import fs from 'node:fs';
 import {join,resolve,relative,isAbsolute} from 'node:path';
-import {walk,sha256} from './walker.mjs';
+import {walk,sha256,walkDirectory} from './walker.mjs';
+import {syncBuiltinESMExports} from 'node:module';
 import {classify,compareSets,analyze,parseConfigJSON} from './derive-map.mjs';
 import {languageEdges,writerCandidates,tokens,localFunctions,sameFileLiteralReturn} from './language-static.mjs';
 import {removalTrial} from './removal-trial.mjs';
@@ -64,6 +73,10 @@ const files={
   'escape.mjs':"import '../outside.mjs';\n"
 };
 try {
+  if(process.env.TRACE_P4_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:p4Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G360_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g360Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G350_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g350Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G340_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g340Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G240_ONLY){console.log(JSON.stringify({status:'PASS',checks:await g240Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G232_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g232Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G231_ONLY){console.log(JSON.stringify({status:'PASS',checks:await g231Checks(root)}));process.exit(0);}
@@ -542,7 +555,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
+  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2146,4 +2159,310 @@ async function g290Checks(root){
  fs.writeFileSync(join(plug,'dirty.txt'),'x');assert.throws(()=>analyze(cfg),/not clean/);fs.rmSync(join(plug,'dirty.txt'));
  checks.push('G290 stale target anchors, unknown repos, overlapping or dirty extra repos are refused; no rules means UNKNOWN');
  return checks;
+}
+
+function p4Checks(root){
+ const area=join(root,'p4'),repo=join(area,'repo'),checks=[];fs.mkdirSync(area);
+ const clone=fixtureSkillRepo(repo);assert.equal(clone.status,0,clone.stderr);
+ const check=(name,fn)=>{fn();checks.push('P4 '+name);};
+ const cli=(script,args)=>spawnSync(process.execPath,[fileURLToPath(new URL('./'+script+'.mjs',import.meta.url)),...args],{encoding:'utf8',windowsHide:true});
+ const input=join(area,'card.json'),file='scripts/trace.mjs',a=file+':1:import';
+ check('start reads clean dirty and rejected Git; version accepts one or two fields',()=>{
+  const c=startTrace('symptom','版本',repo);assert.match(c.version.commit,/^[a-f0-9]{40}$/);assert.equal(c.version.worktree,'乾淨');assert.equal(c.version.running,'UNKNOWN');
+  fs.writeFileSync(join(repo,'untracked.txt'),'fixture');assert.equal(startTrace('symptom','版本',repo).version.worktree,'有未提交變更');
+  const absent=startTrace('symptom','非版本庫',area);assert.equal(absent.version.commit,'UNKNOWN');assert.equal(absent.version.worktree,'UNKNOWN');assert(absent.version.reason);
+  const previous=process.env.GIT_CONFIG_COUNT;process.env.GIT_CONFIG_COUNT='invalid';
+  try{const rejected=startTrace('symptom','Git 拒絕',repo);assert.equal(rejected.version.commit,'UNKNOWN');assert(rejected.version.reason);}finally{if(previous===undefined)delete process.env.GIT_CONFIG_COUNT;else process.env.GIT_CONFIG_COUNT=previous;}
+  fillTrace(c,['--step','1','--version','52d51256']);assert.equal(c.version.commit,'52d51256');assert.equal(c.version.running,'UNKNOWN');
+  fillTrace(c,['--step','1','--version','abc|local']);assert.equal(c.version.running,'local');
+ });
+ check('positional anchors belong only to the nearest section; Markdown abbreviates hashes',()=>{
+  const c=startTrace('integrate','配對',repo),args=['--step','1','--anchor',a];
+  for(const name of ['甲','乙','丙'])args.push('--chain',name,'--anchor',a);
+  args.push('--cleared','排除','--anchor',a,'--note','跨說明仍屬前章節','--anchor',a,'--conflict','現象|方向','--anchor',a,'--verify','讀碼|已讀','--anchor',a,'--unknown','問題|not-run|缺環境|已讀|補試|Owner|尚待觀測','--anchor',a,'--decision','有條件可接','--anchor',a,'--condition','隔離','--anchor',a,'--permission','寫檔','--anchor',a,'--interface','入口|輸入|輸出|錯誤|重送','--anchor',a);
+  const errors=[];fillTrace(c,args,errors);assert.deepEqual(errors,[]);
+  assert.deepEqual(c.chain.map(r=>r.anchors.length),[1,1,1]);assert.equal(c.cleared[0].anchors.length,2);assert.equal(c.steps[0].anchors.length,1);
+  const owners=[...c.chain,...c.cleared,...c.conflicts,...c.verification,...c.unknowns,c.integration,...c.integration.conditions,...c.integration.permissions,...c.integration.interfaces,c.steps[0]];
+  assert.equal(owners.reduce((n,r)=>n+r.anchors.length,0),args.filter(x=>x==='--anchor').length);
+  assert.equal(new Set(owners.map(r=>r.anchors)).size,owners.length);
+  const card=buildChainCard(c),md=renderChainCard(card);assert.equal(card.anchorReview.status,'PASS');assert.match(card.chain[0].anchors[0].sha256,/^[a-f0-9]{64}$/);assert(!md.includes(card.chain[0].anchors[0].sha256));assert.match(md,/雜湊：[a-f0-9]{8}(?:\n|$)/);
+ });
+ check('CLI persists valid fields around a named bad flag and never reassigns rejected anchors',()=>{
+  assert.equal(cli('trace',['start','--mode','symptom','--question','部分寫入','--root',repo,'--out',input]).status,0);
+  const r=cli('trace',['fill','--card',input,'--step','1','--note','說明已寫入','--version','a|b|c','--unknown','問題|not-run|未試|已讀|補試|Owner|尚待觀測']);
+  assert.equal(r.status,0,r.stderr);assert.match(r.stderr,/--version.*提交.*收到 3 欄/);assert(r.stderr.includes('其餘合法內容已寫入'));
+  const c=JSON.parse(fs.readFileSync(input));assert.equal(c.steps[0].notes,'說明已寫入');assert.equal(c.unknowns.length,1);assert.match(c.version.commit,/^[a-f0-9]{40}$/);assert(cli('trace',['status','--card',input]).stdout.includes('未知 1 項'));
+  const errors=[];fillTrace(c,['--step','2','--chain','保留','--anchor',a,'--conflict','缺方向','--anchor',a,'--verify','讀碼|已讀','--anchor',a,'--anchor','wrong','--verison','typo','--note','後面的合法說明'],errors);
+  assert.equal(c.chain[0].anchors.length,1);assert.equal(c.conflicts.length,0);assert.equal(c.verification[0].anchors.length,1);assert.equal(c.steps[1].notes,'後面的合法說明');assert.equal(errors.length,4);
+  assert.equal(cli('trace',['fill','--card',join(area,'missing'),'--step','1']).status,1);
+ });
+ check('all help and summary commands stay bounded and preserve JSON output',()=>{
+  for(const args of [['--help'],['fill','--help']]){const r=cli('trace',args);assert.equal(r.status,0);assert(r.stdout.trim().split('\n').length<=25);for(const flag of ['mode','question','root','out','card','step','note','skip','version','chain','cleared','conflict','verify','unknown','decision','condition','permission','interface','anchor','help'])assert(r.stdout.includes('--'+flag));}
+  fs.writeFileSync(join(area,'good.json'),'{}');fs.writeFileSync(join(area,'bad.json'),'{"changed":1}');
+  const modes=[['symptom','literal',['--text','import']],['symptom','writers',['--field','version']],['symptom','compare',['--good',join(area,'good.json'),'--bad',join(area,'bad.json')]],...['recent','pickaxe','churn','cochange'].map(m=>['git-evidence',m,['--since','2000-01-01','--paths',file,'--path',file,'--text','import']]),...['surface','secrets','flows','deps'].map(m=>['integrate',m,[]])];
+  const sarif=join(area,'scan.sarif');fs.writeFileSync(sarif,JSON.stringify({runs:[{results:[{locations:[{physicalLocation:{artifactLocation:{uri:file},region:{startLine:1}}}]}]}]}));modes.push(['integrate','import-sarif',['--file',sarif]]);
+  for(const [script,mode,extra] of modes){const out=join(area,script+'-'+mode+'.json'),r=cli(script,[mode,'--summary','--root',repo,...extra,'--out',out]);assert.equal(r.status,0,r.stderr);assert(r.stdout.trim().split('\n').length<=20);assert(r.stdout.includes('省略'));assert(!r.stdout.trim().startsWith('{'));const json=JSON.parse(fs.readFileSync(out));assert(json);if(script==='git-evidence'&&(json.commits?.length||json.files?.length))assert.match(r.stdout,/:\d+/);if(script==='integrate'&&json.candidates.length)assert(json.candidates.some(x=>r.stdout.includes(x.file+':'+x.line)));if(script==='symptom'&&mode==='literal'&&json.matches.length)assert(r.stdout.includes(json.matches[0].file+':'+json.matches[0].line));}
+ });
+ check('literal ranks error statements and source first, caps at twenty with exact omissions',()=>{
+  const needle='P4_ONLY_CODE',body=[
+   `const assigned = '${needle}';`, `const misleading = 'throw ${needle}';`,
+   `fail('${needle}', 'message');`, `refuseAccess('${needle}');`, `bad_request('${needle}');`, `raise('${needle}');`,
+   `throw new Error('${needle}');`, `const e = Object.assign(\n new Error('message'),\n {code:'${needle}'}\n);`,
+   `const normal = {code:'${needle}'};`, `// throw new Error('${needle}');`,
+   ...Array.from({length:25},(_,i)=>`const code${i} = '${needle}';`)
+  ].join('\n');
+  fs.writeFileSync(join(repo,file),body);fs.writeFileSync(join(repo,'README.md'),`throw new Error('${needle}');`);fs.writeFileSync(join(repo,'scripts/self-test.mjs'),`fail('${needle}');`);
+  const r=scanSymptom('literal',{root:repo,text:needle});assert.equal(r.status,'PASS');assert.equal(r.total,37);assert.equal(r.matches.length,20);assert.equal(r.omitted,17);
+  assert.deepEqual(r.matches.slice(0,6).map(x=>[x.file,x.kind]),Array.from({length:6},()=>[file,'丟出錯誤']));assert.equal(r.matches.find(x=>x.file===file&&x.line===10)?.kind,'丟出錯誤');
+  assert(r.matches.slice(6,8).every(x=>x.kind==='丟出錯誤'&&x.file!==file));
+  for(const line of [1,2,12,13])assert.notEqual(r.matches.find(x=>x.file===file&&x.line===line)?.kind,'丟出錯誤');
+ });
+ return checks;
+}
+
+function g360Checks(root){
+ const area=join(root,'g360'),repo=join(area,'repo'),checks=[];fs.mkdirSync(area);
+ const clone=fixtureSkillRepo(repo);assert.equal(clone.status,0,clone.stderr);
+ const file='scripts/trace.mjs',put=(f,s)=>fs.writeFileSync(join(repo,f),s),scan=(m,paths=file)=>scanIntegration(m,{root:repo,paths});
+ const check=(name,fn)=>{fn();checks.push('G360 '+name);};
+ check('P3c explicit folder scans preserve masking, names-only secrets, hashes and link exclusions',()=>{
+  const dir=join(area,'archive'),outside=join(area,'outside');fs.mkdirSync(dir);fs.mkdirSync(outside);
+  const secret='FAKE_ONLY_'+ 'x'.repeat(40),secretNames=['.env','.envrc','.env.dev','credentials-backup.json','settings.local.json','id_rsa','private-key.txt','server.pem'];
+  const write=(f,b)=>{fs.mkdirSync(join(dir,f,'..'),{recursive:true});fs.writeFileSync(join(dir,f),b);};
+  write('app/main.mjs',`const data = req.body; exec(data);\nconst apiToken = '${secret}';`);write('app/package.json','{"scripts":{"postinstall":"never run"}}');
+  for(const name of secretNames)write('app/'+name,secret);
+  for(const name of ['.git','node_modules','dist','build','coverage','target','.next'])write('app/'+name+'/hidden.mjs','exec(req.body)');
+  write('app/image.png','not opened');write('app/binary.mjs',Buffer.from([1,0,2]));write('elsewhere.mjs','exec(req.body)');
+  fs.writeFileSync(join(outside,'escape.mjs'),'exec(req.body)');fs.symlinkSync(outside,join(dir,'app/link'),process.platform==='win32'?'junction':'dir');
+  const read=fs.readFileSync,attempts=[];
+  fs.readFileSync=function(p,...args){if(secretNames.some(n=>String(p)===join(dir,'app',n))){attempts.push(String(p));throw Error('SECRET_READ_FORBIDDEN');}return read.call(this,p,...args);};syncBuiltinESMExports();
+  try{
+   let hash;
+   for(const mode of ['surface','secrets','flows','deps']){
+    const r=scanIntegration(mode,{root:dir,paths:'app',noGit:true}),out=JSON.stringify(r);
+    assert.equal(r.scanned,mode==='secrets'?2:1);assert(r.candidates.length>0);assert.equal(r.scanBasis,'未依版本控制的資料夾掃描');assert.equal(r.tracked,undefined);
+    assert.deepEqual(r.nameOnlyFiles,secretNames.map(n=>'app/'+n).sort());assert(!out.includes(secret));assert(!r.contentFiles.some(f=>secretNames.includes(f.file.slice(4))));
+    assert.equal(r.fileListSha256,sha256(JSON.stringify(r.fileList)));assert.equal(r.contentManifestSha256,sha256(JSON.stringify(r.contentFiles)));
+    if(hash)assert.equal(hash,r.fileListSha256);hash=r.fileListSha256;
+    assert(!r.fileList.some(f=>/hidden|image|escape|elsewhere/.test(f)));assert(r.skipped.some(s=>s.reason.includes('符號連結')));
+    assert.deepEqual(r.limits,{maxFiles:10000,maxFileBytes:8388608,maxBytes:67108864});
+   }
+   assert.deepEqual(attempts,[]);
+  }finally{fs.readFileSync=read;syncBuiltinESMExports();}
+  const a=scanIntegration('flows',{root:dir,paths:'app',noGit:true});write('app/main.mjs','const data = req.body; exec(data);\n');const b=scanIntegration('flows',{root:dir,paths:'app',noGit:true});
+  assert.equal(a.fileListSha256,b.fileListSha256);assert.notEqual(a.contentManifestSha256,b.contentManifestSha256);
+  assert.throws(()=>scanIntegration('flows',{root:dir,noGit:true,rev:'HEAD'}));assert.throws(()=>scanIntegration('flows',{root:dir,noGit:true,paths:'../outside'}));
+ });
+ check('P3c folder limits count omissions and every zero-scan CLI explains a next step',()=>{
+  const dir=join(area,'limits');fs.mkdirSync(dir);for(const f of ['a.txt','b.txt','c.txt'])fs.writeFileSync(join(dir,f),'1234');
+  const count=walkDirectory(dir,{maxFiles:1}),bytes=walkDirectory(dir,{maxBytes:5}),single=walkDirectory(dir,{maxFileBytes:3});
+  assert.equal(count.files.length,1);assert.equal(count.skipped.find(s=>s.reason==='超過檔數上限。').count,2);
+  assert.equal(bytes.files.length,1);assert.equal(bytes.skipped.find(s=>s.reason==='超過合計位元組上限。').count,2);
+  assert.equal(single.files.length,0);assert.equal(single.skipped.find(s=>s.reason==='超過單檔位元組上限。').count,3);
+  const cli=extra=>spawnSync(process.execPath,[fileURLToPath(new URL('./integrate.mjs',import.meta.url)),...extra],{encoding:'utf8',windowsHide:true});
+  for(const mode of ['surface','secrets','flows','deps']){
+   const plain=cli([mode,'--root',dir]);assert.equal(plain.status,0);assert.equal(JSON.parse(plain.stdout).scanned,0);assert.match(plain.stderr,/不是 git repo.*--no-git/);
+   const empty=cli([mode,'--root',dir,'--no-git','--paths','missing']);assert.equal(empty.status,0);assert.equal(JSON.parse(empty.stdout).scanned,0);assert.match(empty.stderr,/請檢查/);
+  }
+  const sarif=join(area,'empty.sarif');fs.writeFileSync(sarif,'{"runs":[]}');const imported=cli(['import-sarif','--root',dir,'--file',sarif]);assert.equal(imported.status,0);assert.match(imported.stderr,/SARIF.*--root/);
+  const summary=cli(['deps','--root',dir,'--no-git','--summary']);assert.match(summary.stdout,/未依版本控制的資料夾掃描/);assert.match(summary.stdout,/請檢查/);
+  fs.writeFileSync(join(dir,'.git'),'gitdir: never-follow');assert(!walkDirectory(dir).files.includes('.git'));
+ });
+ const source=["const data = req.body;","const prompt = 'must inspect ' + data;","const modelOutput = client.responses.create(prompt);","exec(data);","fs.writeFileSync(path.join(base, data), data);","db.query('select ' + data);","callTool(modelOutput);","authorize(modelOutput);","server.listen(3000, '127.0.0.1');","spawn('cmd', ['/c', data], {shell:true});","const key = process.env.API_TOKEN;","fetch(endpoint);","// exec(req.body);","const plain = 'exec(req.body)';"].join('\n');put(file,source);
+ check('surface preserves local binding subprocess shell names and ignores string/comment calls',()=>{
+  const r=scan('surface'),listen=r.candidates.filter(c=>c.category==='監聽候選');assert.equal(r.scanned,1);assert.equal(listen.length,1);assert.equal(listen[0].binding,'127.0.0.1');assert(listen[0].local);assert(r.candidates.some(c=>c.category==='子程序候選'&&c.shell));assert(r.candidates.some(c=>c.name==='API_TOKEN'));assert(!r.candidates.some(c=>c.line===13||c.line===14));assert.deepEqual(jargonHits(integrationSummary(r).map(line=>line.replace(/^[^\n]+:\d+ — /,'')).join('\n')),[]);
+ });
+ check('named flow candidates separate both agentic directions and preserve source anchors',()=>{
+  const r=scan('flows');for(const cat of ['外部輸入到危險動作候選','外部內容進提示詞候選','模型輸出到執行工具授權候選'])assert(r.candidates.some(c=>c.category===cat));assert(r.candidates.every(c=>c.source.anchor.line>0&&c.anchor.line>0&&c.link.identifier&&['direct','one-step'].includes(c.relation)));assert(r.candidates.some(c=>c.sink==='拼接或變數查詢'));
+ });
+ check('P3b assigned request identifier and one-step flows retain anchors and bounded ordering',()=>{
+  const body=['function run(req) {','const command = req.body;','const alias = command;','exec(alias);','exec(command);','exec(command.text);','exec(`echo ${command}`);','const answer = client.responses.create(command);','callTool(answer);','authorize(answer);','}',...Array.from({length:52},(_,i)=>`function f${i}(req) { const arg = req.body; exec(arg); }`)].join('\n');put(file,body);
+  const r=scan('flows'),full=scanIntegration('flows',{root:repo,paths:file,all:true});assert.equal(r.candidates.length,50);assert.equal(r.omitted,full.candidates.length-50);assert(r.omitted>0);assert.equal(full.omitted,0);
+  assert(full.candidates.some(c=>c.link.identifier==='command'&&c.link.sourceLine===2&&c.link.sinkLine===5&&c.relation==='direct'&&c.link.scope==='same-function'));
+  assert(full.candidates.some(c=>c.link.alias==='alias'&&c.link.aliasLine===3&&c.link.sinkLine===4&&c.relation==='one-step'));
+  assert(full.candidates.some(c=>c.link.sinkLine===6&&c.link.used==='command.text'));assert(full.candidates.some(c=>c.link.sinkLine===7));
+  assert(full.candidates.some(c=>c.link.identifier==='answer'&&c.link.sinkLine===9));assert(full.candidates.some(c=>c.category==='外部內容進提示詞候選'&&c.link.sinkLine===8));
+  assert(full.candidates.every((c,i,cs)=>!i||cs[i-1].link.depth<=c.link.depth));assert(integrationSummary(r).some(s=>s.includes('零筆不代表安全')));put(file,source);
+ });
+ check('P3b unrelated fixed subprocess is cooccurrence only and function or rebinding barriers hold',()=>{
+  put(file,['function run(req) {','const data = req.body;','spawn(process.execPath, ["fixed.mjs"]);','}'].join('\n'));
+  const r=scan('flows');assert.equal(r.candidates.length,0);assert.equal(r.cooccurrenceCounts['外部輸入到危險動作候選'],1);assert.equal(r.cooccurrenceNote,'僅共現，未列出');
+  for(const body of [
+   'function a(req) { const data = req.body; } function b() { exec(data); }',
+   'const a = () => { const data = req.body; }; const b = () => { exec(data); };',
+   'function a(req) { const data = req.body; return () => exec(data); }',
+   'function a(req) { let data = req.body; data = "fixed"; exec(data); }',
+   'function a(req) { const data = req.body; exec("data"); }',
+   ['const data = req.body;',...Array(41).fill(''), 'exec(data);'].join('\n'),
+   'function a(req) { const data = req.body; const alias = data; const twice = alias; exec(twice); }',
+   'const result = client.responses.create("fixed"); spawn(process.execPath, ["fixed.mjs"]);'
+  ]){put(file,body);assert.equal(scan('flows').candidates.length,0,body);}put(file,source);
+ });
+ check('P3b stdout stderr and console writes are not file sinks',()=>{
+  put(file,['function run(req) {','const data = req.body;','process.stdout.write(data);','process.stderr.write(data);','console.log(data);','console.write(data);','}'].join('\n'));
+  const r=scan('flows');assert.equal(r.candidates.length,0);assert.equal(r.cooccurrenceCounts['外部輸入到危險動作候選'],0);assert(!scan('surface').candidates.some(c=>c.category==='寫入檔案候選'));put(file,source);
+ });
+ check('secrets and all output paths redact synthetic credentials including private-key middle lines',()=>{
+  const fake=['sk-','FAKE_ONLY_','x'.repeat(28)].join(''),body=['FAKE_PRIVATE_', 'x'.repeat(36)].join(''),account=['fake_person','example.invalid'].join('@');
+  put('README.md',`const apiToken = '${fake}';\nconsole.log(apiToken);\n-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n${account}\n`);
+  put('.env.untracked',fake);put('untracked.mjs',`const apiToken = '${fake}';`);
+  const r=scan('secrets','README.md,.env.untracked,untracked.mjs'),s=JSON.stringify(r);assert.equal(r.scanned,1);assert(r.untrackedNames.includes('.env.untracked'));assert(r.candidates.some(c=>c.category==='私鑰區塊候選'));assert(r.candidates.some(c=>c.category==='憑證進記錄候選'));assert(!s.includes(fake)&&!s.includes(body)&&!s.includes(account),'機密或帳號未遮蔽');assert(!redact(`'${fake}'`).includes(fake),'遮蔽失敗');
+  put(file,source+`\nconst system = \x60\nonly ${body}\n\x60;\nconst apiToken = '${fake}';\nexec(apiToken);`);
+  for(const mode of ['secrets','surface','flows']){const dest=join(area,mode+'.json'),r=spawnSync(process.execPath,[fileURLToPath(new URL('./integrate.mjs',import.meta.url)),mode,'--root',repo,'--paths',file,'--out',dest],{encoding:'utf8',windowsHide:true});assert.equal(r.status,0);const output=r.stdout+r.stderr+fs.readFileSync(dest,'utf8');assert(!output.includes(fake)&&!output.includes(body)&&!output.includes(account),'終端或檔案洩漏機密');}put(file,source);
+ });
+ check('Python surface and flow include external files writes public listeners and shell subprocesses',()=>{
+  const f='scripts/py-trace-run.py';put(f,"data = input()\ntext = open(data).read()\nsubprocess.run(data, shell=True)\nopen(data, 'w')\nsock.bind(('0.0.0.0', 80))\nkey = os.environ.get('API_TOKEN')\nrequests.get(url)\n");
+  const r=scan('surface',f);assert(r.candidates.some(c=>c.category==='監聽候選'&&c.broadOrUnknown));assert(r.candidates.some(c=>c.category==='寫入檔案候選'));assert(r.candidates.some(c=>c.name==='API_TOKEN'));assert(scan('flows',f).candidates.length>0);
+ });
+ check('dependency review counts lifecycle unpinned remote and lockfile candidates without execution',()=>{
+  const p=JSON.stringify({scripts:{postinstall:'never executed'},dependencies:{fixed:'1.2.3',range:'^1.0.0',remote:'git+https://example.invalid/repo'}}),r=dependencies('package.json',p);
+  assert.equal(r.filter(c=>c.category==='安裝腳本候選').length,1);assert.equal(r.filter(c=>c.category==='未釘版本相依候選').length,2);assert.equal(r.filter(c=>c.category==='網址或版本庫相依候選').length,1);assert.equal(dependencies('pnpm-lock.yaml','lockfileVersion: 9')[0].category,'鎖定檔候選');assert.equal(dependencies('requirements.txt','fixed==1.2.3\nloose>=2').length,1);
+ });
+ check('SARIF validates every location and rejects stale snippets missing and escaping paths',()=>{
+  const sarif=join(area,'result.sarif'),loc=(uri,line,text)=>({physicalLocation:{artifactLocation:{uri},region:{startLine:line,...(text?{snippet:{text}}:{})}}});
+  fs.writeFileSync(sarif,JSON.stringify({runs:[{results:[{message:{text:'untrusted discarded'},locations:[loc(file,1),loc(file,2,'not present'),loc('../escape',1),loc(file,999)]},{}]}]}));
+  const r=scanIntegration('import-sarif',{root:repo,file:sarif});assert.deepEqual(r.candidates.map(c=>c.anchorCheck),['PASS','ANCHOR_MISMATCH','UNKNOWN','UNKNOWN','UNKNOWN']);assert(!JSON.stringify(r).includes('untrusted discarded'));
+ });
+ check('fill CLI writes all five sections verifies drift and advances in at most twenty lines',()=>{
+  const input=join(area,'card.json'),cli=args=>spawnSync(process.execPath,[fileURLToPath(new URL('./trace.mjs',import.meta.url)),...args],{encoding:'utf8',windowsHide:true});
+  assert.equal(cli(['start','--mode','integrate','--question','可否接入','--root',repo,'--out',input]).status,0);
+  const r=cli(['fill','--card',input,'--step','1','--note','已讀','--anchor',file+':2:const data','--chain','入口','--conflict','現象|方向','--cleared','排除','--verify','讀碼|已讀','--unknown','禁網試接|out-of-scope|缺框架|已讀|補試接|Owner|尚待觀測']);
+  assert.equal(r.status,0);assert(r.stdout.includes('第 2 步／'));assert(r.stdout.trim().split('\n').length<=20);assert(!r.stdout.includes('第 3 步還沒有'));const c=JSON.parse(fs.readFileSync(input));assert.equal(c.steps[0].anchors[0].line,1);assert.equal(c.unknowns.length,1);assert.equal(c.conflicts.length,1);assert.equal(c.verification.length,1);assert.equal(c.cleared.length,1);
+  assert.equal(cli(['fill','--card',input,'--step','2','--skip','--note','缺執行環境']).status,0);const invalid=cli(['fill','--card',input,'--step','99']);assert.equal(invalid.status,0);assert(invalid.stderr.includes('--step'));
+ });
+ check('integration card retains manual interfaces permissions verdict unknowns and checks anchors',()=>{
+  const c=startTrace('integrate','可否接入',repo);fillTrace(c,['--step','1','--version','測試提交|未部署','--anchor',file+':1:const data','--decision','有條件可接','--condition','限縮權限','--permission','指定輸出目錄','--interface','命令列|路徑|候選|錯誤訊息|覆寫結果','--anchor',file+':1:const data']);assert.equal(c.version.commit,'測試提交');
+  const card=buildChainCard(c);assert.equal(card.anchorReview.status,'PASS');assert.equal(card.integration.interfaces.length,1);assert(renderChainCard(card).includes('⑥ 接入結論'));assert.deepEqual(jargonHits(renderChainCard(card).split('\n').filter(l=>!l.includes('比對文字：')&&!l.startsWith('- 原碼位置：')&&!l.startsWith('平台宣告草稿')).join('\n')),[]);c.integration.interfaces[0].anchors[0].expect='missing';assert.equal(buildChainCard(c).anchorReview.status,'ANCHOR_MISMATCH');
+ });return checks;
+}
+
+function g350Checks(root){
+ const checks=[],area=join(root,'g350'),repo=join(area,'repo'),input=join(area,'card.json');fs.mkdirSync(area);
+ const check=(name,fn)=>{fn();checks.push('G350 '+name);};
+ const cli=(args)=>spawnSync(process.execPath,[fileURLToPath(new URL('./trace.mjs',import.meta.url)),...args],{encoding:'utf8',windowsHide:true});
+ const clone=fixtureSkillRepo(repo);assert.equal(clone.status,0,clone.stderr);
+ const needle=['needle','甲',sha256(repo).slice(0,12)].join(' '),long='x'.repeat(5000)+"; throw Error('"+needle+"');";
+ fs.writeFileSync(join(repo,'README.md'),long+('\nconst item = {field: 1, "field": 2};\nobj["field"] = 3;\nobj.field === 4;\nconsole.log("needle 甲");\nconst value = "needle 甲";').replaceAll('needle 甲',needle));
+ fs.writeFileSync(join(repo,'untracked.txt'),needle);
+ const anchor={file:'README.md',line:1,expect:"throw Error('"+needle+"')"};
+ check('all source steps and custom mode advance without program changes',()=>{
+  assert.equal(playbooks.principles.length,10);assert.equal(playbooks.commonCauses.length,10);assert.deepEqual(Object.values(playbooks.modes).map(b=>b.steps.length),[8,8,6,8]);
+  const books={modes:{extra:{steps:[{id:'one',do:'讀來源',tool:'讀碼',stop:'找到來源',section:'鏈'}]}}};
+  const c=startTrace('extra','題',repo,books);assert.equal(inspectTrace(c,books).next,0);c.steps[0].status='done';assert.equal(inspectTrace(c,books).next,-1);
+ });
+ check('CLI creates only first step then advances and retains steps through card export',()=>{
+  const r=cli(['start','--mode','symptom','--question','為何出錯','--root',repo,'--out',input]);assert.equal(r.status,0,r.stderr);assert.equal(r.stdout.trim().split('\n').length,5);assert(!r.stdout.includes('第 2 步'));
+  const c=JSON.parse(fs.readFileSync(input));c.steps[0]={...c.steps[0],status:'done',anchors:[anchor]};fs.writeFileSync(input,JSON.stringify(c));
+  const next=cli(['next','--card',input]);assert.equal(next.status,0);assert(next.stdout.includes('第 2 步／共 8 步'));assert(next.stdout.trim().split('\n').length<=20);
+  const built=buildChainCard(c);assert.equal(built.mode,'symptom');assert.equal(built.steps[0].anchors[0].status,'PASS');assert.equal(built.steps.length,8);
+  assert.equal(cli(['status','--card',input]).stdout.trim().split('\n').length,1);
+ });
+ check('missing items skipped steps and wrong anchors advise without blocking',()=>{
+  const c=startTrace('symptom','題',repo);c.steps[0]={id:'A1',status:'skipped'};c.steps[1]={id:'A2',status:'done',anchors:[{...anchor,expect:'absent'}]};c.unknowns=[{question:'未明'}];
+  const r=traceOutput(c,'next',input);assert(r.some(s=>s.includes('第 3 步／')));assert(r.some(s=>s.includes('錨點對不上')));assert(r.some(s=>s.includes('沒交代原因')));
+  for(const v of [null,[],3,{steps:42,unknowns:'x'},{mode:'symptom',steps:[null],unknowns:[null]}]){fs.writeFileSync(input,JSON.stringify(v));assert.equal(cli(['next','--card',input]).status,0);}
+  fs.writeFileSync(input,'{');assert.equal(cli(['next','--card',input]).status,1);assert.equal(cli(['next','--card',join(area,'absent')]).status,1);
+ });
+ check('bounded human output contains no machine labels and all complete prints command',()=>{
+  for(const mode of Object.keys(playbooks.modes)){
+   const c=startTrace(mode,'題',repo);c.unknowns=Array.from({length:100},()=>({}));
+   for(let i=0;i<c.steps.length;i++){
+    const out=traceOutput(c,'next',input);assert(out.length<=20);assert.deepEqual(jargonHits(out.filter(l=>!l.startsWith('工具：')).join('\n')),[]);c.steps[i].status='done';
+   }
+   const out=traceOutput(c,'next',input);assert(out.some(l=>l.startsWith('產卡命令：')));assert(out.length<=20);
+  }
+ });
+ check('literal and writers search tracked long lines and exclude comparisons',()=>{
+  const r=scanSymptom('literal',{root:repo,text:needle});assert.equal(r.status,'PASS');assert.equal(r.matches.length,3);assert.deepEqual(r.matches.map(x=>x.kind),['丟出錯誤','寫記錄','賦值']);assert(r.matches[0].column>5000);assert(r.matches.every(x=>Array.from(x.text).length<=200));
+  const w=scanSymptom('writers',{root:repo,field:'field'});assert.equal(w.matches.filter(x=>x.file==='README.md').length,3);assert(w.matches.every(x=>x.candidate&&x.kind==='寫入候選'));assert.equal([...('x'.repeat(5000)+' obj.field = 3').matchAll(writerPattern('field'))].length,1);
+ });
+ check('structural comparison preserves missing versus null arrays pointers and omission counts',()=>{
+  const a={empty:null,list:[1,2],nested:{x:1},'a/b':1},b={list:[1,3,4],nested:{x:2},'a/b':2};const d=compareRecords(a,b);assert.equal(d.total,5);assert(d.differences.some(r=>r.key==='/a~1b'));assert(d.differences.some(r=>r.kind==='only-good'&&r.good===null));
+  const many=compareRecords({},Object.fromEntries(Array.from({length:45},(_,i)=>['k'+i,i])));assert.equal(many.differences.length,40);assert.equal(many.omitted,5);assert.equal(compareRecords({},[]).total,1);
+ });
+ check('history parser and aggregation preserve hashes filenames ratios and large-commit exclusion',()=>{
+  const rows=parseHistory(['','TRACE_COMMIT','abc','2026-01-01','title','\nmain','with\nnewline','','TRACE_COMMIT','def','2026-01-02','title2','\nmain',''].join('\0'));
+  assert.equal(rows[0].hash,'abc');assert.deepEqual(rows[0].files,['main','with\nnewline']);
+  rows.push({hash:'big',files:['main',...Array.from({length:30},(_,i)=>'f'+i)]});
+  const c=summarizeHistory(rows,'cochange',{path:'main'});assert.equal(c.eligibleCommits,2);assert.equal(c.ignoredLargeCommits,1);assert.equal(c.files[0].ratio,0.5);assert.deepEqual(c.files[0].commits,['abc']);
+  const churn=summarizeHistory(rows,'churn',{top:1});assert.equal(churn.files[0].file,'main');assert.equal(churn.files[0].count,3);
+ });
+ check('read-only history yields actual commits or explained unknown including shallow history',()=>{
+  assert.equal(gitEvidence('churn',{root:area}).status,'UNKNOWN');
+  for(const mode of ['recent','pickaxe','churn','cochange']){const r=gitEvidence(mode,{root:repo,paths:'SKILL.md',text:'1.34.0',path:'SKILL.md',since:'2000-01-01'});assert.equal(r.status,'PASS',JSON.stringify(r));assert.match(r.head,/^[a-f0-9]{40}$/);}
+  const head=gitEvidence('churn',{root:repo}).head;fs.writeFileSync(join(repo,'.git','shallow'),head+'\n');const r=gitEvidence('churn',{root:repo});assert.equal(r.status,'UNKNOWN');assert(r.cause.includes('截斷'));assert(r.unknowns[0].class);
+ });
+ return checks;
+}
+
+function g340Checks(root){
+ const checks=[],area=join(root,'g340'),repo=join(area,'repo'),out=join(area,'out');fs.mkdirSync(repo,{recursive:true});fs.mkdirSync(out);
+ const check=(name,fn)=>{fn();checks.push('G340 '+name);},put=(name,body)=>fs.writeFileSync(join(repo,name),body,'utf8');
+ const cli=(script,args)=>spawnSync(process.execPath,[fileURLToPath(new URL(script,import.meta.url)),...args],{encoding:'utf8',env:process.env,windowsHide:true});
+ // Plain newline source is intentional: line drift must be exercised physically.
+ put('main.mjs',['// header','export const run = 1;','// end','// fourth','export const tail = 2;'].join('\n'));
+ const source=fs.readFileSync(join(repo,'main.mjs'),'utf8');
+ const a={file:'main.mjs',line:2,expect:'export const run'},base={...initChain('為何等待？',repo),chain:[{label:'入口',anchor:a}],unknowns:[]};
+ check('init CLI and exact anchors produce both usable chain artifacts',()=>{
+  const input=join(area,'input.json'),r=cli('./chain-card.mjs',['--init','--question',base.question,'--root',repo,'--out',input]);assert.equal(r.status,0,r.stderr);const init=JSON.parse(fs.readFileSync(input));assert.equal(init.question,base.question);assert(!('sha256' in init.chain[0].anchor));
+  fs.writeFileSync(input,JSON.stringify(base));const built=cli('./chain-card.mjs',['--config',input,'--out',out]);assert.equal(built.status,0,built.stderr);
+  const c=JSON.parse(fs.readFileSync(join(out,'chain-card.json')));assert.equal(c.anchorReview.status,'PASS');assert.equal(c.chain[0].anchors[0].sha256,sha256(source));assert.equal((fs.readFileSync(join(out,'chain-card.md'),'utf8').match(/^## /gm)??[]).length,5);
+ });
+ check('unique plus/minus three drift corrects, stale/missing/ambiguous anchors still deliver',()=>{
+  const rows=[{...a,line:5},{file:'main.mjs',line:2,expect:'export const tail'}, {...a,line:6},{file:'absent.mjs',line:1,expect:'x'},{file:'../outside',line:1,expect:'x'}];
+  const c=writeChainCard({...base,chain:rows.map(anchor=>({label:'站',anchor})),conflicts:[{severity:'low',phenomenon:'推論',direction:'讀碼'},{severity:'high',phenomenon:'較嚴重',direction:'核對',anchor:a}]},out);
+  assert.deepEqual(c.chain.slice(0,2).map(r=>[r.anchors[0].line,r.anchors[0].corrected]),[[2,true],[5,true]]);assert.equal(c.anchorReview.mismatches.length,3);assert.equal(c.conflicts[0].severity,'high');assert.equal(c.conflicts[1].basis,'無錨點：推論');assert(renderChainCard(c).indexOf('錨點不符')<renderChainCard(c).indexOf('## ①'));
+  put('repeat.mjs','x\nnone\nx');assert.equal(buildChainCard({...base,chain:[{label:'重複',anchor:{file:'repeat.mjs',line:2,expect:'x'}}]}).anchorReview.mismatches.length,1);
+ });
+ check('UNKNOWN review annotates both cards without changing original verdicts',()=>{
+  const items=[{question:'cheap',class:'not-run',cause:'未試',tried:'未試',next:{action:'read',cost:'免費讀取'},understanding:'沒有線索'},{question:'isolation',class:'not-run',cause:'未跑',next:{action:'run',cost:'隔離試跑'}},{question:'lost',class:'evidence-lost',cause:'原檔遺失',tried:'已查',next:{action:'決定保留策略',cost:'Owner'},understanding:'沒有線索'},{question:'missing'},{class:'invented',cause:'x'}];
+  const review=reviewUnknowns(items);assert.deepEqual([review.counts.unexplained,review.counts.shouldDoFirst,review.counts.invalidClass],[1,2,1]);assert.equal(buildChainCard({...base,unknowns:items}).unknownReview.counts.total,5);
+  const c=buildCard({root:repo,unknowns:items,inputs:{status:'UNKNOWN',class:'owner-only',cause:'缺決定',tried:'已問',next:{action:'答覆',cost:'Owner'},understanding:'沒有線索'}});assert.equal(c.inputs.status,'UNKNOWN');assert(c.unknownReview.items.some(x=>x.location==='card.inputs'&&x.cause==='缺決定'));assert(renderCardMarkdown(c).includes('應先補做'));assert(renderCardSection(c).includes('未交代原因'));assert.equal(c.unknowns.length,5);
+ });
+ check('P5 unrelated unknown is record-only with no follow-up or reminder; seven/eight fields work',()=>{
+  const row={question:'線上是哪版',class:'not-run',cause:'本題只問原碼修正',understanding:'未觀測部署；不推定線上版本',affects:'no'},c={...base,mode:'symptom',unknowns:[row]};
+  const r=reviewUnknowns([row]);assert.deepEqual(r.items[0].missing,[]);assert.deepEqual(r.items[0].flags,[]);assert.equal(r.counts.shouldDoFirst,0);assert.deepEqual(inspectTrace(c).flags,[]);
+  const declaration=buildCard({root:repo,declarations:[row]}).unknownReview.items.find(r=>r.location==='card.declarations.0');assert.equal(declaration.affects,'no');assert(!declaration.flags.includes('應先補做'));
+  const text=renderChainCard(buildChainCard(c));assert(text.includes('會不會改變本題結論：不會'));assert(text.includes('— 僅記錄'));assert(!text.includes('下一步：'));assert(!text.includes('欄位未齊'));
+  const input=join(area,'p5-fill.json');fs.writeFileSync(input,JSON.stringify(startTrace('symptom','原碼是否修正？',repo)));
+  const seven='缺證據|not-run|未試|已讀|補試|免費讀取|尚待觀測',args=['fill','--card',input,'--step','1'];
+  for(const suffix of ['', '|yes','|no','|unsure'])args.push('--unknown',seven+suffix);
+  const filled=cli('./trace.mjs',args);assert.equal(filled.status,0,filled.stderr);assert.equal(filled.stderr,'');
+  const saved=JSON.parse(fs.readFileSync(input)),rows=reviewUnknowns(saved.unknowns).items;assert.deepEqual(saved.unknowns.map(r=>r.affects),[undefined,'yes','no','unsure']);
+  assert(rows[0].missing.includes('affects'));assert(rows[0].flags.includes('應先補做'));assert(!rows[2].flags.includes('應先補做'));assert(!inspectTrace(saved).flags.some(s=>s.includes('未知第 3 項')));
+  const errors=[];fillTrace(saved,['--step','1','--unknown',seven+'|invalid'],errors);assert.equal(errors.length,1);assert.equal(saved.unknowns.length,4);
+ });
+ check('P5 summaries separate affecting unknowns from records and preserve paid limits',()=>{
+  const row={class:'not-run',cause:'未試',tried:'未試',next:{action:'讀取',cost:'免費讀取'},understanding:'尚待觀測'},items=[{...row,question:'影響且便宜',affects:'yes'},{...row,question:'不影響',affects:'no'},{...row,question:'影響但付費',affects:'yes',next:{action:'留待處理',cost:'付費模型'}}];
+  const review=reviewUnknowns(items);assert.deepEqual([review.counts.affecting,review.counts.recordOnly,review.counts.shouldDoFirst],[2,1,1]);assert(!review.items[2].flags.includes('應先補做'));
+  const fields=Object.fromEntries(['entries','inputs','outputs','sideEffects','cost','tools','runnability'].map(k=>[k,{status:'PASS'}]));
+  const card=buildCard({root:repo,...fields,unknowns:items}),summary='影響結論的未知 2 項（含不確定；其中應先補做 1 項）；不影響結論、僅記錄 1 項';
+  for(const text of [renderChainCard(buildChainCard({...base,unknowns:items})),renderCardMarkdown(card),renderCardSection(card)]){assert(text.includes(summary));assert(!/affects|not-run|UNKNOWN_CLASS_INVALID/.test(text));assert(text.includes('留待處理'));}
+  const absent=buildChainCard({...base,unknowns:[{...row,question:'未填影響'}]});assert.equal(absent.unknownReview.counts.affecting,1);assert(renderChainCard(absent).includes('欄位未齊：會不會改變本題結論'));assert(renderChainCard(absent).includes('會不會改變本題結論：不確定'));
+  for(const affects of ['yes','no','unsure',undefined])for(const cost of ['免費讀取','隔離試跑','付費模型','Owner'])for(const kind of ['not-run','model-choice'])assert.equal(reviewUnknowns([{...row,affects,class:kind,next:{action:'確認',cost}}]).counts.shouldDoFirst,Number(affects!=='no'&&kind==='not-run'&&['免費讀取','隔離試跑'].includes(cost)));
+ });
+ check('prompt candidates retain long-line restrictions, multiline and named contexts, not comments',()=>{
+  const long="const rules='"+'a'.repeat(5000)+" only shelf A may open; never auto-send';\nconst prompt=rules;\nconst instructions='不得偷換';\nconst system='do not send';\nconst plain='never unrelated';\n// const prompt='must comment';\nconst text=\x60\n只能回報\n\x60;";
+  const body=long,rows=scanPromptSites('router.mjs',body);
+  assert(rows.some(r=>r.line===1&&r.text.includes('only shelf A may open; never auto-send')));assert(rows.some(r=>r.text.includes('不得')));assert(rows.some(r=>r.text.includes('do not')));assert(rows.some(r=>r.line===8&&r.text.includes('只能')));assert(rows.every(r=>Array.from(r.text).length<=200&&!r.text.includes('unrelated')&&!r.text.includes('comment')));
+  assert.equal(scanPromptSites('router.mjs',body,{pattern:'auto-send'}).length,1);assert.equal(scanPromptSites('prompt.md','必須遵守\n一律回報')[0].line,2);put('router.mjs',body);
+ });
+ check('prompt CLI and check-card integration group candidates and expose bounded failures',()=>{
+  const dest=join(out,'prompts.json'),r=cli('./stop-sites.mjs',['--prompts','--root',repo,'--pattern','auto-send','--out',dest]);assert.equal(r.status,0,r.stderr);const c=JSON.parse(fs.readFileSync(dest));assert.equal(c.count,1);assert.equal(c.groups[0].file,'router.mjs');
+  const card=buildCard({root:repo,promptSites:{files:['router.mjs'],pattern:'auto-send'}});assert.equal(card.promptSites.count,1);assert(renderCardMarkdown(card).includes('auto-send'));assert(renderCardSection(card).includes('auto-send'));
+  assert.equal(promptInventory({root:repo,files:['absent.mjs']}).status,'UNKNOWN');for(const script of ['./chain-card.mjs','./stop-sites.mjs'])assert.equal(cli(script,['--help']).status,0);
+ });
+ check('clean environment preserves Python UTF-8 settings while removing credentials',()=>{
+  const env=baseEnvironment({cleanEnvironment:true},{PATH:'x',PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8',OPENAI_API_KEY:'do-not-keep',PYTHONPATH:'do-not-keep'});assert.equal(env.PYTHONUTF8,'1');assert.equal(env.PYTHONIOENCODING,'utf-8');assert(!('OPENAI_API_KEY' in env));assert(!('PYTHONPATH' in env));
+ });
+ return checks;
+}
+// The installed skill is not a git repository; build the fixture repo from files instead of cloning.
+function fixtureSkillRepo(repo){
+ const root=fileURLToPath(new URL('..',import.meta.url));
+ const skipped=new Set(['.git','node_modules']);
+ fs.cpSync(root,repo,{recursive:true,filter:src=>!src.split(/[\\/]/).some(part=>skipped.has(part))});
+ const git=args=>spawnSync('git',['-c','core.autocrlf=false','-c','user.name=fixture','-c','user.email=fixture@example.invalid',...args],{cwd:repo,encoding:'utf8',windowsHide:true});
+ for(const args of [['init','-q'],['add','-A'],['commit','-q','-m','fixture']]){const r=git(args);if(r.status!==0)return r;}
+ return {status:0,stderr:''};
 }
