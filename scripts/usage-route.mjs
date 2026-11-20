@@ -486,7 +486,9 @@ function linkModules(root,copy){const walk=(rel,depth)=>{let es;try{es=fs.readdi
 export const trialStats={spawned:0};
 export function netIsolation(){if(process.env.TCL_TEST_NO_UNSHARE==='1')return false;return spawnSync('unshare',['-rn','true']).status===0;}
 export const NO_ISOLATION='這台不能建立網路隔離（unshare -rn 失敗），為了不連外，試跑不跑（不會改用沒隔離的方式跑）';
-function isoCopy(root){const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo');copyRepo(root,copy);linkModules(root,copy);return {base,copy};}
+// No isolation: an empty scratch folder only (execIso refuses to run anything), never a copy of the repo.
+function isoCopy(root){const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo');if(!netIsolation())return {base,copy};
+ try{copyRepo(root,copy);linkModules(root,copy);}catch(e){fs.rmSync(base,{recursive:true,force:true});throw e;}return {base,copy};}
 function trialEnv(iso,cmd0){const env={PATH:process.env.PATH,HOME:iso.base,TMPDIR:iso.base,LANG:'C.UTF-8',NO_COLOR:'1',TERM:'dumb',COLUMNS:'100'};
  if(/(^|\/)python[\d.]*$/.test(cmd0))Object.assign(env,{PYTHONPATH:pyPathOf(iso.copy),PYTHONDONTWRITEBYTECODE:'1',PYTHONNOUSERSITE:'1',PYTHONIOENCODING:'utf-8'});return env;}
 function execIso(iso,root,cmd,{timeoutMs=8000,input}={}){

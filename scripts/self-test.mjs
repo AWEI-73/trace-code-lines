@@ -38,7 +38,7 @@ import {languageChecks} from './language-self-test.mjs';
 import {census} from './record-census.mjs';
 import {classifyRecords} from './classify-records.mjs';
 import {loadAst,buildGraph,reach as astReach,touches as astTouches,targetsOf as astTargets} from './ast-graph.mjs';
-import {traceRoute,traceWired,runTrial,astPreflight,draftAnswer} from './usage-route.mjs';
+import {traceRoute,traceWired,runTrial,astPreflight,draftAnswer,netIsolation as hasNetIsolation} from './usage-route.mjs';
 import {renderRouteHtml} from './route-report-html.mjs';
 import {preflight as tracePreflight,resolveScope,scopeNotes,answersFrom,relayText,parseCapability} from './preflight.mjs';
 import {buildReport as buildTraceReport,safeSnippet} from './trace-report-html.mjs';
@@ -2597,6 +2597,8 @@ function g370Checks(root){
 async function g410Checks(root){
  const checks=[],area=join(root,'g410');const ast=await loadAst();
  if(!ast.ok){checks.push('G410 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
+ if(!hasNetIsolation()){checks.push('G410 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G410 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G410 '+name);};
  const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body);};
  const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
@@ -2671,6 +2673,8 @@ async function g400Checks(root){
  const checks=[],area=join(root,'g400'),py=join(area,'fwpy'),js=join(area,'fwjs');
  const ast=await loadAst();
  if(!ast.ok){checks.push('G400 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
+ if(!hasNetIsolation()){checks.push('G400 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G400 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G400 '+name);};
  const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body,'utf8');};
  const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
@@ -2757,6 +2761,8 @@ async function g390Checks(root){
  const put=(name,body)=>fs.writeFileSync(join(repo,name),body,'utf8');
  const ast=await loadAst();
  if(!ast.ok||!ast.langs.python){checks.push('G390 SKIPPED: tree-sitter-python not installed');return checks;}
+ // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
+ if(!hasNetIsolation()){checks.push('G390 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G390 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G390 '+name);};
  put('pyproject.toml','[project]\nname = "minipy"\nversion = "0.1.0"\n\n[project.scripts]\nminipy = "minipy.cli:main"\n');
  put('README.md','# minipy\n\n```\n$ cat input.csv | minipy > out.json\n```\n');
@@ -2816,6 +2822,8 @@ async function g380Checks(root){
  const put=(name,body)=>fs.writeFileSync(join(repo,name),body,'utf8');
  const ast=await loadAst();
  if(!ast.ok){checks.push('G380 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
+ if(!hasNetIsolation()){checks.push('G380 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
  const check=async(name,fn)=>{await fn();checks.push('G380 '+name);};
  put('package.json','{"name":"mini","version":"1.0.0","bin":{"mini":"./bin/mini.js"},"main":"./lib/index.js"}\n');
  put('README.md','# mini\n\n```\n$ mini input.csv > out.json\n```\n');
@@ -2882,6 +2890,8 @@ async function g380Checks(root){
 async function g420Checks(root){
  const checks=[],area=join(root,'g420');const ast=await loadAst();
  if(!ast.ok){checks.push('G420 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
+ if(!hasNetIsolation()){checks.push('G420 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G420 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G420 '+name);};
  const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body);};
  const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
@@ -2971,6 +2981,8 @@ async function g420Checks(root){
 async function g430Checks(root){
  const checks=[],area=join(root,'g430');const ast=await loadAst();
  if(!ast.ok){checks.push('G430 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
+ if(!hasNetIsolation()){checks.push('G430 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G430 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G430 '+name);};
  const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body);};
  const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
