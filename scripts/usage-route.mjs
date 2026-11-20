@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {uiTrialSentence} from './ui-trial.mjs';
 import {toolTerms} from './target-has.mjs';
 import {formatOf,fakeInput,MARKER} from './fake-inputs.mjs';
 import {pyEntries} from './ast-python.mjs';
@@ -16,10 +17,15 @@ const readJson=p=>{try{return JSON.parse(fs.readFileSync(p,'utf8'));}catch{retur
 const git=(root,args)=>{const r=spawnSync('git',['--no-pager','-C',root,...args],{encoding:'utf8',env:{...process.env,GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0'}});return r.status===0?r.stdout.trim():null;};
 const lineOf=(body,needle)=>{const i=body.indexOf(needle);return i<0?null:body.slice(0,i).split('\n').length;};
 const BIG_REPO=+(process.env.TRACE_BIG_REPO??3000);
-// a workspace package plus every workspace package it depends on (dependencies / peer / optional, not dev), by folder
-function wsClosure(root,start){const byName=new Map();const dirs=subPackages(root);for(const d of dirs){const p=readJson(path.join(root,d,'package.json'));if(p?.name)byName.set(p.name,d);}
- const seen=new Set([start]),q=[start];while(q.length){const d=q.shift(),p=readJson(path.join(root,d,'package.json'))??{};for(const n of Object.keys({...p.dependencies,...p.peerDependencies,...p.optionalDependencies})){const x=byName.get(n);if(x&&!seen.has(x)){seen.add(x);q.push(x);}}}
- return [...seen];}
+// big repos: files that are not the program itself (tests, stories, fixtures, examples, benchmarks) are not parsed
+export const BIG_SKIP=/(^|\/)(tests?|__tests__|spec|__mocks__|fixtures?|__fixtures__|e2e|stories|\.storybook|examples?|benchmarks?|test-utils)(\/|$)|\.(test|spec|stories|bench)\.[cm]?[jt]sx?$/i;
+// a workspace package plus the workspace packages it depends on (dependencies / peer / optional, not dev), by folder.
+// With codeOnly, a dependency counts only when the program files (not tests / templates / assets) of a kept package import it.
+function wsClosure(root,start,{codeOnly=false,files=null}={}){const byName=new Map();const dirs=subPackages(root);for(const d of dirs){const p=readJson(path.join(root,d,'package.json'));if(p?.name)byName.set(p.name,d);}
+ const dropped=[];const imports=(d,name)=>{if(!codeOnly)return true;const esc=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),re=new RegExp('(?:from\\s*|require\\(\\s*|import\\(\\s*|import\\s+)[\'"`]'+esc+'(?:/[^\'"`]*)?[\'"`]');
+  for(const f of files){if(!f.startsWith(d+'/')||BIG_SKIP.test(f.slice(d.length+1))||!JS_FILE.test(f))continue;let t;try{t=fs.readFileSync(path.join(root,f),'utf8');}catch{continue;}if(re.test(t))return true;}return false;};
+ const seen=new Set([start]),q=[start];while(q.length){const d=q.shift(),p=readJson(path.join(root,d,'package.json'))??{};for(const n of Object.keys({...p.dependencies,...p.peerDependencies,...p.optionalDependencies})){const x=byName.get(n);if(x&&!seen.has(x)){if(imports(d,n)){seen.add(x);q.push(x);}else if(!dropped.includes(x))dropped.push(x);}}}
+ return codeOnly?{keep:[...seen],dropped}:[...seen];}
 const CMD_WORDS=[[/元件/,'component'],[/模板|範本|樣板/,'template'],[/查.{0,4}文件|參考文件/,'docs'],[/AGENTS\.md|CLAUDE\.md|初始化/,'init'],[/codemod|改原碼|升級/i,'upgrade'],[/主題/,'theme'],[/搜尋/,'search']];
 const SCAFFOLD=/^(init|create|new|scaffold|generate|setup|bootstrap|upgrade|migrate|codemod|add)$/;
 const OTHER_PROGRAM=new Set(['subprocess','network','listen','paid','real-account','worker','mcp-tools']);
@@ -71,7 +77,7 @@ export function packageNames(root){root=path.resolve(root);const out=new Set();f
  const py=pyProjectMeta(root);if(py.name)out.add(py.name);return [...out].slice(0,60);}
 // Folders (depth ≤ 3) that are their own package; tests, examples, docs, vendored and installed code skipped.
 const SUB_SKIP=/^(node_modules|\.git|\.venv|venv|\.tox|__pycache__|site-packages|vendor|third_party|dist|build|coverage|tests?|__tests__|e2e|examples?|samples?|docs?|fixtures|benchmarks?|\..*)$/;
-function subPackages(root){const out=[];const walk=(d,rel,depth)=>{if(out.length>=40)return;let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}
+export function subPackages(root){const out=[];const walk=(d,rel,depth)=>{if(out.length>=40)return;let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}
   for(const x of es){if(!x.isDirectory()||SUB_SKIP.test(x.name))continue;const r=rel?rel+'/'+x.name:x.name,p=path.join(d,x.name);
    if(['package.json','pyproject.toml','setup.py'].some(f=>fs.existsSync(path.join(p,f))))out.push(r);else if(depth<3)walk(p,r,depth+1);}};
  walk(root,'',1);return out.sort();}
@@ -83,6 +89,7 @@ export function chooseEntry(found,question='',hint=null){
  const {entries}=found;
  if(hint){if(/^bin(:|$)/.test(hint)){const n=hint.split(':')[1];return entries.find(e=>e.kind==='bin'&&(!n||e.name===n))??null;}
   if(/^(lib|library|main|api)$/.test(hint))return entries.find(e=>e.kind==='library')??null;
+  {const same=entries.find(e=>e.file===path.posix.normalize(hint));if(same)return same;}
   return {kind:/(^|\/)(bin|cli)\//.test(hint)?'bin':'file',name:path.posix.basename(hint),file:path.posix.normalize(hint),declared:{file:'(指定)',line:null}};}
  return rankEntries(found,question)[0]?.e??null;
 }
@@ -118,6 +125,7 @@ export async function traceRoute(root,{question='',entry:hint=null,fn=null,ast=n
   entryRank:hint?null:rankEntries(found,question).slice(0,8).map(r=>({kind:r.e.kind,name:r.e.name,file:r.e.file,pkg:r.e.pkg??null,score:Math.round(r.score*10)/10,why:r.why})),
   engine:ast.ok?{name:'tree-sitter',version:ast.version}:{name:'regex-fallback',reason:ast.reason},
   entry,candidates:found.entries,usage:found.usage,stations:[],touches:{route:[],elsewhere:[]},unknowns:[],trial:null,answer:null};
+ if(model.entryRank?.length>1){const dup=n=>model.entryRank.filter(r=>r.name===n).length>1;model.choices=[{what:'入口',how:'問句字、文件用法、入口種類',ranked:model.entryRank.slice(0,4).map(r=>({name:(r.kind==='bin'?'命令列 ':'函式庫 ')+r.name+(dup(r.name)?'（'+(r.pkg||r.file)+'）':''),file:r.file,score:r.score,why:r.why??[],switch:'--entry '+(r.kind==='bin'&&!dup(r.name)?'bin:'+r.name:r.file)}))}];}
  if(!entry){model.unknowns.push({kind:'no-entry',text:'package.json 沒有 bin、main 或 exports，也沒有 index.js；請用 --entry 指定入口檔。'});model.answer=draftAnswer(model);return model;}
  if(!ast.ok){model.unknowns.push({kind:'no-ast',text:ast.reason});
   // Regex fallback: whole-repo hints, not split by route (says so in the report).
@@ -125,8 +133,12 @@ export async function traceRoute(root,{question='',entry:hint=null,fn=null,ast=n
   model.answer=draftAnswer(model);return model;}
  // Big monorepo: parse only the entry's package and the workspace packages it depends on (said in unknowns).
  let files=null;{const fl=listFiles(root);const code=fl.filter(f=>JS_FILE.test(f)).length;
-  if(entry.pkg&&code>BIG_REPO){const keep=wsClosure(root,entry.pkg);files=fl.filter(f=>!f.includes('/')||keep.some(d=>f.startsWith(d+'/')));
-   model.parseScope={packages:keep,files:files.length,of:fl.length};model.unknowns.push({kind:'scope',text:'repo 很大（'+code+' 個程式檔），只解析入口所在的 '+entry.pkg+' 和它依賴的 workspace 套件（'+keep.filter(d=>d!==entry.pkg).slice(0,5).join('、')+(keep.length>6?' 等':'')+'），共 '+files.length+' 檔；其他套件裡的東西這次沒看。'});}}
+  if(entry.pkg&&code>+(process.env.TRACE_BIG_REPO??BIG_REPO)){const {keep,dropped}=wsClosure(root,entry.pkg,{codeOnly:true,files:fl});const inPkg=f=>keep.some(d=>f.startsWith(d+'/'));
+   // only the program: tests, stories, fixtures, examples and bundled templates/assets are skipped (the entry file always stays)
+   const skipped=fl.filter(f=>inPkg(f)&&JS_FILE.test(f)&&f!==entry.file&&BIG_SKIP.test(f.slice(keep.find(d=>f.startsWith(d+'/')).length+1)));const sk=new Set(skipped);
+   files=fl.filter(f=>(!f.includes('/')||inPkg(f))&&!sk.has(f));
+   model.parseScope={packages:keep,dropped,skipped:skipped.length,files:files.length,of:fl.length};
+   model.unknowns.push({kind:'scope',text:'repo 很大（'+code+' 個程式檔），只解析入口所在的 '+entry.pkg+(keep.length>1?' 和它的程式真的有 import 的 workspace 套件（'+keep.filter(d=>d!==entry.pkg).slice(0,5).join('、')+(keep.length>6?' 等':'')+'）':'')+'，共 '+files.length+' 檔'+(dropped.length?'；'+dropped.slice(0,3).join('、')+' 雖列在依賴裡，但只有測試／範本／素材在用，沒解析':'')+(skipped.length?'；測試、範例、範本、素材等 '+skipped.length+' 個檔沒解析':'')+'。其他套件裡的東西這次沒看。'});}}
  const g=buildGraph(ast,root,{files});model.stats=stats(g);model.toolTerms=toolTerms(g,question);
  const entryFile=g.files.has(entry.file)?entry.file:[...g.files.keys()].find(f=>f===entry.file.replace(/\.(m?js|cjs)$/,'.ts'))??null;
  if(!entryFile){model.unknowns.push({kind:'entry-missing',text:'入口檔 '+entry.file+' 不在 repo 裡（可能要先建置才會產生）；這條路無法追。'});model.answer=draftAnswer(model);return model;}
@@ -170,15 +182,16 @@ export async function traceRoute(root,{question='',entry:hint=null,fn=null,ast=n
     if(e.path.length>1&&docs.includes(e.path)){s+=2;why.push('文件提到');}
     if(e.path.length>1&&testText.includes(e.path)){s+=1;why.push('測試有打');}
     s-=segs.filter(x=>/^[:*{(]/.test(x)).length*0.5;return {e,s,why};};
-   const r=routeHit.map(sc).sort((a,b)=>b.s-a.s);routeHit=[r[0].e];fwOthers=r.slice(1).map(x=>({name:x.e.name,file:x.e.file,line:x.e.line,score:x.s,why:x.why}));routeHit.why=r[0].why;}
+   const r=routeHit.map(sc).sort((a,b)=>b.s-a.s);routeHit=[r[0].e];fwOthers=r.slice(1).map(x=>({name:x.e.name,file:x.e.file,line:x.e.line,score:x.s,why:x.why}));routeHit.why=r[0].why;model.choices=[...(model.choices??[]),{what:'路由',how:'問句、文件、測試',ranked:r.slice(0,4).map(x=>({name:x.e.name,file:x.e.file,line:x.e.line,score:x.s,why:x.why}))}];}
   let hit=[...cmdHit,...routeHit];
   // not named: the command the documented usage lines for these words use most (csv → `insert … --csv`)
   let how='依問句';
   if(!hit.length){const VERB=[[/寫進|存進|匯入|插入|寫入|塞進|載入/,['insert','import','load','add','upsert']],[/查詢|搜尋/,['query','search','select','find']],[/刪/,['delete','remove','drop','rm']],[/列出/,['list','ls']],[/匯出|輸出成/,['export','dump']]];
-   for(const [re,ws] of VERB)if(re.test(question))for(const w of ws){const e=fwAll.find(e=>e.kind==='command'&&e.name===w);if(e&&!hit.length){hit=[e];how='依問句動詞推論（問句的動作對到 '+w+'）';}}}
+   const vc=[];for(const [re,ws] of VERB)if(re.test(question))ws.forEach((w,i)=>{const e=fwAll.find(e=>e.kind==='command'&&e.name===w);if(e&&!vc.some(x=>x.e===e))vc.push({e,s:ws.length-i,why:['問句的動作對到 '+w+'（同義字第 '+(i+1)+' 順位）']});});
+   if(vc.length){hit=[vc[0].e];how='依問句動詞推論（問句的動作對到 '+vc[0].e.name+'）';model.choices=[...(model.choices??[]),{what:'指令',how:'問句動詞',ranked:vc.slice(0,4).map(x=>({name:x.e.name,file:x.e.file,line:x.e.line,score:x.s,why:x.why}))}];}}
   if(!hit.length){const ks=KEYWORDS(question).filter(k=>!['convert','transform','parse','process','render','compile','format','handle','json'].includes(k)&&!entry.name.toLowerCase().includes(k));const cnt=new Map();
    for(const u of found.usage.filter(u=>ks.some(k=>u.text.toLowerCase().includes(k))))for(const e of fwAll.filter(e=>e.kind==='command'))if(new RegExp('\\s'+e.name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(\\s|$)').test(u.text))cnt.set(e,(cnt.get(e)??0)+1);
-   const best=[...cnt].sort((a,b)=>b[1]-a[1])[0];if(best){hit=[best[0]];how='依文件用法推論（'+best[1]+' 行用法對到問句的字）';}}
+   const ranked=[...cnt].sort((a,b)=>b[1]-a[1]),best=ranked[0];if(best){hit=[best[0]];how='依文件用法推論（'+best[1]+' 行用法對到問句的字）';model.choices=[...(model.choices??[]),{what:'指令',how:'文件用法',ranked:ranked.slice(0,4).map(([e,n])=>({name:e.name,file:e.file,line:e.line,score:n,why:[n+' 行用法對到問句的字']}))}];}}
   if(hit.length){fwSel=new Set([...hit,...(hit.every(e=>e.kind==='command')?fwAll.filter(e=>e.kind==='route'):[]),...(g.framework??[]).filter(e=>!fwAll.includes(e))].map(e=>e.unit));model.framework={total:fwAll.length,picked:hit.map(e=>({kind:e.kind,framework:e.framework,name:e.name,file:e.file,line:e.line,unit:e.unit})),how,...(fwOthers.length?{others:fwOthers.slice(0,12),pickedWhy:routeHit.why}:{})};if(how!=='依問句')model.unknowns.push({kind:'framework',text:'問句沒點名指令，'+how+'挑了 '+hit.map(e=>e.name).join('、')+'（共 '+fwAll.length+' 個指令）；不對就在問句寫指令名。'});}
   else{model.framework={total:fwAll.length,picked:[],how:'全部'};if(fwAll.length>1)model.unknowns.push({kind:'framework',text:'repo 用 '+[...new Set(fwAll.map(e=>e.framework))].join('、')+' 註冊了 '+fwAll.length+' 個'+(fwAll.some(e=>e.kind==='route')?'路由／':'')+'指令（例：'+fwAll.slice(0,4).map(e=>e.name).join('、')+'），問句沒點名，這次全部算進路線，範圍會偏大；在問句寫指令名或路徑即可縮小。'});}}
  const parent=reach(g,roots,{classes:model.apiClasses??null,hints:KEYWORDS(question),framework:fwSel});if(parent.dynPicked)model.dynPicked=parent.dynPicked;if(parent.methodPicked){model.methodPicked=parent.methodPicked;for(const p of parent.methodPicked)model.unknowns.push({kind:'inferred',text:'有 '+p.total+' 個類別都有 '+p.method+'()，依問句只接 '+p.picked.join('、')+'（推論）；其他格式的處理不算這條路。'});}model.reachedUnits=parent.size;delete model.apiClasses;
@@ -336,17 +349,18 @@ export function draftAnswer(m){
  const off=caps.filter(c=>!c.onRoute),on=new Set(caps.filter(c=>c.onRoute).map(c=>c.term));const offT=[...new Set(off.filter(c=>!on.has(c.term)).map(c=>c.term))];
  if(offT.length&&t?.project)parts.offRoute='原碼路線只追到入口與指令分派，'+offT.slice(0,3).map(x=>x.toUpperCase()).join('、')+' 的實作（'+off.filter(c=>offT.includes(c.term)).slice(0,2).map(c=>c.file).join('、')+'）由指令執行時載入，以上各指令的行為以試跑為準';
  else if(offT.length)parts.offRoute='問句要的 '+offT.slice(0,3).map(t=>t.toUpperCase()+' 在 '+off.filter(c=>c.term===t).slice(0,2).map(c=>c.file+(c.via.length?'（由 '+c.via.slice(0,2).map(v=>v.file+':'+v.line).join('、')+' 載入'+(c.ui?'，介面功能':'')+'）':'（沒找到誰載入）')).join('、')).join('；')+'，這條入口走不到，不能當成這個步驟的輸出';
- const text=[parts.entry+'。'+parts.input+'；'+parts.output+'。',parts.touches+'。',caveats.length?caveats.join('；')+'。':parts.error+'。',parts.offRoute?parts.offRoute+'。':'',parts.agent?parts.agent+'。':'',parts.verified].join('');
+ if(m.uiTrial){parts.uiTrial=uiTrialSentence(m.uiTrial);if(parts.offRoute&&m.uiTrial.results?.some(r=>r.ok))parts.offRoute=parts.offRoute.replace('，這條入口走不到，不能當成這個步驟的輸出','，命令列入口走不到');}
+ const text=[parts.entry+'。'+parts.input+'；'+parts.output+'。',parts.touches+'。',caveats.length?caveats.join('；')+'。':parts.error+'。',parts.offRoute?parts.offRoute+'。':'',parts.uiTrial?parts.uiTrial+'。':'',parts.agent?parts.agent+'。':'',parts.verified].join('');
  return {text,parts,draft:true};
 }
 // ---- isolated trial ----
 const DEFAULT_CSV='name,age,city\nAmy,30,Taipei\nBob,25,"Kaohsiung, TW"\n';
 const DEFAULT_JSON='{"posts": [{"id": 1, "title": "hello"}, {"id": 2, "title": "world"}]}\n';
 const BAD_CSV='name,age\n"Amy,30\nBob,25,extra,,\n';
-function copyRepo(root,dest){const skip=/(^|\/)(\.git|node_modules|\.venv|venv|__pycache__)$/;const walk=(s,d)=>{fs.mkdirSync(d,{recursive:true});for(const e of fs.readdirSync(s,{withFileTypes:true})){if(skip.test(e.name)||e.isSymbolicLink())continue;const a=path.join(s,e.name),b=path.join(d,e.name);if(e.isDirectory())walk(a,b);else if(e.isFile())fs.copyFileSync(a,b);}};walk(root,dest);}
-function snapshot(dir){const m=new Map();const walk=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){if(e.name==='node_modules')continue;const p=path.join(d,e.name);if(e.isSymbolicLink()){let t='';try{t=fs.readlinkSync(p);}catch{}m.set(path.relative(dir,p)+' →link',t);}else if(e.isDirectory())walk(p);else if(e.isFile()){const st=fs.statSync(p);m.set(path.relative(dir,p),st.size+':'+st.mtimeMs);}}};walk(dir);return m;}
+export function copyRepo(root,dest){const skip=/(^|\/)(\.git|node_modules|\.venv|venv|__pycache__)$/;const walk=(s,d)=>{fs.mkdirSync(d,{recursive:true});for(const e of fs.readdirSync(s,{withFileTypes:true})){if(skip.test(e.name)||e.isSymbolicLink())continue;const a=path.join(s,e.name),b=path.join(d,e.name);if(e.isDirectory())walk(a,b);else if(e.isFile())fs.copyFileSync(a,b);}};walk(root,dest);}
+export function snapshot(dir){const m=new Map();const walk=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){if(e.name==='node_modules')continue;const p=path.join(d,e.name);if(e.isSymbolicLink()){let t='';try{t=fs.readlinkSync(p);}catch{}m.set(path.relative(dir,p)+' →link',t);}else if(e.isDirectory())walk(p);else if(e.isFile()){const st=fs.statSync(p);m.set(path.relative(dir,p),st.size+':'+st.mtimeMs);}}};walk(dir);return m;}
 // HOME and TMPDIR of a trial point at its own folder: what lands there outside the repo copy, inputs and work folders
-function snapOther(base){const m=new Map();for(const e of fs.readdirSync(base,{withFileTypes:true})){if(/^(repo|inputs|work-.*)$/.test(e.name))continue;const p=path.join(base,e.name);if(e.isDirectory()){for(const [k,v] of snapshot(p))m.set(e.name+'/'+k,v);}else if(e.isFile())m.set(e.name,String(fs.statSync(p).size));}return m;}
+export function snapOther(base){const m=new Map();for(const e of fs.readdirSync(base,{withFileTypes:true})){if(/^(repo|inputs|work-.*)$/.test(e.name))continue;const p=path.join(base,e.name);if(e.isDirectory()){for(const [k,v] of snapshot(p))m.set(e.name+'/'+k,v);}else if(e.isFile())m.set(e.name,String(fs.statSync(p).size));}return m;}
 // many files under one folder (a compile cache) → one line with a count
 const squash=list=>{const by=new Map();for(const f of list){const k=f.split('/').slice(0,2).join('/');by.set(k,(by.get(k)??0)+1);}return [...by].map(([k,n])=>n>3?k+'/…（'+n+' 個檔）':null).filter(Boolean).concat(list.filter(f=>(by.get(f.split('/').slice(0,2).join('/'))??0)<=3));};
 const diff=(a,b)=>[...b.keys()].filter(k=>a.get(k)!==b.get(k)).concat([...a.keys()].filter(k=>!b.has(k)).map(k=>k+'（被刪）'));
@@ -395,7 +409,13 @@ export function inferRun(root,m,{timeoutMs=8000}={}){
  // rank: names the sentence's words, is a concrete example (not `[options] <file>`), matches the named command, gives a file when the sentence says 檔
  const nameToks=new Set(e.name.toLowerCase().split(/[^a-z0-9]+/));const kwU=kw.filter(k=>!nameToks.has(k)&&!e.name.toLowerCase().includes(k));
  const template=t=>/\[[\w -]+\]|<[\w -]+>/.test(t),score=u=>{const t=u.text.toLowerCase();const tk=u.text.replace(/^\$\s*/,'').split(/\s+/).slice(1);return -tk.filter(x=>/^--?[a-z]/i.test(x)&&!kwU.some(k=>x.toLowerCase().includes(k))).length*1.5+(tk.some(x=>FILEISH.test(x.replace(/^['"]|['"]$/g,''))||/<[\w -]*(file|path|input|source)[\w -]*>/i.test(u.text))?3:/[|<]/.test(u.text)?0:tk.every(x=>x.startsWith('-'))?-4:0)+kwU.filter(k=>t.includes(k)).length*3+(template(u.text)?0:2)+(cmd&&u.text.includes(' '+cmd)?4:cmd?-4:0)-(new RegExp('^\\s*(\\$\\s*)?([^|]*\\|\\s*)?'+esc+'(\\s|$)').test(u.text)?0:3)+(/檔/.test(m.question??'')&&!/\|/.test(u.text)?1:0)-(/https?:\/\//.test(u.text)?3:0)-((u.text.match(/'/g)??[]).length%2||(u.text.match(/"/g)??[]).length%2?6:0)-u.text.split(/\s+/).length/8;};
- const pickUse=[...uses].filter(u=>!/\\$/.test(u.text)&&(!cmd||u.text.includes(' '+cmd+' ')||u.text.endsWith(' '+cmd))).sort((a,b)=>score(b)-score(a))[0]??null;
+ // the same score, said in words (shown in 怎麼挑的)
+ const useWhy=u=>{const t=u.text.toLowerCase(),tk=u.text.replace(/^\$\s*/,'').split(/\s+/).slice(1),w=[];const hit=kwU.filter(k=>t.includes(k));if(hit.length)w.push('有問句的字 '+hit.join('、'));
+  if(tk.some(x=>FILEISH.test(x.replace(/^['"]|['"]$/g,'')))||/<[\w -]*(file|path|input|source)[\w -]*>/i.test(u.text))w.push('給了檔案');else if(tk.every(x=>x.startsWith('-')))w.push('只有旗標');
+  if(cmd)w.push(u.text.includes(' '+cmd)?'是問句的 '+cmd+' 指令':'不是 '+cmd+' 指令');if(template(u.text))w.push('是範本寫法 <…>');
+  const ex=tk.filter(x=>/^--?[a-z]/i.test(x)&&!kwU.some(k=>x.toLowerCase().includes(k)));if(ex.length)w.push('多了旗標 '+ex.slice(0,3).join(' '));if(/https?:\/\//.test(u.text))w.push('要網址');return w;};
+ const useRank=[...uses].filter(u=>!/\\$/.test(u.text)&&(!cmd||u.text.includes(' '+cmd+' ')||u.text.endsWith(' '+cmd))).map(u=>({u,s:score(u)})).sort((a,b)=>b.s-a.s),pickUse=useRank[0]?.u??null;
+ const useChoice=useRank.length?{what:'試跑用法',how:'README／文件用法行',ranked:useRank.slice(0,4).map(x=>({name:x.u.text.slice(0,90),file:x.u.file,line:x.u.line,score:Math.round(x.s*10)/10,why:useWhy(x.u)}))}:null;
  let args=[],stdin=false;
  if(pickUse){const line=pickUse.text.replace(/^\$\s*/,'');const line2=line.replace(/<[\w -]+>/g,'X');stdin=new RegExp('\\|\\s*'+esc+'\\b').test(line2)||new RegExp(esc+'\\b[^|>]*<\\s*\\S').test(line2);
   const after=(line.split(new RegExp('(?:^|\\s)'+esc+'(?=\\s|$)'))[1]??'').replace(/<([\w -]+)>/g,(x,y)=>'⟨'+y.trim().replace(/\s+/g,'_')+'⟩').replace(/\[[^\]]*\]/g,' ');const toks=after.split(/\s*[|>]\s*/)[0].replace(/<\s*\S+/,'').trim().split(/\s+/).filter(Boolean);
@@ -422,7 +442,7 @@ export function inferRun(root,m,{timeoutMs=8000}={}){
  if(multi){why.splice(0,why.length,...why.filter(w=>/^問句提到 \d+ 個指令/.test(w)));const q2=x=>/\s/.test(x)?'"'+x+'"':x;for(const x of multi){x.run=[...base.map(q2),...x.args.map(q2)].join(' ');x.display=[shown,...x.args].join(' ');}
   const own=e.pkg?readJson(path.join(root,e.pkg,'package.json')):null;const ws=new Map(subPackages(root).map(d=>[readJson(path.join(root,d,'package.json'))?.name,d]));
   var peers=Object.fromEntries(Object.keys(own?.peerDependencies??{}).filter(n=>ws.has(n)).map(n=>[n,ws.get(n)]));}
- return {run:multi?multi[0].run:run,display:multi?multi.map(x=>x.display).join(' → '):display,...(multi?{multi,peers}:{}),why,inferred:true,...(typeof offline!=='undefined'&&offline?.length?{offlineFlags:offline}:{}),help:(sub||h).split('\n').filter(Boolean).slice(0,12).join('\n').slice(0,900),sure:!!(pickUse||flag||cmd)};
+ return {...(useChoice&&!multi?{choice:useChoice}:{}),run:multi?multi[0].run:run,display:multi?multi.map(x=>x.display).join(' → '):display,...(multi?{multi,peers}:{}),why,inferred:true,...(typeof offline!=='undefined'&&offline?.length?{offlineFlags:offline}:{}),help:(sub||h).split('\n').filter(Boolean).slice(0,12).join('\n').slice(0,900),sure:!!(pickUse||flag||cmd)};
 }
 // PYTHONPATH for the copy: every folder that holds a top-level package (root, src/, packages/x/src …)
 function pyPathOf(copy){const inits=[];const walk=(d,rel,depth)=>{if(depth>6||inits.length>4000)return;let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}
@@ -542,3 +562,8 @@ export async function astPreflight(root,{entry=null}={}){
  const findings=touches(g,parent).filter(t=>['subprocess','network','listen','paid','real-account','mcp-tools'].includes(t.cap)).map(t=>({kind:t.cap,label:t.label,file:t.file,line:t.line,lineSha256:t.lineSha256,reached:parent?t.reached:null,ctx:t.ctx,canon:t.canon}));
  return {engine:{name:'tree-sitter',version:ast.version,files:g.files.size},files:new Set(g.files.keys()),findings,entries:chosen.map(e=>({kind:e.kind,name:e.name,file:e.file,found:g.files.has(e.file)}))};
 }
+
+// a choice is close when the runner-up is within 1 point (or 15%) of the pick: say so instead of guessing silently
+export function choiceNotes(choices=[]){const out=[];for(const c of choices){const [a,b]=c.ranked;if(!a||!b)continue;const gap=a.score-b.score,close=gap<=Math.max(1,Math.abs(a.score)*0.15);c.close=close;c.gap=Math.round(gap*10)/10;
+  if(close)out.push(c.what+'挑 `'+a.name+'`（'+a.score+' 分）只贏 `'+b.name+'`（'+b.score+' 分）'+c.gap+' 分，可能挑錯；'+(c.what==='入口'?'要換就加 '+(b.switch??'--entry'):c.what==='試跑用法'?'要換就給 --run':'要換就在問句寫 '+b.name));}
+ return out;}

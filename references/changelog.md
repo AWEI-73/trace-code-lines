@@ -1,6 +1,6 @@
 # 版本記錄
 
-## 未發布：用途路線（語法樹）
+## 1.38.0-rc.1 (2026-11-20，測試中)：用途路線（語法樹）
 
 - 新增 `trace.mjs route`：從一句用途開始，自動找入口（package.json bin／exports／main、README 用法），沿語法樹追「使用說明 → 入口 → 讀取輸入 → 轉換 → 輸出 → 錯誤」，每站附檔案:行與該行雜湊；報告第一段是「怎麼接」（入口、給它、拿回、會碰、成功失敗怎麼認、已核對／待確認）。
 - `--trial`：複製 repo 到暫存資料夾，用 `unshare -rn` 關網路，以假檔跑正常、重跑、格式錯、檔案不存在四種情況，記結束碼、標準輸出是否為 JSON、有沒有改檔；結果自動寫進「怎麼接」。
@@ -29,6 +29,12 @@
 - 工具類試跑：建立專案的指令在空資料夾跑、沒網路卡住時用 `--help` 的離線旗標（`--no-install` 等）再跑、同資料夾重跑；問句點名多個指令時在同一個假專案依序跑（連上 repo 裡的 peer 套件），分只讀與會寫檔，含 `--help` 範例與 `--apply` 先預覽再套用；家目錄與暫存資料夾的寫入也記下（快取資料夾收成一行）。
 - 修正：`npx／pnpm dlx <套件>` 用法對到該套件的 bin、pnpm 每個套件的 node_modules 連進副本、tsconfig `paths` 別名、被 git 忽略的 dist／build 產物改讀原始碼（試跑仍用建置好的檔）、`const importSrc = rel => import(…rel)` 動態載入小幫手、檔名裡的 `package.json` 不再算 JSON 格式、大 monorepo 只解析入口套件與依賴的 workspace 套件。
 - 試用：open-slide（pnpm＋Vite／React 簡報框架）、Astryx（pnpm 設計系統 CLI）；markitdown 重驗 DOCX 已有。既有自測新增 G420。
+- 介面按鈕試跑（`scripts/ui-trial.mjs`、`ui-probe.mjs`、`ui-driver.py`）：問句要的格式只在介面檔時，`--trial` 同時在隔離副本開 dev 伺服器（只有本機回環、不連外），用無頭瀏覽器點按鈕（會先開 Download／Export 選單）、收下載；`window.print()` 由無頭瀏覽器代存 PDF。驗產出（PDF 頁數／頁面大小／可選取文字，PPTX 投影片數／第 1 張可編輯文字），列對外連線、副本與家目錄寫入。`--no-ui-trial`、`--ui-keep`。open-slide 實測：PDF 16 頁 1440×810 pt、PPTX 16 張可編輯。
+- 大 monorepo：依賴只在程式真的 import 才解析，測試／stories／fixtures／範例／benchmark 不解析（Astryx 路線 57.9 秒 → 約 14 秒，答案不變）；入口檔指定 `--entry 檔` 時對到同一個已知入口。
+- 已有／缺口：「已有」只算程式證據（有人 import 的模組、有人呼叫的函式、import／宣告依賴的套件）；定義了沒人用 = 部分；只在文件提到另列（弱）；`new X` 只在 X 是那個套件時算；加 SheetJS（`xlsx`）、xlsxwriter。
+- 怎麼挑的：入口、試跑用法、路由的候選、分數與理由列在報告；第二名差距 ≤ 15% 時在怎麼接點名並給換的方法；同名入口加上套件名區分。
+- 新增 `check-quotes`：草稿或抽取結果裡的數字與單位對回引用的 檔:行（別名 `` `SA` = `OS:path` ``、`:12,13`、「出處：」整段），分不在原文、單位不同、範圍一端（要看）、標明的換算。
+- 既有自測新增 G430（十例；有瀏覽器驅動時含端到端按鈕試跑）。
 
 ## 1.37.0-rc.1 (2026-11-19，測試中)
 

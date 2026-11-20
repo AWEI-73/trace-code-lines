@@ -1,7 +1,7 @@
 ---
 name: trace-code-lines
 metadata:
-  version: 1.37.0-rc.1
+  version: 1.38.0-rc.1
 description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，沿問題讀碼，交付可追到證據的鏈卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
 
@@ -29,10 +29,20 @@ node scripts/trace.mjs status --card <卡片.json>
 
 多入口與 monorepo：workspaces／packages/*（含 Python src 版面）都列為入口，依問句字、主套件或範例外掛、文件用法次數排序，只挑一個，其餘放「其他候選」（附分數與理由，`--entry` 可換）；多條路由對上時也只挑最相關的一條。外掛式註冊（多個類別都有 `convert()`）依問句挑類別（docx → DocxConverter），標成推論。試跑依問句做假檔（CSV／JSON／DOCX／PDF／HTML／Markdown），好檔帶標記字串，用來確認內容真的轉出來；在空的工作資料夾執行（repo 自己的設定檔不套用）。報告的「接線」一節是可直接拿去接的合約：呼叫方式、給什麼、拿回什麼、成功失敗訊號（含逾時建議）、動到的檔、要准的能力、還要試的未知，加一份步驟描述（輸入／輸出／execution_class／停下條件）；JSON 版在路線檔的 `adapter`。
 
-要接進自己的系統時加 `--target <系統 repo> [--target-name 名稱]`：先在目標系統找同功能的東西再談缺口（以格式／工作命名的模組或函式、做這件事的知名套件、只接受副檔名或文件提到、已經裝了這個工具的哪個版本），分「讀進來」與「產出」兩個方向，結果寫進「怎麼接」與「接線」的「已有／缺口」表；只看 git 追蹤的檔，測試、退役與暫存副本不算。問句要的能力（PDF、PPTX、codemod…）若在這條入口走不到的地方（例如介面按鈕），報告會點名檔案與誰載入它。工具類 repo：建立專案的指令（init／create…）在空資料夾跑、沒網路卡住時改用 `--help` 列的離線旗標再跑、同資料夾重跑看會不會拒絕；問句點名多個指令時（元件→component、AGENTS.md→init、codemod→upgrade，含各指令 `--help` 的範例），在同一個假專案依序各跑一次，分出只讀與會寫檔的，寫到家目錄或暫存的也列出。pnpm 每個套件的 node_modules、tsconfig `paths` 別名、被忽略的 dist／build 產物（改讀原始碼）、`importSrc('x.mjs')` 這類動態載入小幫手都會處理；很大的 monorepo 只解析入口套件與它依賴的 workspace 套件（會寫在未知）。
+要接進自己的系統時加 `--target <系統 repo> [--target-name 名稱]`：先在目標系統找同功能的東西再談缺口（以格式／工作命名的模組或函式、做這件事的知名套件、只接受副檔名或文件提到、已經裝了這個工具的哪個版本），分「讀進來」與「產出」兩個方向，結果寫進「怎麼接」與「接線」的「已有／缺口」表；只看 git 追蹤的檔，測試、退役與暫存副本不算。問句要的能力（PDF、PPTX、codemod…）若在這條入口走不到的地方（例如介面按鈕），報告會點名檔案與誰載入它。工具類 repo：建立專案的指令（init／create…）在空資料夾跑、沒網路卡住時改用 `--help` 列的離線旗標再跑、同資料夾重跑看會不會拒絕；問句點名多個指令時（元件→component、AGENTS.md→init、codemod→upgrade，含各指令 `--help` 的範例），在同一個假專案依序各跑一次，分出只讀與會寫檔的，寫到家目錄或暫存的也列出。pnpm 每個套件的 node_modules、tsconfig `paths` 別名、被忽略的 dist／build 產物（改讀原始碼）、`importSrc('x.mjs')` 這類動態載入小幫手都會處理；很大的 monorepo 只解析入口套件與它的程式真的有 import 的 workspace 套件，測試、stories、fixtures、範例、benchmark 不解析（範圍寫在未知）。
+
+介面按鈕試跑：問句要的格式只在介面檔（如 `export-pdf.ts`、`export-pptx.ts`）時，`--trial` 會同時在隔離副本開 dev 伺服器（找依賴放按鈕套件的 app 的 dev／start 指令，只開本機回環），用無頭瀏覽器（Python Playwright＋Chrome／Chromium；`TCL_PLAYWRIGHT_PYTHON` 指定 python）點按鈕（必要時先開 Download／Export 選單），收下載檔；按鈕叫瀏覽器列印時由無頭瀏覽器代替列印對話框存 PDF。產出會驗：PDF 頁數、頁面大小、有沒有可選取文字；PPTX 投影片數、第 1 張可編輯文字。對外連線、主控台錯誤、副本與家目錄的寫入都列出。沒有驅動或 dev 指令時說明原因並略過；`--no-ui-trial` 關掉，`--ui-keep <資料夾>` 保留產出。
+
+已有／缺口只把程式證據算「已有」：被別的程式 import 的同名模組、被呼叫的函式、import 或宣告依賴的知名套件；定義了沒人用算「部分」；只在文件提到的另列「只有文件提到」（弱）。入口、試跑用法、路由有多個候選時，報告「怎麼挑的」列分數與理由，第二名很接近時在怎麼接寫出來並給換的方法。
+
+草稿、抽取結果引用文件的數字時，用 `check-quotes` 把每個數字與單位對回引用的 檔:行：不在原文、單位不同（字 vs words）會失敗；只對到原文範圍的一端（22–28px 的 28px）標「要看」；標明換算（÷、換算、=）的另列。
 
 ```text
-node scripts/trace.mjs route --root <repo> --question "給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？" --out <路線.json> --html <報告.html> [--trial [--run "python3 -m 套件 --csv < {input}"]] [--preflight <答覆.json>] [--target <系統 repo> --target-name 名稱] [--entry bin:名稱|library|檔] [--fn 檔:函式]
+node scripts/trace.mjs check-quotes --map OS=<repo>,WL=<repo> 草稿.md …   # 也可 node scripts/check-quotes.mjs …；--json 給機器讀
+```
+
+```text
+node scripts/trace.mjs route --root <repo> --question "給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？" --out <路線.json> --html <報告.html> [--trial [--run "python3 -m 套件 --csv < {input}"]] [--preflight <答覆.json>] [--target <系統 repo> --target-name 名稱] [--entry bin:名稱|library|檔] [--fn 檔:函式] [--no-ui-trial] [--ui-keep <資料夾>]
 node scripts/trace.mjs wired --root <repo> --from 檔:函式 --to 函式 --out <路線.json> [--html <報告.html>]
 node scripts/trace.mjs route-report --route <路線.json> --out <報告.html> --answer "讀碼後改寫的怎麼接"
 ```
@@ -74,4 +84,4 @@ node scripts/trace.mjs report --card <卡片.json> --out <報告.html>
 
 ## 版本
 
-目前版本：1.37.0-rc.1（2026-11-19，測試中）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.38.0-rc.1（2026-11-20，測試中）。歷史見 [changelog](references/changelog.md)。

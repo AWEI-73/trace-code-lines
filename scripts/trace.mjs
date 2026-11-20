@@ -1,15 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
-import {spawnSync} from 'node:child_process';
+import {spawnSync,spawn} from 'node:child_process';
+import os from 'node:os';
 import {initChain,checkChainAnchor} from './chain-card.mjs';
 import {reviewUnknowns} from './unknowns.mjs';
 import {noLinks} from './walker.mjs';
 import {gitRead} from './git-evidence.mjs';
 import {targetHas} from './target-has.mjs';
 import {adapterContract} from './adapter-contract.mjs';
-import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun,packageNames} from './usage-route.mjs';
+import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun,packageNames,choiceNotes} from './usage-route.mjs';
 import {renderRouteHtml} from './route-report-html.mjs';
+import {uiTargets} from './ui-trial.mjs';
+import {checkQuotes} from './check-quotes.mjs';
 import {preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,relayText,capLabel,parseCapability} from './preflight.mjs';
 // Dogfood ext round: the step hints say 超出範圍 etc. in Chinese, so --unknown accepts the Chinese class labels too.
 const UNKNOWN_CLASS_ZH={'沒去跑':'not-run','沒跑':'not-run','未試跑':'not-run','由模型決定':'model-choice','單次異常':'one-off','資料沒了':'evidence-lost','要負責人判斷':'owner-only','負責人判斷':'owner-only','範圍或授權外':'out-of-scope','超出範圍':'out-of-scope'};
@@ -172,8 +175,9 @@ export function fillTrace(c,args,errors=[]){
 export function traceHelp(){
  return [
   '用法：node scripts/trace.mjs <route|wired|route-report|preflight|answer|start|fill|fix|next|status|report> [參數]；--help 顯示本說明。',
-  '用途路線：route --root <repo> --question "一句用途" --out <路線.json> [--html 報告] [--entry bin:名稱|library|檔] [--trial [--run "node bin/x {input}"]] [--preflight 答覆.json] [--target 要接進的系統 [--target-name 名稱]]；',
-  '  功能接好沒：wired --from 檔:函式 --to 函式；改寫答案：route-report --route <路線.json> --out <報告.html> --answer "…"。',  '開卡前三步：preflight --root <repo> --out <問題.json> [--paths 目錄,檔] [--mode 情境]，把印出的問題原文轉給負責人；',
+  '用途路線：route --root <repo> --question "一句用途" --out <路線.json> [--html 報告] [--entry bin:名稱|library|檔] [--trial [--run "node bin/x {input}"] [--no-ui-trial] [--ui-keep 資料夾]] [--preflight 答覆.json] [--target 要接進的系統 [--target-name 名稱]]；',
+  '  功能接好沒：wired --from 檔:函式 --to 函式；改寫答案：route-report --route <路線.json> --out <報告.html> --answer "…"。',
+  '數字出處核對：check-quotes [--root 資料夾] [--map OS=/repo,WL=/repo] 草稿.md …（每個數字與單位對回引用的 檔:行）。',  '開卡前三步：preflight --root <repo> --out <問題.json> [--paths 目錄,檔] [--mode 情境]，把印出的問題原文轉給負責人；',
   '  answer --questions <問題.json> --out <答覆.json> --by "誰回的" [--accept-defaults] [--set 1=乙]… [--simulated]；',
   '  start … --preflight <答覆.json>。未回覆＝未授權，接入結論最多「有條件可接」。',
   '走完：report --card <卡片.json> --out <報告.html>：自動跑唯讀分診、套用不查範圍、產鏈卡與單檔網頁報告。',
@@ -209,6 +213,14 @@ export function traceOutput(c,command,file,books=playbooks){
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  const [command,...args]=process.argv.slice(2),get=k=>args.includes(k)?args[args.indexOf(k)+1]:undefined;
  if(command==='--help'||args.includes('--help'))console.log(traceHelp());
+ else if(command==='check-quotes'){
+  // numbers / units quoted from docs, checked against the cited file:line (see scripts/check-quotes.mjs)
+  const map={};for(const kv of (get('--map')??'').split(',').filter(Boolean)){const [k,v]=kv.split('=');map[k]=path.resolve(v);}if(get('--root'))map['']=path.resolve(get('--root'));
+  const files=args.filter((a,i)=>i>0&&!a.startsWith('--')&&!['--map','--root'].includes(args[i-1]));if(!files.length)throw Error('用法：check-quotes [--root 資料夾] [--map OS=/repo,WL=/repo] 草稿.md …');
+  let bad=0;for(const f of files){const r=checkQuotes(fs.readFileSync(f,'utf8'),{map,file:f});bad+=r.findings.filter(x=>x.severity!=='check').length;
+   console.log(f+'：核對 '+r.checked+' 個數字'+(r.findings.length?'，'+r.findings.length+' 個要看':'，都對得上')+(r.derived.length?'（另 '+r.derived.length+' 個是標明的換算，原文沒有）':''));
+   for(const x of r.findings)console.log('  第 '+x.line+' 行 ['+({'unit-mismatch':'單位不同','range-end':'範圍的一端','not-in-source':'原文沒有'}[x.kind])+'] '+x.text);}
+  process.exitCode=bad?1:0;}
  else if(command==='route'||command==='wired'||command==='route-report'){
   try{
    const out=get('--out');if(!out)throw Error('請給 --out <路線.json 或 報告.html>。');
@@ -223,9 +235,16 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
       // no --run: infer it from README usage, --help (run in the isolated copy) and the sentence; marked 推論
       const plan=get('--run')?null:inferRun(root,m);const run=get('--run')??plan?.run;if(!run)throw Error('這個入口不是命令列，試跑要給 --run');if(plan)console.log('試跑指令（推論）：'+plan.display+'\n　依據：'+plan.why.join('；'));
       const listens=(m.touches?.route??[]).some(t=>t.cap==='listen');
+      if(plan?.choice)m.choices=[...(m.choices??[]),plan.choice];
+      // the capability the sentence wants lives only behind a UI control: open the app (loopback only) and press it, alongside the command-line trial
+      let uiJob=null;if(!args.includes('--no-ui-trial')&&uiTargets(m).length){console.log('介面試跑：'+uiTargets(m).map(t=>t.term.toUpperCase()+'（'+t.file+'）').join('、')+'，在隔離副本開 dev 伺服器，用無頭瀏覽器按按鈕（和命令列試跑同時跑）…');
+       const d=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-uijob-'));fs.writeFileSync(path.join(d,'m.json'),JSON.stringify({root:m.root,question:m.question,capabilities:m.capabilities}));
+       const ch=spawn(process.execPath,[fileURLToPath(new URL('./ui-trial.mjs',import.meta.url)),path.join(d,'m.json'),path.join(d,'r.json'),get('--ui-keep')?path.resolve(get('--ui-keep')):''],{stdio:'ignore'});uiJob={d,done:new Promise(r=>ch.on('exit',r))};}
       m.trial=runTrial(root,{run,plan,server:listens?{paths:(m.framework?.picked??[]).filter(e=>e.kind==='route'&&/GET|ALL/.test(e.method??'GET')).map(e=>e.name.replace(/^\S+\s+/,'')).filter(p=>p.startsWith('/')&&!/[:*{(]/.test(p))}:null,input:get('--fake-input')&&path.resolve(get('--fake-input')),badInput:get('--bad-input')&&path.resolve(get('--bad-input')),question:m.question});
       if(m.trial.cases.find(c=>c.id==='good')?.json?.ok){for(const s of m.stations)if(/^推論/.test(s.status))s.status+='；試跑有正確輸出，間接支持';for(const u of m.unknowns)if(u.kind==='inferred')u.text+='試跑有正確輸出，間接支持這些推論。';}
-      m.answer=draftAnswer(m);}}
+      if(uiJob){await uiJob.done;try{m.uiTrial=JSON.parse(fs.readFileSync(path.join(uiJob.d,'r.json'),'utf8'));}catch{m.uiTrial={ran:false,skipped:'介面試跑沒有留下結果'};}fs.rmSync(uiJob.d,{recursive:true,force:true});}
+      m.answer=draftAnswer(m);}
+     if(m.choices?.length&&m.answer){const cn=choiceNotes(m.choices);if(cn.length){m.answer.parts.caveats=[...(m.answer.parts.caveats??[]),...cn];m.answer.text=m.answer.text.replace(/。?$/,'。')+cn.join('；')+'。';}}}
    }
    // --preflight 答覆.json: what the owner granted, so the page says 已准／沒准 per capability on this route
    if(get('--preflight')){const af=path.resolve(get('--preflight')),ans=JSON.parse(fs.readFileSync(af,'utf8')),qs=JSON.parse(fs.readFileSync(path.resolve(path.dirname(af),ans.questionsFile),'utf8')),r=resolveScope(qs,ans);
@@ -234,7 +253,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
    if(get('--target')&&command!=='route-report'){const GENERIC=/^(slide|deck|export)$/;m.targetHas=targetHas(path.resolve(get('--target')),m.toolTerms??[],{name:get('--target-name'),packages:packageNames(m.root),question:m.question});const th=m.targetHas;
     if(m.answer&&(th.rows.length||th.uses?.length)){const ev=r=>r.evidence[0]?r.evidence[0].file+':'+r.evidence[0].line:'';const has=th.rows.filter(r=>r.status==='has');
      const usesTxt=th.uses?.length?th.target+' 已經裝了 '+[...new Map(th.uses.map(u=>[u.name+u.version,u])).values()].slice(0,3).map(u=>u.name+' '+u.version+'（'+u.file+':'+u.line+'）').join('、')+(m.repo?.version||m.entry?.version?'，這次看的是 '+(m.entry?.version??m.repo.version):'')+'；':'';
-     const txt=usesTxt+(has.length?th.target+' 已有 '+has.map(r=>r.term.toUpperCase()+'（'+ev(r)+'）').join('、')+'，這部分不算缺口':th.target+' 沒找到同功能的模組')+([...th.gap,...th.partial].some(x=>!GENERIC.test(x))?'；真正補的是 '+[...th.partial.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase()+'（只看到接受或文件提到）'),...th.gap.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase())].slice(0,6).join('、'):'')+'（文字搜尋，見接線）';
+     const txt=usesTxt+(has.length?th.target+' 已有 '+has.map(r=>r.term.toUpperCase()+'（'+ev(r)+'）').join('、')+'，這部分不算缺口':th.target+' 沒找到同功能的模組')+([...th.gap,...th.partial,...(th.docOnly??[])].some(x=>!GENERIC.test(x))?'；真正補的是 '+[...th.partial.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase()+'（程式只接受這個格式或定義了沒人用）'),...(th.docOnly??[]).filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase()+'（只有文件提到）'),...th.gap.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase())].slice(0,6).join('、'):'')+'（文字搜尋，見接線）';
      m.answer.parts.target=txt;m.answer.text=m.answer.text.replace(/。?$/,'。')+txt+'。';}}
    if(m.stations&&command!=='wired')m.adapter=adapterContract(m);
    const html=command==='route-report'?path.resolve(out):get('--html')&&path.resolve(get('--html'));

@@ -81,6 +81,7 @@ try {
   if(process.env.TRACE_P4_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:p4Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G360_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g360Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G350_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:g350Checks(root)}));process.exit(0);}
+  if(process.env.TRACE_G430_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g430Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G420_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g420Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G410_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g410Checks(root)}));process.exit(0);}
   if(process.env.TRACE_G400_ONLY){console.log(JSON.stringify({status:'PASS',synthetic:true,checks:await g400Checks(root)}));process.exit(0);}
@@ -566,7 +567,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...await g420Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
+  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...await g420Checks(root),...await g430Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2888,6 +2889,7 @@ async function g420Checks(root){
  // --- a "system" repo: a DOCX converter, an inbox that only accepts .pdf, a test-only and a retired PDF converter, scratch copies ---
  const sys=join(area,'sys');
  put(sys,'scripts/lib/docx-text.mjs',"export const DOCX_CONVERTER={id:'sys-docx-text',version:'1.0.0'};\nexport function docxToMarkdown(b){return String(b);}\n");
+ put(sys,'scripts/intake.mjs',"import {docxToMarkdown} from './lib/docx-text.mjs';\nexport const run=b=>docxToMarkdown(b);\n");
  put(sys,'scripts/lib/inbox.mjs',"export const inboxExtensions=['.md','.pdf','.docx'];\n");
  put(sys,'scripts/deck.mjs',"const PptxGenJS=require(process.env.PPTX_MODULE);\nmodule.exports=()=>new PptxGenJS();\n");
  put(sys,'tests/pdf-to-text.test.mjs',"export function pdfToText(){}\n");
@@ -2961,6 +2963,132 @@ async function g420Checks(root){
  await check('HTML: 已有／缺口 table with direction and the already-installed line',()=>{
   m.targetHas=targetHas(sys,['pdf','docx'],{name:'Sys',packages:['tool-core'],question:'匯出 PDF；給它一份 DOCX'});const h=renderRouteHtml(m);
   assert(h.includes('Sys 已有／缺口')&&h.includes('已經在用')&&h.includes('tool-core 1.0.0')&&h.includes('產出')&&h.includes('讀進來'));
+ });
+ return checks;
+}
+
+// 1.38 爆幹好用 pass: UI-button trials, big-monorepo parse scope, 已有 needs code evidence, visible command scoring, number/unit source check.
+async function g430Checks(root){
+ const checks=[],area=join(root,'g430');const ast=await loadAst();
+ if(!ast.ok){checks.push('G430 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G430 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G430 '+name);};
+ const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body);};
+ const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
+ const {uiTargets,findServe,inspectOutput,runUiTrial,uiTrialSentence,uiTrialHtml,findDriver}=await import('./ui-trial.mjs');
+ const {targetHas}=await import('./target-has.mjs');const {checkQuotes}=await import('./check-quotes.mjs');const {choiceNotes,inferRun}=await import('./usage-route.mjs');
+ // a store-only zip (no zip tool needed): enough for a .pptx with two slides
+ const zlib=(await import('node:zlib')).default,here=new URL('.',import.meta.url).pathname;
+ const zip=entries=>{const parts=[],cen=[];let off=0;for(const [name,data] of entries){const n=Buffer.from(name),d=Buffer.from(data),crc=zlib.crc32(d);
+   const h=Buffer.alloc(30);h.writeUInt32LE(0x04034b50,0);h.writeUInt16LE(20,4);h.writeUInt32LE(crc,14);h.writeUInt32LE(d.length,18);h.writeUInt32LE(d.length,22);h.writeUInt16LE(n.length,26);parts.push(h,n,d);
+   const c=Buffer.alloc(46);c.writeUInt32LE(0x02014b50,0);c.writeUInt16LE(20,4);c.writeUInt16LE(20,6);c.writeUInt32LE(crc,16);c.writeUInt32LE(d.length,20);c.writeUInt32LE(d.length,24);c.writeUInt16LE(n.length,28);c.writeUInt32LE(off,42);cen.push(c,n);off+=30+n.length+d.length;}
+  const cd=Buffer.concat(cen),e=Buffer.alloc(22);e.writeUInt32LE(0x06054b50,0);e.writeUInt16LE(entries.length,8);e.writeUInt16LE(entries.length,10);e.writeUInt32LE(cd.length,12);e.writeUInt32LE(off,16);return Buffer.concat([...parts,cd,e]);};
+ const slide=t=>'<p:sld xmlns:a="a" xmlns:p="p"><a:t>'+t+'</a:t><a:t>second run</a:t></p:sld>';
+ const pptx=zip([['[Content_Types].xml','<Types/>'],['ppt/presentation.xml','<p/>'],['ppt/slides/slide1.xml',slide('Hello deck')],['ppt/slides/slide2.xml',slide('Two')]]);
+ // --- a UI tool: the export buttons live in UI files; apps/web's dev script runs a workspace bin that serves the page ---
+ const ui=join(area,'ui');
+ put(ui,'package.json','{"name":"ui-mono","private":true,"workspaces":["packages/*","apps/*"]}\n');
+ put(ui,'packages/core/package.json','{"name":"ui-core","version":"1.0.0","bin":{"ui-serve":"./serve.mjs"}}\n');
+ put(ui,'packages/core/src/app/lib/export-pdf.ts',"export function exportPdf(){window.print();}\n");
+ put(ui,'packages/core/src/app/lib/export-pptx.ts',"export async function exportPptx(){/* builds a .pptx */}\n");
+ put(ui,'packages/core/deck.b64',pptx.toString('base64')+'\n');
+ put(ui,'packages/core/serve.mjs',`#!/usr/bin/env node
+import http from 'node:http';import fs from 'node:fs';
+const deck=Buffer.from(fs.readFileSync(new URL('./deck.b64',import.meta.url),'utf8'),'base64');
+const page='<!doctype html><title>deck</title><style>@page{size:1440px 810px}section{height:810px}</style><button aria-label="Download" onclick="document.getElementById(\\'m\\').hidden=false">Download</button><div id="m" hidden><button onclick="window.print()">Export as PDF</button><button id="x">Export as PPTX</button></div><section><h1>Slide one text</h1></section><section><h1>Slide two</h1></section><script>document.getElementById("x").onclick=async()=>{const b=await (await fetch("/deck.pptx")).blob();const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="deck.pptx";a.click();}</script>';
+const s=http.createServer((q,r)=>{if(q.url==='/deck.pptx'){r.writeHead(200,{'content-type':'application/octet-stream'});r.end(deck);}else{r.writeHead(200,{'content-type':'text/html'});r.end(page);}});
+s.listen(0,'127.0.0.1',()=>console.log('  Local: http://localhost:'+s.address().port+'/'));
+`);
+ put(ui,'apps/web/package.json','{"name":"web","private":true,"scripts":{"dev":"ui-serve --open"},"dependencies":{"ui-core":"1.0.0"}}\n');
+ gitInit(ui);
+ const um={question:'能不能匯出 PDF 和 PPTX？',capabilities:[{term:'pdf',file:'packages/core/src/app/lib/export-pdf.ts',ui:true,onRoute:false},{term:'pptx',file:'packages/core/src/app/lib/export-pptx.ts',ui:true,onRoute:false},{term:'pdf',file:'packages/cli/pdf.ts',ui:false,onRoute:true}]};
+ await check('UI trial targets: only formats the question names whose code sits in a UI file off the route; the dev server is the app that depends on the button package, its bin resolved from the workspace',()=>{
+  assert.deepEqual(uiTargets(um).map(t=>t.term+':'+t.file),['pdf:packages/core/src/app/lib/export-pdf.ts','pptx:packages/core/src/app/lib/export-pptx.ts']);
+  assert.deepEqual(uiTargets({...um,question:'會不會連網？'}),[]);
+  const s=findServe(ui,'packages/core/src/app/lib/export-pdf.ts');assert.equal(s.dir,'apps/web');assert.equal(s.script,'dev');assert.equal(s.bin,'packages/core/serve.mjs');assert.deepEqual(s.args,['--open']);assert(/依賴放按鈕的套件 ui-core/.test(s.why),s.why);
+ });
+ await check('output check: a PDF by magic bytes and pages, a PPTX by its parts, slide count and first-slide editable text; anything else is named, not trusted',()=>{
+  const p=join(area,'deck.pptx');fs.writeFileSync(p,pptx);const o=inspectOutput(p);assert.equal(o.kind,'pptx');assert.equal(o.slides,2);assert(o.ok);
+  if(spawnSync('unzip',['-v']).status===0){assert.equal(o.textRuns,2);assert(/Hello deck/.test(o.textSample));}
+  const f=join(area,'one.pdf');fs.writeFileSync(f,'%PDF-1.4\n1 0 obj<</Type /Pages /Kids [2 0 R] /Count 1>>endobj\n2 0 obj<</Type /Page>>endobj\ntrailer<<>>\n%%EOF\n');const q=inspectOutput(f);assert.equal(q.kind,'pdf');assert(q.pages>=1);
+  const z=join(area,'x.bin');fs.writeFileSync(z,'hello');assert.equal(inspectOutput(z).kind,'unknown');
+ });
+ await check('UI trial skips with a reason (no dev script / no browser driver) and says so in 怎麼接 and the HTML',()=>{
+  const none=join(area,'none');put(none,'package.json','{"name":"none"}\n');put(none,'src/app/export-pdf.ts','export const x=1;\n');
+  const r=runUiTrial(none,{question:'匯出 PDF',capabilities:[{term:'pdf',file:'src/app/export-pdf.ts',ui:true,onRoute:false}]});assert.equal(r.ran,false);assert(/dev／start/.test(r.skipped));
+  assert(/介面試跑沒跑/.test(uiTrialSentence(r)));const h=uiTrialHtml(r,s=>String(s));assert(/沒跑|略過/.test(h),h.slice(0,300));
+  const old=process.env.TCL_PLAYWRIGHT_PYTHON,oldPath=process.env.PATH;process.env.TCL_PLAYWRIGHT_PYTHON='/nonexistent/python';
+  try{const d=findDriver();if(!d.python){const r2=runUiTrial(ui,um);assert.equal(r2.ran,false);assert(/TCL_PLAYWRIGHT_PYTHON/.test(r2.skipped));}}finally{if(old===undefined)delete process.env.TCL_PLAYWRIGHT_PYTHON;else process.env.TCL_PLAYWRIGHT_PYTHON=old;process.env.PATH=oldPath;}
+ });
+ const drv=findDriver(),canNs=spawnSync('unshare',['-rn','true']).status===0;
+ if(drv.python&&drv.chrome&&canNs){
+  await check('UI trial end to end: loopback-only dev server in a copy, headless clicks through the Download menu; PDF via the print dialog, PPTX via a download; repo copy unchanged',()=>{
+   const keep=join(area,'kept');const r=runUiTrial(ui,um,{budgetS:90,keepDir:keep});assert(r.ran&&r.listened,JSON.stringify(r).slice(0,800));
+   const by=Object.fromEntries(r.results.map(x=>[x.term,x]));assert(by.pdf.ok&&by.pdf.download.viaPrint&&by.pdf.output.kind==='pdf'&&by.pdf.output.pages>=1,JSON.stringify(by.pdf));
+   assert(by.pptx.ok&&by.pptx.output.kind==='pptx'&&by.pptx.output.slides===2,JSON.stringify(by.pptx));assert(/Download/.test(by.pptx.via.join()),JSON.stringify(by.pptx.via));
+   assert.equal(r.changedCount,0,r.changed.join());assert.deepEqual(r.outsideHosts,[]);assert(fs.readdirSync(keep).length===2);
+   const s=uiTrialSentence(r);assert(/拿到 PDF/.test(s)&&/拿到 PPTX（2 張投影片/.test(s)&&/代替列印對話框/.test(s),s);
+  });
+ }else checks.push('G430 UI trial end to end SKIPPED: '+(!drv.python?'no Python playwright':!drv.chrome?'no Chrome/Chromium':'no unshare'));
+ // --- big monorepo scope: a declared workspace dependency used only by tests is not parsed; tests are skipped; the route is the same ---
+ const mono=join(area,'mono');
+ put(mono,'package.json','{"name":"mono","private":true,"workspaces":["packages/*"]}\n');
+ put(mono,'packages/app/package.json','{"name":"app","version":"1.0.0","bin":{"app":"./cli.js"},"dependencies":{"lib-a":"1.0.0","lib-b":"1.0.0"}}\n');
+ put(mono,'packages/app/cli.js',"import fs from 'node:fs';\nimport {shout} from 'lib-a';\nconst f=process.argv[2];\nfs.writeFileSync(f+'.out',shout(fs.readFileSync(f,'utf8')));\n");
+ put(mono,'packages/app/tests/cli.test.js',"import {helper} from 'lib-b';\nhelper();\n");
+ put(mono,'packages/lib-a/package.json','{"name":"lib-a","version":"1.0.0","main":"index.js"}\n');put(mono,'packages/lib-a/index.js',"export function shout(s){return s.toUpperCase();}\n");
+ put(mono,'packages/lib-b/package.json','{"name":"lib-b","version":"1.0.0","main":"index.js"}\n');put(mono,'packages/lib-b/index.js',"export function helper(){}\n");
+ put(mono,'README.md','# app\n\n```\napp notes.txt\n```\n');gitInit(mono);
+ await check('big monorepo scope: dependencies only tests import are not parsed, tests are skipped, the route and its touches do not change, and the scope is said',async()=>{
+  const small=await traceRoute(mono,{question:'給它一個檔，會寫哪些檔？',ast});const old=process.env.TRACE_BIG_REPO;process.env.TRACE_BIG_REPO='1';
+  let big;try{big=await traceRoute(mono,{question:'給它一個檔，會寫哪些檔？',ast});}finally{if(old===undefined)delete process.env.TRACE_BIG_REPO;else process.env.TRACE_BIG_REPO=old;}
+  assert(big.parseScope,'scope recorded');assert.deepEqual(big.parseScope.dropped,['packages/lib-b']);assert.equal(big.parseScope.skipped,1);assert(big.parseScope.packages.includes('packages/lib-a'));
+  assert.equal(JSON.stringify(big.touches.route.map(t=>t.cap+t.file+t.line)),JSON.stringify(small.touches.route.map(t=>t.cap+t.file+t.line)));
+  assert(big.unknowns.some(u=>u.kind==='scope'&&/lib-b/.test(u.text)&&/只有測試/.test(u.text)));
+ });
+ // --- 已有／缺口: code evidence vs documentation ---
+ const tg=join(area,'target');
+ put(tg,'scripts/lib/docx-text.mjs',"export function docxToMarkdown(b){return String(b);}\n");put(tg,'scripts/intake.mjs',"import {docxToMarkdown} from './lib/docx-text.mjs';\nexport const run=b=>docxToMarkdown(b);\n");
+ put(tg,'scripts/lib/epub-reader.mjs',"export function epubRead(){}\n");
+ put(tg,'scripts/slides.mjs',"import PptxGenJS from 'pptxgenjs';\nexport const deck=()=>new PptxGenJS();\n");
+ put(tg,'docs/formats.md','# Formats\n\nWe convert PDF and HTML pages into notes.\n');put(tg,'README.md','Export to PDF is planned.\n');
+ put(tg,'package.json','{"name":"tg","dependencies":{"xlsx":"0.18.5"}}\n');gitInit(tg);
+ await check('已有 needs code evidence (imported module, called function, imported or declared library); defined-but-unused is 部分; docs alone are 只有文件提到, listed apart and never 已有',async()=>{
+  const r=targetHas(tg,['docx','epub','pptx','pdf','html','xlsx','rtf'],{question:'給它一份 DOCX、EPUB、HTML；匯出 PPTX 或 PDF；XLSX'});const by=Object.fromEntries(r.rows.map(x=>[x.term,x]));
+  assert.equal(by.docx.status,'has');assert.equal(by.docx.evidence[0].usedBy.file,'scripts/intake.mjs');
+  assert.equal(by.epub.status,'partial');assert(by.epub.counts.unwired>=1);
+  assert.equal(by.pptx.status,'has');assert(by.pptx.evidence.some(e=>e.kind==='library'));
+  assert.equal(by.pdf.status,'doc',JSON.stringify(by.pdf));assert.equal(by.html.status,'doc');assert(by.pdf.docs.length>=1&&by.pdf.evidence.length===0);
+  assert.equal(by.xlsx.status,'has');assert(by.xlsx.evidence.some(e=>e.dependency));assert.equal(by.rtf.status,'gap');
+  assert.deepEqual(r.docOnly.sort(),['html','pdf']);assert(!r.has.includes('pdf'));
+  const m=await traceRoute(mono,{question:'給它一個檔，會寫哪些檔？',ast});m.targetHas=r;const h=renderRouteHtml(m);assert(h.includes('只有文件提到'),'doc status shown');
+ });
+ // --- command / entry choice: scores visible, a close runner-up is named with how to switch ---
+ await check('choice scoring: a close runner-up is named with its score and the switch; a clear winner adds no warning; the HTML shows the ranking',async()=>{
+  const close=[{what:'入口',ranked:[{name:'命令列 a',score:3,switch:'--entry bin:a'},{name:'函式庫 b',score:3,switch:'--entry lib/b.js'}]}];const n=choiceNotes(close);
+  assert.equal(n.length,1);assert(/只贏 `函式庫 b`（3 分）0 分，可能挑錯；要換就加 --entry lib\/b\.js/.test(n[0]),n[0]);assert.equal(close[0].close,true);
+  assert.deepEqual(choiceNotes([{what:'試跑用法',ranked:[{name:'x',score:9},{name:'y',score:2}]}]),[]);
+  const m=await traceRoute(mono,{question:'給它一個檔，會寫哪些檔？',ast});m.choices=close;const h=renderRouteHtml(m);assert(h.includes('怎麼挑的')&&h.includes('函式庫 b'),'ranking table');
+ });
+ await check('choice scoring on a repo: two usage lines are ranked, the picked run and the runner-up are both kept',async()=>{
+  const two=join(area,'two');put(two,'package.json','{"name":"two","version":"1.0.0","bin":{"two":"./cli.js"}}\n');put(two,'cli.js',"const fs=require('fs');const [c,f]=process.argv.slice(2);if(c==='convert')fs.writeFileSync(f+'.md',fs.readFileSync(f));else console.log('two');\n");
+  put(two,'README.md','# two\n\n```\ntwo convert report.docx\ntwo version\n```\n');gitInit(two);
+  const mm=await traceRoute(two,{question:'給它一份 DOCX，轉成 Markdown，會寫哪些檔？',ast});const plan=inferRun(two,mm);assert(/convert/.test(plan.run),plan.run);
+  const r=plan.choice.ranked;assert.deepEqual(r.map(x=>x.name),['two convert report.docx','two version']);assert(r[0].score>r[1].score);assert(r[0].why.some(w=>/給了檔案/.test(w)),JSON.stringify(r[0].why));assert.deepEqual(choiceNotes([plan.choice]),[]);
+ });
+ // --- number / unit source check ---
+ const src=join(area,'qsrc');put(src,'theme.md','# Theme\n\n| role | size |\n| --- | --- |\n| caption | 22–28px |\n| body | 32px |\n\nKeep each slide under 40 words.\n');put(src,'units.ts','export const EMU_PER_PX = 6350;\n');
+ await check('number check: a single end of a source range is flagged for review; a different unit (字 vs words) and a number not in the cited lines fail; stated conversions are derived; alias and section citations resolve',()=>{
+  const draft=['`TH` = `OS:theme.md`','','# Sizes','','- 內文至少 32px（`TH:6`）','- 圖說 28px（`OS:theme.md:5`）','- 每張約 40 字（`OS:theme.md:8`）','- 標題 120–160px（`OS:theme.md:5-6`）','- 1px = 6350 EMU，換算成 pt 是 0.5pt（`OS:units.ts:1`）','','出處：`OS:theme.md:5`','- 圖說用 22–28px'].join('\n');
+  const r=checkQuotes(draft,{map:{OS:src}});const k=r.findings.map(f=>f.line+':'+f.kind);
+  assert(k.includes('6:range-end'),k.join());assert(k.includes('7:unit-mismatch'),k.join());assert(k.includes('8:not-in-source'),k.join());assert(!k.some(x=>x.startsWith('5:')||x.startsWith('12:')),k.join());
+  assert(r.derived.some(d=>d.line===9),JSON.stringify(r.derived));assert.equal(r.ok,false);
+  const good=checkQuotes(['- 內文至少 32px（`OS:theme.md:6`）','- 每張少於 40 個英文單字（words，`OS:theme.md:8`）'].join('\n'),{map:{OS:src}});assert(good.ok,JSON.stringify(good.findings));assert(good.checked>=2);
+ });
+ await check('number check CLI: exit 1 with readable lines when a quote does not match, exit 0 when all match',()=>{
+  const bad=join(area,'bad.md'),ok=join(area,'ok.md');fs.writeFileSync(bad,'- 圖說 120px（`OS:theme.md:5`）\n');fs.writeFileSync(ok,'- 內文 32px（`OS:theme.md:6`）\n');
+  const run=f=>spawnSync(process.execPath,[join(here,'check-quotes.mjs'),'--map','OS='+src,f],{encoding:'utf8'});const a=run(bad),b=run(ok);
+  assert.equal(a.status,1,a.stdout+a.stderr);assert(/120/.test(a.stdout),a.stdout);assert.equal(b.status,0,b.stdout+b.stderr);
+  const t=spawnSync(process.execPath,[join(here,'trace.mjs'),'check-quotes','--root',src,ok],{encoding:'utf8'});assert(t.status===0||t.status===1,t.stderr);
  });
  return checks;
 }

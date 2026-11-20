@@ -43,6 +43,6 @@ export function adapterContract(m){
   files.trialChanged=cs.flatMap(x=>x.changed??[]).slice(0,30);
   step.inputs=[t.project?'project_dir':'target_dir'];step.outputs=[t.project?'project_files':'scaffold_dir'];
   step.stop_if='結束碼非 0'+(cs.some(x=>x.timedOut)?'，或逾時（沒網路時會卡在安裝相依）':'')+(t.cases.some(x=>x.id==='good-again'&&x.exit!==0)?'，或目標資料夾已存在（要 --force）':'');}
- const th=m.targetHas?{target:m.targetHas.target,has:m.targetHas.has,partial:m.targetHas.partial,gap:m.targetHas.gap,...(m.targetHas.uses?.length?{alreadyUses:m.targetHas.uses.map(u=>u.name+' '+u.version+'（'+u.file+':'+u.line+'）')}:{})}:null;
+ const th=m.targetHas?{target:m.targetHas.target,has:m.targetHas.has,partial:m.targetHas.partial,docOnly:m.targetHas.docOnly??[],gap:m.targetHas.gap,...(m.targetHas.uses?.length?{alreadyUses:m.targetHas.uses.map(u=>u.name+' '+u.version+'（'+u.file+':'+u.line+'）')}:{})}:null;
  return {invoke,inputs,outputs,signals,files,grants,unknowns,step,...(th?{targetHas:th}:{}),basis:t?'讀碼＋隔離試跑':'只讀碼（未試跑）'};
 }
