@@ -1,5 +1,122 @@
 # 版本記錄
 
+## 1.38.0-rc.3 (2026-11-20，測試中)：試跑先問准、沒隔離就不跑
+
+- 試跑授權擋在最前面：`--trial` 先讀 `--preflight` 答覆，負責人在「能不能實際跑」選「網路全關」或「只開本機」才跑。沒答覆、選不跑、還沒回答、題目對不上、選容器時，命令列試跑、`--help` 推論、dev 伺服器、無頭瀏覽器一個都不啟動，路線檔與報告寫「試跑沒跑：原因」。會開連線埠的路線和介面試跑要「只開本機」。
+- 建不出網路隔離（`unshare -rn`）就不跑（fail closed）：命令列試跑、`--help` 推論、本機服務試讀、介面試跑都回報「不能建立網路隔離」並略過，拿掉原本沒隔離照跑的退路。
+- 自我測試：授權矩陣；用假的 `unshare`／`python3` 記下每次啟動，證明沒准時什麼都沒啟動、沒有暫存副本；隔離不可用時命令列與介面試跑都不啟動（啟動計數不變）。
+- Windows：沒有網路隔離時，--help 推論不再先複製 repo；原本建 node_modules 連結遇 EPERM 會讓整條路線建不出來，並留下暫存副本。副本建失敗也會清掉暫存。
+- 自我測試：用途路線各組在沒有 unshare 的機器上整組略過並寫明原因（原本裝了語法樹的 Windows 會失敗）。
+- SKILL.md 回到短入口，完整用法搬到 references/route.md；拿掉私人原文片段檔。
+
+## 1.38.0-rc.2 (2026-11-20，測試中)：用途路線（語法樹）
+
+- 能力邊界：SKILL.md 新增「能力邊界」（看得到／看不到）。報告在函式判斷、match／switch／case、三元運算、條件旗標對不回的寫檔站標「這裡看不到，不保證」；有外部套件或動態呼叫沒追進去時，不再寫「這條路不寫檔」，改寫「沒看到寫檔，但有 N 處 … 沒追進去，不保證」。拿回一句分清預設跑法與另外加旗標的試跑。自測 +1。
+
+## 1.38.0-rc.1 (2026-11-20)：用途路線（語法樹）
+
+- 新增 `trace.mjs route`：從一句用途開始，自動找入口（package.json bin／exports／main、README 用法），沿語法樹追「使用說明 → 入口 → 讀取輸入 → 轉換 → 輸出 → 錯誤」，每站附檔案:行與該行雜湊；報告第一段是「怎麼接」（入口、給它、拿回、會碰、成功失敗怎麼認、已核對／待確認）。
+- `--trial`：複製 repo 到暫存資料夾，用 `unshare -rn` 關網路，以假檔跑正常、重跑、格式錯、檔案不存在四種情況，記結束碼、標準輸出是否為 JSON、有沒有改檔；結果自動寫進「怎麼接」。
+- 新增 `trace.mjs wired`（功能接好沒：A → … → B，原碼接線完整／沒接上；有測試走到會註明）與 `route-report --answer`（agent 讀碼後改寫答案）。
+- 新增 `scripts/ast-graph.mjs`：tree-sitter（web-tree-sitter，選配）解析 JS/TS，建呼叫圖：函式、類別與 ES5 prototype 方法、跨檔 import／require／re-export／`export *`、workspace 套件、別名（`const _fetch = fetch`、解構改名、多次指派）、詞法作用域（參數與區域變數會遮蔽全域）、每個命中都記行號。串流 `_transform`、`then` 與依方法名對到的呼叫標成推論。
+- 開卡前檢查改用語法樹偵測執行程式、連網、開連線埠、付費、真帳號、模型工具；只有入口走得到的才問，走不到的列為「repo 有但入口走不到」。沒裝語法樹時退回原本的文字比對並標明。
+- 試用：csvtojson（CSV → JSON）、axios、simple-git。舊的漏抓與誤報：`_fetch(` 別名、每檔只記第一筆、`正則.exec(` 誤報、型別宣告誤報都已由語法樹解決。
+- 既有自測新增七例（G380）。
+- Python（選配 tree-sitter-python，沒裝時 .py 退回文字比對）：`import x`／`from x import y as z`／相對 import／套件 `__init__.py` 轉出口與子模組、`[project.scripts]`／`[tool.poetry.scripts]`／setup.cfg／setup.py console_scripts、`__main__.py`（`python -m`）；`if __name__ == '__main__'` 區塊只在直接執行時算。能力：subprocess／os.system 類、requests／httpx／urllib／socket／aiohttp 等、`open()` 依模式分讀寫、pathlib／shutil／os 寫檔、`print(file=sys.stderr)`、`os.environ`／`getenv`（記變數名）、`sys.exit`／`raise SystemExit`、eval／exec。類別呼叫即建立（`__init__`），`self.x =` 欄位、參數遮蔽同名模組。
+- 動態載入：`import_module(f'{prefix}{name}')` 會解出前綴（含 `prefix = 'a.' if … else 'b.'`），用途路線依問句挑模組（csv → parsers/csv.py），`wired` 依目標挑，開卡前檢查把前綴下的模組都算走得到；前綴對不到 repo 的標成「會載入 repo 以外的程式碼」。
+- 條件更準：能力本身在 `if` 裡標「有條件」；只在 `當 …` 分支才會跑的危險動作，「怎麼接」寫「只在特定情況（檔:行 只在「當 …」時）」，不再一律寫成「這條路會」。呼叫處的條件另列在「有條件才會走的動作」。
+- 試跑：`--run "… < {input}"` 改由標準輸入餵檔，第四種情況換成空輸入；Python 試跑設 PYTHONPATH 指向副本、不寫 .pyc、不用使用者 site-packages，不安裝任何套件，缺的套件記在案例與注意事項。
+- 試用：jc（`jc --csv`，Python）。既有自測新增五例（G390）。
+- 合併報告：路線頁加「能不能接」（結論、這條路需要的能力與授權 已准／沒准／還沒問、你要決定、目前准的），鏈卡細節收合在後；`report --card … --route …` 一個指令產單一網頁（舊的鏈卡頁另存 `.card.html`），`route|wired --preflight <答覆.json>` 帶入授權。兩份 JSON 都內嵌。
+- 試跑參數自動推論：沒給 `--run` 時讀 README／docs 用法與隔離副本裡的 `--help`，挑對到問句的指令與旗標，標成推論並列依據；repo 有 `.venv` 時用它的 python。會開連線埠的路線：只開本機回環，等服務起來後 GET 試讀再關掉。
+- 框架入口：click／typer（群組與 `name=`）、argparse `set_defaults(func=…)`、commander `.command().action()`、yargs `.command(…, handler)`、Express／Fastify／Koa（含 `router.route().get().post()`）、Flask／FastAPI 路由。問句點名或由動詞／文件用法推論的才進路線；`wired` 從群組函式能走到子指令。
+- 修正：`require('./')` 結尾斜線、`module.exports = function`、bin 指向未建置的 `lib/` 時退回 `src/`、`.venv`／site-packages 不再被掃、`from .utils import sqlite3` 這類轉出口與 try/except 備援 import 追到標準庫、`sqlite3.connect` 算寫檔、`express()` 本身不再算開連線埠（只有 `.listen`）、只在特定條件才連網的會標「只在特定情況」。
+- 試用：sqlite-utils（click）、json-server（yargs＋Express）；jc、csvtojson 不再需要手寫 `--run`。既有自測新增 G400。
+- 接線合約：報告新增「接線」（呼叫、給它、拿回、成功／失敗、動到的檔、要准、還要試的、步驟描述），路線檔多 `adapter`。
+- 多入口：monorepo（npm workspaces、pnpm／lerna／nx／turbo、packages/*、Python src 版面）入口自動列出並排序，其餘入口與路由放「其他候選」；多條路由對上時挑最相關的一條（問句字、文件、測試、內部路由降分）。
+- 試跑：依問句做 DOCX／PDF／HTML／Markdown 假檔並檢查內容有沒有帶出；在空的工作資料夾執行；記錄每種情況耗時；文件用法略過 cd／pip 等安裝行，偏好帶輸入檔、旗標少的行。
+- 修正：`requests.Session()` 本身不算連網、`shutil.copyfileobj` 不算寫檔、套件資料夾裡 `__main__.py` 旁的轉換程式不再被略過、vendor／third_party 等不掃、只交給外部套件的薄路線會直說。
+- 試用：markitdown（Python monorepo，DOCX → Markdown）、remark（npm workspaces，Markdown 整理）。既有自測新增 G410。
+- 目標系統已有／缺口：`--target <系統 repo> [--target-name 名稱]` 先在要接進的系統裡找同功能的模組、函式、知名套件（分讀進來／產出）、只接受副檔名或文件提到的地方，以及已經裝了這個工具的哪個版本；只看 git 追蹤的檔，測試／退役／暫存副本不算。結果進「怎麼接」與「接線」。
+- 問句要的能力不在這條路上時（PDF／PPTX 匯出在介面按鈕裡），點名檔案與誰載入它；問到登入 Claude／Codex 時，列出 repo 啟動 AI 代理 CLI 的位置（路線上或別處）。
+- 工具類試跑：建立專案的指令在空資料夾跑、沒網路卡住時用 `--help` 的離線旗標（`--no-install` 等）再跑、同資料夾重跑；問句點名多個指令時在同一個假專案依序跑（連上 repo 裡的 peer 套件），分只讀與會寫檔，含 `--help` 範例與 `--apply` 先預覽再套用；家目錄與暫存資料夾的寫入也記下（快取資料夾收成一行）。
+- 修正：`npx／pnpm dlx <套件>` 用法對到該套件的 bin、pnpm 每個套件的 node_modules 連進副本、tsconfig `paths` 別名、被 git 忽略的 dist／build 產物改讀原始碼（試跑仍用建置好的檔）、`const importSrc = rel => import(…rel)` 動態載入小幫手、檔名裡的 `package.json` 不再算 JSON 格式、大 monorepo 只解析入口套件與依賴的 workspace 套件。
+- 試用：open-slide（pnpm＋Vite／React 簡報框架）、Astryx（pnpm 設計系統 CLI）；markitdown 重驗 DOCX 已有。既有自測新增 G420。
+- 介面按鈕試跑（`scripts/ui-trial.mjs`、`ui-probe.mjs`、`ui-driver.py`）：問句要的格式只在介面檔時，`--trial` 同時在隔離副本開 dev 伺服器（只有本機回環、不連外），用無頭瀏覽器點按鈕（會先開 Download／Export 選單）、收下載；`window.print()` 由無頭瀏覽器代存 PDF。驗產出（PDF 頁數／頁面大小／可選取文字，PPTX 投影片數／第 1 張可編輯文字），列對外連線、副本與家目錄寫入。`--no-ui-trial`、`--ui-keep`。open-slide 實測：PDF 16 頁 1440×810 pt、PPTX 16 張可編輯。
+- 大 monorepo：依賴只在程式真的 import 才解析，測試／stories／fixtures／範例／benchmark 不解析（Astryx 路線 57.9 秒 → 約 14 秒，答案不變）；入口檔指定 `--entry 檔` 時對到同一個已知入口。
+- 已有／缺口：「已有」只算程式證據（有人 import 的模組、有人呼叫的函式、import／宣告依賴的套件）；定義了沒人用 = 部分；只在文件提到另列（弱）；`new X` 只在 X 是那個套件時算；加 SheetJS（`xlsx`）、xlsxwriter。
+- 怎麼挑的：入口、試跑用法、路由的候選、分數與理由列在報告；第二名差距 ≤ 15% 時在怎麼接點名並給換的方法；同名入口加上套件名區分。
+- 新增 `check-quotes`：草稿或抽取結果裡的數字與單位對回引用的 檔:行（別名 `` `SA` = `OS:path` ``、`:12,13`、「出處：」整段），分不在原文、單位不同、範圍一端（要看）、標明的換算。
+- 既有自測新增 G430（十例；有瀏覽器驅動時含端到端按鈕試跑）。
+- 盲測 sqlparse（Python `sqlformat`）修正：`模組:main` 而 main 只是從 cli.py import 進來時追進 cli.py（原本路線停在 `__main__.py`、看不到讀寫檔）；README 裡 YAML 的 `- id:` 不算用法；問句的「縮排／大寫／關鍵字」對到旗標；範例的 .sql 等檔名會換成輸入；SQL 假檔；標準輸入寫出觸發條件（`filename == '-'`）；試跑沒走到的寫檔會點名與可能的觸發參數；入口站略過註解與模組說明字串。自測 +1。
+- 寫檔條件（`scripts/guards.mjs`）：路線上的寫檔、跑程式、連網等站會附上觸發條件：外層 if／elif／else，加上前面那串 if 其他分支提早 return／raise／exit 的情況（看縮排，Python 與 JS/TS），再把條件裡的變數對回命令列旗標（argparse、click、commander、yargs、util.parseArgs）。報告寫成「加 --outfile <值> 才會寫檔（條件 檔 第 N 行）」、「沒加 --dry-run 才會寫檔」，標成推論。
+- 試跑加旗標：有條件的寫檔時，在隔離副本用正常輸入的複本，各加一個觸發旗標再跑一次（要值的旗標給工作資料夾裡的新檔），記下寫出的新檔、原檔有沒有被覆蓋、還動了哪些檔。sqlparse：`--outfile` 寫出新檔、原檔沒變；`--in-place` 覆蓋原檔。markitdown：`--output` 寫出新檔。
+- 用語：排版類工具格式錯也回 0 改列為正常說明，不再當警告；目標系統完全沒有時寫「接進來就是補上 X」；試跑用法候選去重。自測 +2。
+
+## 1.37.0-rc.1 (2026-11-19，測試中)
+
+- 開卡前檢查：`trace.mjs preflight` 只讀掃環境與受查 repo（不安裝、不下載、不執行），印出給負責人的問題原文（甲乙丙一鍵回、附建議）；掃描或安全規則能決定的不問，列為「不用回」。寫給 agent 的指令檔一律只列檔名；CI 與容器設定預設一起查。
+- `trace.mjs answer` 把回覆（照建議或「3甲乙」）轉成答覆檔並核對問題雜湊；模擬回覆須加 `--simulated`。`start --preflight` 把授權範圍寫進卡片開頭；問題只在開卡前問。
+- 接入結論上限：沒做開卡前檢查、負責人仍有未回覆項目，或卡上需要的能力負責人沒准，結論最多「有條件可接」，填「可接」會被拒絕。
+- 需要授權的能力改成固定選項（讀檔、寫檔、執行其他程式、連外網、用真帳號、花錢、讀機密、讓模型下系統指令），範圍放在「|」後一句補充；自動對照負責人准的項目，補充與對不上選項的標「需人看」。
+- `trace.mjs report` 一個命令跑唯讀分診（接入看指定範圍，其他情境只看卡上引用的檔）、套用不查範圍、產鏈卡與單檔離線網頁報告：頂部是結論、為什麼、你要決定、證據在哪；測試程式另計；內嵌給 agent 的機器資料。
+- 分診片段的註解一律遮蔽，報告再遮一次。錨點寫在章節後也算該步有錨點。
+- 已知限制：試跑的「網路全關」只攔常見寫法，攔不住 UDP、DNS、子執行緒與允許清單內的程式。
+- 既有自測新增七例（G370）。
+- 外部專案試用修正：開卡前掃描不再把 `正則.exec(`、`物件.exec(` 當成執行其他程式；`--unknown` 的類別可直接寫中文（如「超出範圍」）；介面沒有錨點時，fill 當下就提醒。
+- 高星專案試用修正：開卡前掃描把引入 http／https／net、`new XMLHttpRequest(`、引入 child_process 也算線索（axios 原本 0 筆）；型別宣告檔（.d.ts、typings/）只列不算能力需求；新增 `fix` 指令，可刪除已填項目或改未知類別；補充說明含括號時改用冒號，不再疊兩層括號。
+
+## 1.36.2 (2026-11-15)
+
+- 未知新增是否影響本題結論；未填視為不確定並提示缺欄。僅沒去跑、可免費讀取或隔離試跑且影響或可能影響結論者標應先補做；不影響者只交代、不提醒。
+- 卡片摘要分列影響結論與僅記錄數；填卡支援可省略的第八欄，保留七欄相容。補查止於本卡問題或成品驗收，不為清零擴張或自動開卡。
+- 既有自測新增兩例，涵蓋不影響時的標示與提醒、雙數摘要、七／八欄與缺欄相容；沿用檔案建立的隔離儲存庫。
+
+## 1.36.1 (2026-11-15)
+
+- TRACE-P4：fill 錨點依參數位置歸屬，錯誤參數逐項說明並保留合法寫入；版本可填一欄或兩欄。
+- start 唯讀取得提交及工作樹狀態，Git 拒絕則保留未知與原因；沿用原欄位名，在 version 內補 worktree／reason。
+- Markdown 錨點雜湊縮為前 8 碼，JSON 保留完整值；trace 與 fill 說明列齊參數與例子。
+- 症狀、Git 歷史與接入分診提供有界白話摘要及外部 JSON 輸出；字面搜尋辨識常見丟錯敘述，錯誤與原碼優先，預設 20 筆並計省略數。
+
+## 1.36.0 (2026-11-15)
+
+- 四個接入分診命令支援明示 --no-git 有界資料夾掃描、機密檔名隔離與清冊雜湊，零掃描在終端說明原因與下一步。
+- flows 收緊為同函式（無邊界時 ±40 行）的具名賦值及一步關聯，排除標準輸出誤判，共現只計數，預設列 50 筆並支援 --all。
+- 步進器一鍵填卡、即時核對並帶出下一步；未開始步驟不再逐條提醒缺錨點。
+- 接入分診沿用入口、停止位置與提示詞辨識，補邊界、遮蔽機密、同檔流向、離線相依與外部掃描結果核對；全部只列候選。
+- 接入鏈卡增加結論、條件、授權能力與人工讀碼填寫的介面摘要，沿用錨點與未知五欄。
+
+## 1.35.0 (2026-11-15)
+
+- 四本劇本、十條通則與常見原因資料化；單一步進器只印當前步驟，缺項與未知僅提醒，保留跳步。
+- 新增症狀字面、寫入候選與記錄差異，以及唯讀提交、字面歷史、熱區、共同改動證據。
+- 技能本體改為情境路口；原有流程保留按需讀取，鏈卡保存情境與步驟。
+
+## 1.34.0 (2026-11-15)
+
+- 預設一題一張五節鏈卡；輕量錨點自算 hash、容許 ±3 行唯一校正，不符列限制仍產卡，保留按需整輪 audit。
+- 鏈卡與體檢卡共用 UNKNOWN 五欄與對策；缺原因、便宜未跑與無效類別只標示、不改判。
+- stop-sites 新增按檔分組的提示詞限制候選清冊及 pattern 篩選；instrument 乾淨環境保留 Python UTF-8 設定。
+
+## 1.33.1 (2026-11-04)
+
+- 修正靜態查線的 toolVersion 仍只讀頂層 version 的相容性遺漏；可讀 metadata.version 並保留舊欄位支援。既有螢光魚執行紀錄不改判。
+
+## 1.33.0 (2026-11-04)
+
+- water-source 在啟動前核對 line／anchor 與來源錨點；dry plan 顯示結果，enable 保存拒絕紀錄，錯位不啟動且不耗執行次數。生成後才存在的目標用 sourceAnchor 綁既有來源，仍須通過執行後觀察。
+- 可明示 runtimeRoot 使用獨立短隔離路徑；原 outputRoot 保留情境歷史、三次上限及 PASS 快取。原始追蹤留在短執行根，不刪證據。
+
+## 1.32.0 (2026-11-04)
+
+- 新增 agent-followup 的路線工單與證據收回。由 agent 追共用呼叫者／宣告／設定，工具核對原 finding ID、來源與證據錨點，明列未分派、缺回覆及不符項目；保留原機器判決，語意與執行證據仍由管理者覆核。不綁模型，不自動派工。
+
+## 1.31.0 (2026-11-04)
+
+- audit 初始化以 Git tracked 檔案母體探索；非 Git 保留有界檔案系統回退。boundary 對已證明局部函式 require 排除模組載入誤報，並新增用途分類計數。water-source CLI 預設摘要，--verbose 輸出完整報告。
+
+
 ## 1.30.0 (2026-11-01)
 
 - 修正 derive-map 漏列 TS/JS 裸套件匯入：`import … from '@scope/pkg/sub'`、`export … from 'pkg'`、`import type` 與字面 `import('pkg')` 以前只留 builtin，第三方套件從 edges 與 externalDependencies 消失；現在列 EXTERNAL_PACKAGE，含 file:line、specifier 與 `package`，與 Python／CJS 一致。外部邊不進閉包；tsconfig 別名與相對路徑行為不變。
@@ -303,4 +420,3 @@ G49 的歷史快照另保留 1.6.0 的結構化 wrapper reason，以及 G40 之�
 ## 1.5.0 推論與逐 gap 對帳
 
 外部推論用 derive-map --inferred-edges，不擴張靜態閉包；逐 gap 執行證據用 gap-reconcile.mjs。使用前讀 [推論層與執行對帳](inference-runtime.md)。coverage 最多 CO_OCCURRED，VERIFIED 只來自精確呼叫邊 observation；REFUTED 需要 complete:true 且保留原推論。
-

@@ -3,6 +3,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {hash} from './cassette.mjs';
 import {tokens} from './language-static.mjs';
+import {safeName,noLinks} from './walker.mjs';
 // options.mcpToolTables: pluggable patterns for tools declared as data rather than registerTool/.tool calls.
 // Each {rowPattern, flags?, files?, requireText?} — rowPattern needs a named group `name` (optionally `description`);
 // files is a path regex, requireText must appear in the file (e.g. 'tools/list'). Default none: behaviour unchanged.
@@ -17,15 +18,19 @@ export function tableTools(rel,body,tables=[]){
  }
  return out;
 }
-export function discoverEntries(root,{mcpToolTables=[]}={}){
+export function discoverEntries(root,{mcpToolTables=[],inventory=null}={}){
  const entries=[],documents=[],files=[],skipped=[];
  function scan(dir){
   for(const e of fs.readdirSync(dir,{withFileTypes:true})){
    const p=path.join(dir,e.name),rel=path.relative(root,p).replaceAll('\\','/');
    if(e.isSymbolicLink()){skipped.push({file:rel,reason:'LINK'});continue;}
    if(e.isDirectory()){if(!['.git','node_modules','.venv','__pycache__'].includes(e.name))scan(p);continue;}
-   if(!/\.(?:[cm]?js|tsx?|jsx|py|gs|html|md|json)$/i.test(e.name))continue;
-   if(fs.statSync(p).size>2*1024*1024){skipped.push({file:rel,reason:'SIZE_LIMIT'});continue;}
+   scanFile(p,rel,e);
+  }
+ }
+ function scanFile(p,rel,e){
+   if(!/\.(?:[cm]?js|tsx?|jsx|py|gs|html|md|json)$/i.test(e.name))return;
+   if(fs.statSync(p).size>2*1024*1024){skipped.push({file:rel,reason:'SIZE_LIMIT'});return;}
    const body=fs.readFileSync(p,'utf8'),sha256=hash(body),lines=body.split(/\r?\n/);files.push({file:rel,sha256});
    if(/(?:^|\/)(?:readme|skill)\.md$/i.test(rel))documents.push({file:rel,sha256});
    const add=(kind,line,signature)=>entries.push({kind,signature,arguments:'UNKNOWN: agent must read the implementation',anchor:{file:rel,line,expect:lines[line-1].trim().slice(0,240),sha256},status:'STATIC_CANDIDATE'});
@@ -47,9 +52,8 @@ export function discoverEntries(root,{mcpToolTables=[]}={}){
    }
    for(const x of tableTools(rel,body,mcpToolTables)){add('mcp-tool',x.line,x.name);Object.assign(entries.at(-1),{name:x.name,registration:'table',table:x.table,...(x.description?{description:x.description}:{})});}
    if(e.name==='package.json')try{const p=JSON.parse(body);for(const [name,command] of Object.entries(p.scripts??{}))entries.push({kind:'package-script',signature:name,arguments:command,anchor:{file:rel,line:lines.findIndex(l=>l.includes(JSON.stringify(name)))+1,expect:JSON.stringify(name),sha256},status:'STATIC_CANDIDATE'});}catch{}
-  }
  }
- scan(root);return {schema:'entry-inventory-v1',root,entries,documents,files,skipped,coverage:'Lexical candidates only. Agent reads README, SKILL and source, adds missed entries and explicit argument formats; computed registrations remain UNKNOWN.'};
+ if(inventory){if(!Array.isArray(inventory))throw Error('INVENTORY_ARRAY_REQUIRED');noLinks(root);for(const file of inventory){safeName(file);const p=path.join(root,file);noLinks(p);if(!fs.lstatSync(p).isFile())throw Error('INVENTORY_REGULAR_FILE_REQUIRED: '+file);const e={name:path.basename(file),isSymbolicLink:()=>false,isDirectory:()=>false};scanFile(p,file,e);}}else scan(root);return {schema:'entry-inventory-v1',root,entries,documents,files,skipped,coverage:'Lexical candidates only. Agent reads README, SKILL and source, adds missed entries and explicit argument formats; computed registrations remain UNKNOWN.'};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node discover-entries.mjs repo [--mcp-tables patterns.json]');process.exit(0);}
 const i=process.argv.indexOf('--mcp-tables'),mcpToolTables=i>0?JSON.parse(fs.readFileSync(process.argv[i+1],'utf8')):[];

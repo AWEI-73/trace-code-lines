@@ -79,3 +79,11 @@ JSON 政策以 categories 列允許類別，以 mappings 列 reason code 或關�
 ## 1.21.0 閱讀摘要
 
 報告按「同判定、同原因、同檔案」合併，每類預設顯示 20 組，先列正式路線，再按件數排序。每組附件數、出現處數與前三個錨點；不確定按呼叫端合約、執行證據、觸發條件等缺口分小類。省略組數明列，完整清單只放 JSON，不改「壞了」計數與原判定。 體檢卡全量依據在 `check-card.json`，其他欄位的清單預覽最多三筆，並註明省略數。`--help` 不讀設定、不執行受查程式。
+
+## 提示詞清冊
+
+`node scripts/stop-sites.mjs --prompts --root <repo> --out <prompt-sites.json> [--pattern <regex>]`。輸出在受查根外；不執行受查程式。
+沿用本檔詞法器與有界讀取：掃 JS／TS／Python 字串中 prompt／instructions／system 變數、屬性或呼叫參數，以及 prompt 表達式引用的單跳變數、多行模板與 `.md` 候選檔。
+尋找 must／never／only／do not／不得／禁止／只能／一律，按檔分組；每筆有 file、line、column、text（最多 200 字）、basis、anchor 與來源 hash。超長單行按限制詞附近切片，不先截整行；`--pattern` 比對檔名或切片原文。
+這是候選清單，不判對錯或宣稱已送模型；agent 讀呼叫處後過濾普通文件／非提示模板，與程式可接受選項及替身結果比較。動態組字、跨檔別名、巢狀模板可能漏報；超過 8 MiB 或不可讀檔明列 skipped，不跟隨 symlink；排除 .git、node_modules、.venv、venv。
+體檢卡可設 `promptSites` 收入清冊，原阻擋點對照維持不變。

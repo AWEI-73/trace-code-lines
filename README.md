@@ -1,6 +1,8 @@
-# Trace Code Lines 1.30.0
+# Trace Code Lines 1.34.0
 
 [English](#english) · [繁體中文](#traditional-chinese)
+
+UNKNOWN follow-up: [route packets, agent investigation and evidence collection](references/agent-followup.md). Group related findings by a source-backed route; retain original verdicts and review the agent's reasoning separately from file/hash checks.
 
 <a id="english"></a>
 ## English
@@ -38,7 +40,7 @@ Start a new conversation in the project you want to inspect. Keep `SKILL.md`, `s
 
 ### Use
 
-Start with `node scripts/audit.mjs --init <repo> --out <config>`, fill questions and authorized record roots, then `node scripts/audit.mjs --config <config>`. One card binds static findings, retained counts and isolated existing-test results; missing execution evidence stays UNKNOWN. See [audit](references/audit.en.md).
+Start with one question or symptom. The agent follows the source chain and delivers a five-section [chain card](references/chain-card.md). Optional scaffold: `node scripts/chain-card.mjs --init --question "Why?" --root <repo> --out <input.json>`; then `--config <input.json> --out <output-directory>`. The tool computes hashes and checks lightweight anchors. Full [audit](references/audit.en.md) and repository check cards remain available when a whole-repo inventory is needed. Every UNKNOWN carries a cause and next action; see the [playbook](references/unknown-playbook.md).
 
 Ask the agent:
 
@@ -111,6 +113,8 @@ Static parsing is bounded. Computed imports, build configuration, complete synta
 <a id="traditional-chinese"></a>
 ## 繁體中文
 
+預設一個問題或症狀 → agent 順鏈讀碼 → 五節[鏈卡](references/chain-card.md)。先讀碼，無須預填 hash 或紀錄根；整輪 audit、體檢卡與五步細查按需使用。UNKNOWN 依[對策表](references/unknown-playbook.md)填五欄；便宜且在授權內能補的先補。
+
 刪檔或改名前跑 `deletion-impact.mjs --config file`，把已安裝產物與紀錄列為 repo 外只讀留存根。repo 引用分程式／資料／歷史，留存引用依根／檔分組；命中一律要處理，缺根或不完整掃描保留 UNKNOWN，不推論新版能否接受。報告與體檢卡可加新章節。詳見[刪除影響](references/deletion-impact.md)。
 
 報告按「同判定、同原因、同檔案」合併，每類預設顯示 20 組，先列正式路線，再按件數排序。每組附件數、出現處數與前三個錨點；不確定按呼叫端合約、執行證據、觸發條件等缺口分小類。省略組數明列，完整清單只放 JSON，不改「壞了」計數與原判定。
@@ -144,7 +148,7 @@ Trace Code Lines **不把描述當成功**。查線流程要求每個結論對�
 
 ### 使用方式
 
-先 `audit.mjs --init <repo> --out <config>`，補 questions 與授權紀錄根，再 `audit.mjs --config <config>`。一張卡收齊靜態、紀錄與隔離既有測試；缺執行證據留 UNKNOWN。見[audit](references/audit.md)。
+先提出問題或症狀，agent 順鏈讀碼後交[鏈卡](references/chain-card.md)。需要整輪盤點才用 `audit.mjs --init <repo> --out <config>`，補 questions 與授權紀錄根，再 `audit.mjs --config <config>`；見[audit](references/audit.md)。
 
 可以對 agent 說：
 

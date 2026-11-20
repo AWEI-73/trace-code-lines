@@ -1,0 +1,12 @@
+{
+  "name": "trace-code-lines",
+  "private": true,
+  "description": "Optional parser for the JS/TS/Python usage-route scan. The skill runs without it (regex fallback).",
+  "type": "module",
+  "optionalDependencies": {
+    "tree-sitter-javascript": "0.25.0",
+    "tree-sitter-typescript": "0.23.2",
+    "web-tree-sitter": "0.25.10",
+    "tree-sitter-python": "0.25.0"
+  }
+}

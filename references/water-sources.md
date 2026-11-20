@@ -10,6 +10,16 @@ expected 支援 coverage 的 file、write 的 file 與可選 sha256、boundary �
 
 輸出按情境保存 attempt-1.json 到 attempt-3.json。agent 讀失敗結果後修改原計畫，再用相同 outputRoot 執行；已過情境不重跑，未過最多三次，所有計畫 hash 留存。不得另換 ID 或輸出目錄逃避次數限制。任一必要觀察未核對通過就 FAIL。前置失敗不執行後續步驟。
 
+## 執行前錨點與短路徑
+
+未加 `--enable` 的計畫會核對 `line`／`anchor` 預期及宣告來源錨點，不啟動目標、不寫檔。啟用時，錯行、文字不符、來源缺失或越界會先留下未執行紀錄，不耗正式試跑次數；修正情境後仍使用原 outputRoot 與情境 ID。
+
+執行時才生成的安裝檔，預期可加 `sourceAnchor: {file, line, expect, repo?}` 指向既有來源。這只提供啟動前來源綁定，不能取代真正目標的執行後核對；目標已存在時也會核對。
+
+Windows 的深層工作／安裝路徑可能超過某些工具的限制。可在設定明示 `runtimeRoot`，例如本次授權的 `C:/trace-run`；它必須是絕對、非磁碟根、無連結且與 clone／outputRoot 互不重疊的獨立目錄。工具在其中建立每次獨有的短執行目錄，TEMP／HOME 與 raw evidence 跟隨該次位置。
+
+`outputRoot` 仍保存原情境的 attempt ledger，變更 runtimeRoot 不會取得額外次數，也不會重派既有 PASS。原始追蹤保留在 runtimeRoot，交接時必須一併保留；它不是可任意清空的快取。不設定 runtimeRoot 時沿用原目錄配置。短根只能減少前綴長度，不能保證任意下游檔名皆受工具支援；情境的資料 home 也應放在隔離 HOME，而非深層 clone 裡。
+
 ## 通用邊界卷帶
 
 schema 為 boundary-cassette-v1，包含 anchors 與 calls。每筆 call：
@@ -91,3 +101,5 @@ harness 常被情境複製到每次不同的暫存目錄，路徑無法事先寫
 ## 工具開發模式（--tool-dev）
 
 `node water-source.mjs --config c.json --enable --tool-dev`：只在修改本工具時使用。解除三次上限，但寫入 `dev-attempt-N.json`、`dev-run-N/` 與 `water-source.tool-dev.json`，報告 `status: NOT_COUNTED`、`countsTowardVerdict: false`、`label` 說明不計入；正式 attempt 檔不讀不寫，上限仍是三次。體檢卡收到這種報告只列 `toolDev` 警示，不改 runnability 與證據等級；maintenance 直接拒收（`TOOL_DEV_RESULTS_NOT_COUNTED`）。
+
+CLI 預設輸出情境狀態、失敗預期與完整證據檔路徑；`--verbose` 輸出完整報告。檔案載入覆蓋不證明函式執行或業務派送。

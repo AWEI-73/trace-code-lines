@@ -1,58 +1,55 @@
 ---
 name: trace-code-lines
-version: 1.30.0
-description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，交付可追到證據的體檢卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
+metadata:
+  version: 1.38.0-rc.3
+description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，沿問題讀碼，交付可追到證據的鏈卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
+
 
 # 查程式碼線工具組
 
-預設做輕量檢查：靜態查線，加 agent 讀碼，加報告。適用一般 repo、工具、skill 與服務，不綁特定框架。每個結論附來源、版本、母體與缺口；缺證據寫 UNKNOWN。
+一個問題、一張有來源的鏈卡。先依情境開卡，每次只讀步進器給的這一步，不必載入整套方法。
 
-## 預設路徑
+## 從這裡開始
 
-先跑 `audit.mjs --init <repo> --out <config>`，補 questions 與授權 recordRoots；再跑 `audit.mjs --config <config>` 一次產卡。見[audit](references/audit.md)；下列五步保留供細查。
+- 壞了、錯值、很慢或沒發生：`symptom`。
+- 接手陌生儲存庫：`takeover`。
+- 改、刪、搬或改名前：`change`。
+- 接入外部工具前：`integrate`。
 
-刪除題先納題目根，合併同輪 import 邊並列數字摘要；只截其餘根，缺邊明列 UNKNOWN。
+```text
+node scripts/trace.mjs start --mode <情境> --question "一句問題" --root <repo> --out <卡片.json>
+node scripts/trace.mjs next --card <卡片.json>
+node scripts/trace.mjs status --card <卡片.json>
+```
 
-1. **確認正在讀哪份**：讀 README、SKILL.md 與版本指標；多層設定用 `version-chain.mjs`。hash 不冒充 Git commit。
-2. **找入口並讀碼**：`discover-entries.mjs <repo>` 列出命令列、網頁路由、匯出函式、技能腳本、MCP 工具、GAS API 候選。agent 逐一讀 README 與原碼，補漏、確認參數與輸出，保留搜尋範圍；以資料表宣告的 MCP 工具可用 `--mcp-tables <patterns.json>` 提供列樣式（範例 examples/mcp-table-rows.json）；未提供時不變。清冊不是完整性保證。
-3. **靜態查線**：`derive-map.mjs --config <file>` 產出閉包與終點候選。設定與原碼必須綁到同一快照；不從檔名猜功能。需要時讀 [runner](references/runner.md)、[evidence](references/evidence.md)。
-4. **宣告與實作對照**：agent 從 README、SKILL.md 與註解抽出宣告，每項附文件與原碼兩邊錨點。分類為「說了沒做」「做了沒說」「流程對不上」；找不到證據寫 UNKNOWN。負面結論需可重跑的搜尋範圍。格式見 [體檢卡](references/check-card.md)。
-阻擋點亦屬宣告對照：提供政策清單與 reason／關鍵字表，分底線、要處理、不確定；無宣告只列清單，防呆與混合條件不硬判。設定、錨點與限制見[阻擋點](references/stop-sites.md)。
+想知道某工具怎麼用、能不能接進自己的系統（JS/TS/Python）：`route`；只確認功能有沒有接好：`wired`；草稿引用的數字對回原文：`check-quotes`。用法與能力邊界見 [用途路線](references/route.md)。
 
-刪檔或改名時跑 `deletion-impact.mjs --config <file>`，把已安裝產物與紀錄列為留存根；見[刪除影響](references/deletion-impact.md)。
+接入或要試跑時，先 `preflight` 把要負責人決定的事一次問完；`--trial` 只在答覆准了「網路全關」或「只開本機」、而且建得出網路隔離時才跑，否則一律不跑並寫明原因。
 
-5. **交付**：`report.mjs --config <file>` 產出原有健檢；再用 `check-card.mjs --config <file>` 寫入 check-card.md、check-card.json 與健檢 HTML 的新增章節。卡片列入口、輸入、輸出、副作用、費用、工具、能否執行及宣告對照。快速靜態入口與安裝方法見 [README](README.md)。
+一鍵填卡：`node scripts/trace.mjs fill --card <卡> --step <n> --note "說明" --anchor "檔:行:文字"`；可重複錨點，跳步加 `--skip`，寫回即核對並印下一步。
+同命令可加 `--chain "一站"`、`--conflict "現象|方向"`、`--cleared "排除項"`、`--verify "檢查|結果"`、`--unknown "問題|類別|原因|試過|下一步|成本|理解|會不會改變本題結論"`；末欄可省略：`yes`＝會、`no`＝不會、`unsure`＝不確定；接入欄位見 [接入分診](references/integrate.md)。
+下一步只顯示第一個尚未完成的步驟。未知是誠實交代原因與目前解釋，不是待辦；探索以本卡的一句問題、固定流程以成品與宣告的驗收項目為終點，只補會或可能改變結論的未知，驗收未明須補證據或明寫交付限制，其餘僅記錄；不為清零擴張調查或自動開卡，值得另追的只留一句「另一個問題」。
+走完用 `report` 一次產鏈卡與網頁，或用印出的 `chain-card.mjs --config <卡片.json> --out <證據目錄>` 只產鏈卡並讀回；核對引用不代替語意覆核或實際重現。
 
-報告每類預設 20 組、前三錨點，不確定依缺證據分類；全量在 JSON。宣告排除與維修單規則見 [維修單](references/maintenance.md)。
+## 需要時才讀
 
-## 需要「水有沒有流過」時
-
-只有需要執行證據且已獲授權時，才讀 [水源與情境](references/water-sources.md) 及 [儀器](references/instrumentation.md)。
-水源可換成既有紀錄／卡帶、隔離測試錄帶，或 agent 寫 scenarios.json 順 API 試跑。螢光魚只記錄覆蓋、收據及邊界。
-每個情境最多三次嘗試（`--tool-dev` 僅供改工具時解除上限，結果標 NOT_COUNTED、不計入任何判定或體檢卡）；每次保存計畫、錯誤與機器判決。失敗後由 agent 讀錯誤再修情境；不得改掉預期結果湊通過。裁判只採覆蓋、收據或錨點，agent 敘述不算證據。
-證據由強到弱：真實使用 ＞ AGENT_DRIVEN_STUBBED ＞ 測試跑過 ＞ 只有靜態；替身不能升格為真實使用。
-
-按需讀取：
-- 跨 repo 依賴方向用 `boundary.mjs`；分類、錨點與缺口見 [boundary](references/boundary.md)。
-- 反查入口、importer 與回退條件：[reach](references/reach.md)，只提供判讀提示。
-- 既有事件分類、普查與路線骨架：[record-census](references/record-census.md)；單案連結：[runtime-tools](references/runtime-tools.md)。
-- 覆蓋對帳與語言限制：[language-support](references/language-support.md)。
-- 隔離試跑或拆除試驗：[run-once](references/run-once.md)。程序成功與候選拆除結果分開，逐候選列出。
-- 外部推論與缺口對帳：[inference-runtime](references/inference-runtime.md)。
-- 只有要求時才做 [流程圖](references/flowchart.md) 或 [路線動態圖](references/route-map.md)。
+- [劇本用法、通則與常見原因](references/playbooks.md)；步驟只在 [資料檔](assets/playbooks.json)。
+- [接入分診與接入卡](references/integrate.md)：邊界、機密、流向、相依及既有掃描結果；只交待確認的候選。
+- [鏈卡格式與錨點](references/chain-card.md)、[未知的交代與補查邊界](references/unknown-playbook.md)。
+- [原有細查路徑](references/detailed-workflow.md)：五步盤點、宣告對照、刪除影響、動態證據及專門工具，內容完整保留。
+- [用途路線、試跑與開卡前檢查](references/route.md)。
+- [整輪盤點](references/audit.md)、[原有健檢](references/check-card.md)、[快速入口與安裝](README.md)。
 
 ## 邊界
 
-- 原 repo 只讀。執行只在授權隔離副本；輸出與暫存只寫授權位置，保留來源 hash 與前後檢查。
-- 依賴只照既有鎖定檔安裝，關閉安裝腳本；缺鎖定檔就不自行補套件。
-- 試跑移除金鑰與 token、拒絕網路；模型及付費服務只用替身、現成假資料或既有錄音。花錢、登入真帳號、部署、寄信、正式資料寫入與 push 是硬停。
-- 每個實驗獨立 TEMP，執行後清程序與暫存、核對監聽埠。儀器是 API 掛勾，不是作業系統沙盒；Python audit 不能改寫子程序 argv。
-- 靜態邊與候選不是執行證據；exit 0 只代表程序成功，須另列回傳狀態。沒有觀測到不等於沒人用或可刪除。
-- 工具只用 Node 內建模組／Python 標準庫；不跟隨 symlink，不猜外部根。HTML 支援字面 script src；打包器設定、一般計算式動態 import、完整 AST、跨檔資料流仍有限制。
-- 保留原換行；Node UTF-8 寫入後讀回並計 CJK、?、U+FFFD、CR。修改 JS 跑 node --check 與既有 self-test。不新增測試檔。
-- 同一項同一原因連續兩次修正仍失敗，還原該項並標 FAIL。公開包不含私人路徑、片段與案例輸出。
+- 原 repo 只讀；輸出與暫存只寫授權位置，試跑僅在授權隔離副本，保留來源與前後核對。
+- 先讀記錄再讀碼，固定版本；每跳一站留錨點，分清文件宣告、程式能力與實際記錄。
+- 本題需要補查時先選低成本方法；付費、真帳號、部署、寄信、正式資料寫入與推送須有明確授權。
+- 靜態候選不當執行證據；沒有觀測不等於無人使用或可刪。負面結論附範圍。
+- 工具只用內建模組（語法樹套件可選，沒裝時退回文字比對），不跟隨連結、不猜外部根；套件與試跑細則按需讀原有細查路徑。
+- 修改後 UTF-8 讀回、語法檢查與既有自測；不新增測試檔。同項同因連續兩次修正仍失敗，還原並標失敗。
 
 ## 版本
 
-目前版本：1.30.0（2026-11-01）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.38.0-rc.3（2026-11-20，測試中）。歷史見 [changelog](references/changelog.md)。
