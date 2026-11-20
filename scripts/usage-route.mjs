@@ -484,13 +484,30 @@ function listTestText(root){let out='',n=0;const walk=(d,rel,depth)=>{if(depth>4
 // node_modules of the root and of each workspace package (pnpm keeps one per package), linked read-through into the copy
 function linkModules(root,copy){const walk=(rel,depth)=>{let es;try{es=fs.readdirSync(path.join(root,rel),{withFileTypes:true});}catch{return;}
   for(const x of es){if(!x.isDirectory())continue;const r=rel?rel+'/'+x.name:x.name;
-   if(x.name==='node_modules'){if(fs.existsSync(path.join(copy,rel))&&!fs.existsSync(path.join(copy,r)))fs.symlinkSync(path.join(root,r),path.join(copy,r),'dir');}
+   if(x.name==='node_modules'){if(fs.existsSync(path.join(copy,rel))&&!fs.existsSync(path.join(copy,r)))fs.symlinkSync(path.join(root,r),path.join(copy,r),WIN?'junction':'dir');}
    else if(depth<4&&!/^(\.git|\.venv|venv|__pycache__|dist|build)$/.test(x.name)&&!x.name.startsWith('.'))walk(r,depth+1);}};walk('',0);}
 // Trials only ever run inside a fresh network namespace (unshare -rn). If that cannot be created, nothing runs (fail closed).
 // TCL_TEST_NO_UNSHARE=1 simulates a box without it (self-test); trialStats counts every program a trial actually started.
 export const trialStats={spawned:0};
-export function netIsolation(){if(process.env.TCL_TEST_NO_UNSHARE==='1')return false;return spawnSync('unshare',['-rn','true']).status===0;}
-export const NO_ISOLATION='這台不能建立網路隔離（unshare -rn 失敗），為了不連外，試跑不跑（不會改用沒隔離的方式跑）';
+// Windows: the same namespace inside WSL (`unshare -rnm`), the scratch folder bind-mounted in and /mnt hidden, so neither the
+// network nor Windows programs (WSL interop) are reachable. Command-line trials only; servers and UI trials need Linux.
+export const WIN=process.platform==='win32';let wslOk=null;
+const toWsl=p=>{const m=/^([A-Za-z]):[\\/](.*)$/.exec(p);return m?'/mnt/'+m[1].toLowerCase()+'/'+m[2].replace(/\\/g,'/'):p.replace(/\\/g,'/');};
+export function netIsolation(){if(process.env.TCL_TEST_NO_UNSHARE==='1')return false;
+ if(WIN){if(wslOk===null)wslOk=spawnSync('wsl.exe',['-e','unshare','-rnm','true'],{windowsHide:true,timeout:30000}).status===0;return wslOk;}
+ return spawnSync('unshare',['-rn','true']).status===0;}
+export const NO_ISOLATION=WIN?'這台不能在 WSL 裡建立網路隔離（wsl.exe unshare -rnm 失敗），為了不連外，試跑不跑（不會改用沒隔離的方式跑）':'這台不能建立網路隔離（unshare -rn 失敗），為了不連外，試跑不跑（不會改用沒隔離的方式跑）';
+export const WIN_CLI_ONLY='Windows 經 WSL 只做命令列試跑；會開連線埠的路線與介面試跑要在 Linux 上試';
+// Run cmd with no network. base is the scratch folder holding everything the run may touch (copy, inputs, work folders, home).
+function nsSpawn(cmd,{base,cwd,env,timeout,input,stdio}){
+ const o={encoding:'utf8',timeout,input,stdio,maxBuffer:4*1024*1024};
+ if(!WIN)return spawnSync('unshare',['-rn','--',...cmd],{...o,cwd,env});
+ const M='/tmp/tcl-iso-'+path.basename(base),map=s=>typeof s==='string'&&s.includes(base)?s.split(base).join(M).replace(/\\/g,'/'):s;
+ const lenv={PATH:'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'};
+ for(const [k,v] of Object.entries(env??{}))if(k!=='PATH')lenv[k]=k==='PYTHONPATH'?String(v).split(path.delimiter).map(map).join(':'):map(String(v));
+ const script='mkdir -p "$1" && mount --bind "$2" "$1" && mount -t tmpfs none /mnt && cd "$3" && shift 3 && exec "$@"';
+ const r=spawnSync('wsl.exe',['-e','env','-i',...Object.entries(lenv).map(([k,v])=>k+'='+v),'unshare','-rnm','--','sh','-c',script,'sh',M,toWsl(base),map(cwd),...cmd.map(map)],{...o,windowsHide:true});
+ const back=s=>typeof s==='string'?s.split(M).join(base):s;return {...r,stdout:back(r.stdout),stderr:back(r.stderr)};}
 // No isolation: an empty scratch folder only (execIso refuses to run anything), never a copy of the repo.
 function isoCopy(root){const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo');if(!netIsolation())return {base,copy};
  try{copyRepo(root,copy);linkModules(root,copy);}catch(e){fs.rmSync(base,{recursive:true,force:true});throw e;}return {base,copy};}
@@ -499,11 +516,12 @@ function trialEnv(iso,cmd0){const env={PATH:process.env.PATH,HOME:iso.base,TMPDI
 function execIso(iso,root,cmd,{timeoutMs=8000,input}={}){
  if(/^python[\d.]*$/.test(cmd[0])&&pyVenv(root))cmd=[pyVenv(root),...cmd.slice(1)];
  if(!netIsolation())return {status:null,stdout:'',stderr:NO_ISOLATION,error:Object.assign(Error(NO_ISOLATION),{code:'NO_ISOLATION'})};
- const full=['unshare','-rn','--',...cmd];trialStats.spawned++;
- return spawnSync(full[0],full.slice(1),{cwd:iso.copy,env:trialEnv(iso,cmd[0]),encoding:'utf8',timeout:timeoutMs,input,stdio:[input!=null?'pipe':'ignore','pipe','pipe'],maxBuffer:4*1024*1024});}
+ trialStats.spawned++;
+ return nsSpawn(cmd,{base:iso.base,cwd:iso.copy,env:trialEnv(iso,cmd[0]),timeout:timeoutMs,input,stdio:[input!=null?'pipe':'ignore','pipe','pipe']});}
 export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',plan=null,server=null,triggers=[]}={}){
  root=path.resolve(root);if(!run)throw Error('試跑要給 --run，例如 --run "node bin/cli.js {input}"');
  if(!netIsolation())return {ran:false,skipped:NO_ISOLATION,network:'unavailable',run,cases:[]};
+ if(WIN&&server)return {ran:false,skipped:WIN_CLI_ONLY,network:'unavailable',run,cases:[]};
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo'),inDir=path.join(base,'inputs');copyRepo(root,copy);fs.mkdirSync(inDir);
  linkModules(root,copy);
  // fake input in the format the sentence names (CSV, JSON, DOCX, PDF, HTML …); the good one carries MARKER
@@ -527,7 +545,8 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
   // servers: loopback only (still no outside network), probe with GETs, then stop it
   const probe=server&&unshare&&!viaStdin;const penv=probe?{...env,TCL_PROBE:JSON.stringify({cmd,paths:server.paths??[],waitMs:8000})}:env;
   const full=probe?['unshare','-rn','--','sh','-c','ip link set lo up 2>/dev/null; exec "$0" "$1"',process.execPath,path.join(path.dirname(new URL(import.meta.url).pathname),'serve-probe.mjs')]:['unshare','-rn','--',...cmd];trialStats.spawned++;
-  const r0=spawnSync(full[0],full.slice(1),{cwd:work,env:penv,encoding:'utf8',timeout:timeoutMs,input:viaStdin?fs.readFileSync(file):undefined,stdio:[viaStdin?'pipe':'ignore','pipe','pipe'],maxBuffer:4*1024*1024});
+  const sio={timeout:timeoutMs,input:viaStdin?fs.readFileSync(file):undefined,stdio:[viaStdin?'pipe':'ignore','pipe','pipe']};
+  const r0=probe?spawnSync(full[0],full.slice(1),{...sio,cwd:work,env:penv,encoding:'utf8',maxBuffer:4*1024*1024}):nsSpawn(cmd,{...sio,base,cwd:work,env:penv});
   let r=r0,srv=null;if(probe){const line=(r0.stdout??'').split('\n').find(l=>l.startsWith('@@TCL_PROBE@@'));if(line){srv=JSON.parse(line.slice(13));r={status:srv.exit,stdout:srv.stdout,stderr:srv.stderr};for(const x of srv.gets)if(x.body)x.body=x.body.replaceAll(base,'<隔離>');}}
   const stdout=r.stdout??'',stderr=r.stderr??'';
   const dep=stderr.match(/(?:ModuleNotFoundError|ImportError): No module named '([\w.]+)'/)?.[1]??stderr.match(/Cannot find (?:module|package) '([^']+)'/)?.[1]??null;
@@ -539,7 +558,7 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
   fs.writeFileSync(path.join(proj,'package.json'),JSON.stringify({name:'trial-app',version:'0.0.0',private:true,type:'module',dependencies:{react:'^19.0.0'}},null,2)+'\n');
   // peer packages the tool expects in a project (e.g. @astryxdesign/core) and that live in this repo: linked into the made-up project
   const peers=Object.keys(plan.peers??{});const pj=JSON.parse(fs.readFileSync(path.join(proj,'package.json'),'utf8'));
-  for(const n of peers){const d=plan.peers[n];const dst=path.join(proj,'node_modules',...n.split('/'));fs.mkdirSync(path.dirname(dst),{recursive:true});fs.symlinkSync(path.join(copy,d),dst,'dir');pj.dependencies[n]=JSON.parse(fs.readFileSync(path.join(copy,d,'package.json'),'utf8')).version??'*';}
+  for(const n of peers){const d=plan.peers[n];const dst=path.join(proj,'node_modules',...n.split('/'));fs.mkdirSync(path.dirname(dst),{recursive:true});fs.symlinkSync(path.join(copy,d),dst,WIN?'junction':'dir');pj.dependencies[n]=JSON.parse(fs.readFileSync(path.join(copy,d,'package.json'),'utf8')).version??'*';}
   fs.writeFileSync(path.join(proj,'package.json'),JSON.stringify(pj,null,2)+'\n');
   // project files the sentence names (AGENTS.md, CLAUDE.md …) already exist with the owner's own text, as in a real project
   for(const f of new Set((question.match(/\b[A-Za-z][\w-]*\.md\b/g)??[])))fs.writeFileSync(path.join(proj,f),'# my rules\n');
@@ -552,8 +571,12 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
  if(!scaffold&&!plan?.multi&&!viaStdin&&!server)triggers.slice(0,3).forEach((x,k)=>{const ext=path.extname(good),inp=path.join(inDir,'trig-'+(k+1)+ext);fs.copyFileSync(good,inp);const h0=fs.readFileSync(inp);
   const outP=path.join(base,'work-trig-'+(k+1),'out'+ext);const r0=run;run=run.replace('{input}',x.flag+(x.value?' '+outP:'')+' {input}');runOne('trig-'+(k+1),'加 '+x.flag+(x.value?' <新檔>':''),inp);run=r0;
   const c=cases.at(-1),ow=fs.existsSync(outP);c.trigger={flag:x.flag,value:x.value,defined:x.file+':'+x.line,outWritten:ow,outBytes:ow?fs.statSync(outP).size:0,outHead:ow?fs.readFileSync(outP,'utf8').slice(0,300):null,inputChanged:!fs.readFileSync(inp).equals(h0)};});
+ // the program itself is missing where the trial runs (e.g. no node inside WSL): nothing about the tool was learned
+ const NOTFOUND=/(?:exec: |^)(\S+): (?:not found|No such file)/m;
+ const gone=cases.length&&cases.every(c=>c.exit===127&&NOTFOUND.test(c.stderr));
+ if(gone){const prog=cases[0].stderr.match(NOTFOUND)?.[1]??'這個程式';fs.rmSync(base,{recursive:true,force:true});return {ran:false,skipped:(WIN?'WSL 裡':'試跑環境裡')+'沒有 '+prog+'，試跑沒跑成'+(WIN?'（要在 WSL 裝 '+prog+'，或到 Linux 試）':''),network:'off',run,cases:[]};}
  const a=cases.find(c=>c.id==='good'),b=cases.find(c=>c.id==='good-again');if(a&&b)b.sameStdout=a.stdout===b.stdout;
- const out={ran:true,...(plan?.multi?{project:true,peers:plan.peers??{},multi:plan.multi.map(x=>({cmd:x.cmd,display:x.display,why:x.why}))}:scaffold?{scaffold:true}:{}),viaStdin,python:py,...(venv?{venv:path.relative(root,venv)}:{}),...(plan?{inferred:true,display:plan.display,why:plan.why,help:plan.help,sure:plan.sure}:{}),network:'off',...(server?{server:true}:{}),isolation:server?'獨立網路命名空間（只有本機回環，連不到外面），在 repo 副本裡跑；服務起來後用 GET 試讀再關掉':'獨立網路命名空間（完全沒有網路），在 repo 副本裡跑',run,inputs:{format:input?path.extname(input):fk.fmt,marker:input?null:MARKER,good:/^(docx|pdf)$/.test(fk.fmt??'')&&!input?'（'+fk.fmt+' 二進位檔，內含「'+MARKER+'」）':fs.readFileSync(good,'utf8').slice(0,400),bad:fs.readFileSync(bad,'utf8').slice(0,400).replace(/[\u0000-\u0008]/g,'·')},cases,at:new Date().toISOString()};
+ const out={ran:true,...(plan?.multi?{project:true,peers:plan.peers??{},multi:plan.multi.map(x=>({cmd:x.cmd,display:x.display,why:x.why}))}:scaffold?{scaffold:true}:{}),viaStdin,python:py,...(venv?{venv:path.relative(root,venv)}:{}),...(plan?{inferred:true,display:plan.display,why:plan.why,help:plan.help,sure:plan.sure}:{}),network:'off',...(server?{server:true}:{}),isolation:server?'獨立網路命名空間（只有本機回環，連不到外面），在 repo 副本裡跑；服務起來後用 GET 試讀再關掉':WIN?'WSL 裡的獨立網路命名空間（完全沒有網路，Windows 磁碟藏起來），在 repo 副本裡跑':'獨立網路命名空間（完全沒有網路），在 repo 副本裡跑',run,inputs:{format:input?path.extname(input):fk.fmt,marker:input?null:MARKER,good:/^(docx|pdf)$/.test(fk.fmt??'')&&!input?'（'+fk.fmt+' 二進位檔，內含「'+MARKER+'」）':fs.readFileSync(good,'utf8').slice(0,400),bad:fs.readFileSync(bad,'utf8').slice(0,400).replace(/[\u0000-\u0008]/g,'·')},cases,at:new Date().toISOString()};
  fs.rmSync(base,{recursive:true,force:true});return out;
 }
 // ---- short mode: "is feature X wired?" A → … → B, plus whether a test reaches B. ----

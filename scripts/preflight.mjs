@@ -78,27 +78,31 @@ export function scanTarget(root,{paths=[],ast=null}={}){
 }
 const opt=(value,label)=>({value,label});
 // A local socket or pipe listener is not outbound network; it is reported as a finding, not a capability need.
+// The 負責人 is asked only about going outside, spending, real accounts, secrets and handing a model a shell;
+// everything else (reading, writing to a given folder, running other programs, an isolated trial) the agent decides by default.
+export const OWNER_ONLY=['network','real-account','paid','secrets','mcp-shell'];
+const AGENT_CAPS=['fs-read','fs-write','exec'];
 const CAP_NEED={subprocess:'exec',network:'network',paid:'paid','real-account':'real-account'};
 export function buildQuestions(env,target,{mode='integrate'}={}){
  const k=target.byKind,live=x=>(k[x]??[]).filter(f=>!f.test&&!f.retired&&!f.typesOnly&&!f.unreached),has=x=>live(x).length>0,ev=x=>live(x).slice(0,5).map(f=>f.file+(f.line?':'+f.line:''));
  const available=env.scanners.filter(s=>s.found).map(s=>s.name),missing=env.scanners.filter(s=>!s.found).map(s=>s.name);
  const q=[],settled=[];
- q.push({id:'run',decide:'能不能實際跑這份程式，看它真的做了什麼？',why:'不跑就只能讀程式碼猜；跑也只在隔離副本、限時、不碰你的帳號。'+(has('install-scripts')?'這份程式有安裝時自動跑的腳本，試跑也不會執行它。':''),default:'none',scope:'只影響這次查線',
+ q.push({id:'run',decide:'能不能實際跑這份程式，看它真的做了什麼？',why:'不跑就只能讀程式碼猜；跑也只在隔離副本、限時、不碰你的帳號。'+(has('install-scripts')?'這份程式有安裝時自動跑的腳本，試跑也不會執行它。':''),default:'loopback',by:'agent',scope:'只影響這次查線',
   options:[opt('none','不跑，只讀程式碼'),opt('deny','在隔離副本跑，網路全關（只攔常見寫法）'),opt('loopback','在隔離副本跑，只開本機'),opt('container','在你準備好的無網路容器裡跑')],evidence:[...ev('install-scripts'),...ev('network')].slice(0,5)});
- if(has('paid')||has('real-account'))q.push({id:'paidCalls',decide:'跑的時候碰到付費或真帳號呼叫怎麼辦？',why:'查線不會替你花錢；預設一律擋下或換成假的。',default:'stub',scope:'只在試跑',options:[opt('stub','一律擋下或換成假的'),opt('account','用你另外提供的測試帳號')],evidence:[...ev('paid'),...ev('real-account')].slice(0,5),dependsOn:{run:['deny','loopback','container']}});
- if(available.length)q.push({id:'scanners',decide:'要不要用你電腦上已裝的掃描工具？',why:'查線本身不查已知弱點；掃描工具要你自己跑，結果交給我核對。',default:'skip',scope:'我只建議，不安裝也不替你跑',options:[opt('skip','不用，相關項目寫成未知'),opt('import-existing','你自己跑，把結果檔交給我')],available,missing,evidence:[]});
+ if(has('paid')||has('real-account'))q.push({id:'paidCalls',decide:'跑的時候碰到付費或真帳號呼叫怎麼辦？',why:'查線不會替你花錢；預設一律擋下或換成假的。',default:'stub',by:'agent',scope:'只在試跑',options:[opt('stub','一律擋下或換成假的'),opt('account','用你另外提供的測試帳號')],evidence:[...ev('paid'),...ev('real-account')].slice(0,5),dependsOn:{run:['deny','loopback','container']}});
+ if(available.length)q.push({id:'scanners',decide:'要不要用你電腦上已裝的掃描工具？',why:'查線本身不查已知弱點；掃描工具要你自己跑，結果交給我核對。',default:'skip',by:'agent',scope:'我只建議，不安裝也不替你跑',options:[opt('skip','不用，相關項目寫成未知'),opt('import-existing','你自己跑，把結果檔交給我')],available,missing,evidence:[]});
  else settled.push({id:'scanners',value:'skip',reason:'電腦上沒有可用的掃描工具，相關項目寫成未知；需要時再請你自行安裝。',missing});
  if(mode==='integrate'){
   const needs=[...new Set(Object.entries(CAP_NEED).filter(([kind])=>has(kind)).map(([,cap])=>cap))];
-  q.push({id:'capabilities',decide:'接進來之後，你願意讓它做哪些事？（可多選）',why:'沒勾的就是不准；程式需要但你沒給的，會寫進結論的條件。'+(needs.length?'掃描看到它可能需要：'+needs.map(v=>CAP_LABEL[v]).join('、')+'。':''),default:['fs-read'],scope:'最小授權，逐項勾選',
+  q.push({id:'capabilities',decide:'接進來之後，你願意讓它做哪些事？（可多選）',why:'沒勾的就是不准；程式需要但你沒給的，會寫進結論的條件。'+(needs.length?'掃描看到它可能需要：'+needs.map(v=>CAP_LABEL[v]).join('、')+'。':''),default:AGENT_CAPS,by:needs.some(v=>OWNER_ONLY.includes(v))?'owner':'agent',scope:'最小授權，逐項勾選',
    options:CAPS.map(([v,,long])=>opt(v,long)),multi:true,needs,evidence:[...ev('subprocess'),...ev('paid'),...ev('real-account')].slice(0,5)});
-  if(has('mcp-tools'))q.push({id:'mcpTools',decide:'它提供的工具，會交給你的模型直接呼叫嗎？',why:'會的話，模型給的參數一律當成不可信；有危險工具就會建議不要接。',default:'yes',scope:'只讀',options:[opt('yes','會'),opt('no','不會'),opt('unknown','還不確定')],evidence:ev('mcp-tools')});
+  if(has('mcp-tools'))q.push({id:'mcpTools',decide:'它提供的工具，會交給你的模型直接呼叫嗎？',why:'會的話，模型給的參數一律當成不可信；有危險工具就會建議不要接。',default:'yes',by:'agent',scope:'只讀',options:[opt('yes','會'),opt('no','不會'),opt('unknown','還不確定')],evidence:ev('mcp-tools')});
   else settled.push({id:'mcpTools',value:'none-found',reason:'掃描沒看到提供給模型的工具。'});
  }
  settled.push({id:'agentInstructions',value:'names-only',reason:'寫給 agent 的指令檔一律只列檔名、不讀內容（可能藏注入文字）。'});
  if(has('ci')||has('container'))settled.push({id:'ciContainer',value:'in-scope',reason:'自動化流程與容器設定只讀不跑，預設一起查；不想查就在「不查的部分」排除。'});
- if(target.retiredDirs.length)q.push({id:'outOfScope',decide:'這些看起來是退役或封存的部分，要排除不查嗎？（可多選）',why:'排除的部分在報告寫明「沒查」，不算查過沒問題。測試程式不用排除，報告會自動分開放。',default:target.retiredDirs.map(r=>r.dir),scope:'路徑前綴',options:target.retiredDirs.map(r=>opt(r.dir,r.dir+'（'+r.count+' 檔）')),multi:true,freeform:true,evidence:target.retiredDirs.map(r=>r.dir)});
- if(!target.git)q.push({id:'noGit',decide:'沒有版本控制，要用目前內容當快照嗎？',why:'無法固定版本，結論只對這次內容有效。',default:'snapshot',scope:'只讀',options:[opt('snapshot','用目前內容當快照'),opt('stop','先停，等你給版本')],evidence:['.']});
+ if(target.retiredDirs.length)q.push({id:'outOfScope',decide:'這些看起來是退役或封存的部分，要排除不查嗎？（可多選）',why:'排除的部分在報告寫明「沒查」，不算查過沒問題。測試程式不用排除，報告會自動分開放。',default:target.retiredDirs.map(r=>r.dir),by:'agent',scope:'路徑前綴',options:target.retiredDirs.map(r=>opt(r.dir,r.dir+'（'+r.count+' 檔）')),multi:true,freeform:true,evidence:target.retiredDirs.map(r=>r.dir)});
+ if(!target.git)q.push({id:'noGit',decide:'沒有版本控制，要用目前內容當快照嗎？',why:'無法固定版本，結論只對這次內容有效。',default:'snapshot',by:'agent',scope:'只讀',options:[opt('snapshot','用目前內容當快照'),opt('stop','先停，等你給版本')],evidence:['.']});
  return {questions:q,settled};
 }
 // Fixed capability options shared by the preflight question and the card's --permission field.
@@ -118,7 +122,7 @@ export function preflight(root,{paths=[],mode='integrate',ast=null}={}){
  const environment=scanEnvironment(),target=scanTarget(root,{paths,ast}),{questions,settled}=buildQuestions(environment,target,{mode});
  const body={schema:'trace-preflight-questions-v2',createdAt:new Date().toISOString(),root:target.root,mode,focus:paths,environment,
   target:{engine:ast?.engine??{name:'regex',reason:'沒有提供語法樹；只用文字比對'},entries:ast?.entries??null,git:target.git,fileCount:target.fileCount,totalFiles:target.totalFiles,testFiles:target.testFiles,retiredDirs:target.retiredDirs,findings:target.findings},questions,settled,
-  rules:['只讀；不安裝、不下載、不執行受查程式。','agent 只提議；負責人決定。','未回覆的項目一律視為未授權；接入結論最多「有條件可接」。','問題只在開卡前問，查到一半不再追問；中途發現的新項目記未知（只有負責人能答）。']};
+  rules:['只讀；不安裝、不下載、不執行受查程式。','讀檔、寫檔（限指定資料夾）、跑其他程式與隔離試跑由 agent 依預設決定；連外網、花錢、真帳號、機密、讓模型下系統指令才問負責人。','未回覆的項目一律視為未授權；負責人那幾項沒回覆時，接入結論最多「有條件可接」。','問題只在開卡前問，查到一半不再追問；中途發現的新項目記未知（只有負責人能答）。']};
  body.questionsSha256=sha256(JSON.stringify(body.questions));return body;
 }
 const applies=(q,a)=>!q.dependsOn||Object.entries(q.dependsOn).every(([k,v])=>[].concat(v).includes(a[k]));
@@ -130,7 +134,9 @@ function validAnswer(q,v){
  return q.options.some(o=>o.value===v);
 }
 // Turn a reply into an answers file. `set` keys may be question ids or shown numbers; values may be option values or 甲乙丙.
-export function answersFrom(qs,{acceptDefaults=false,set={},by,simulated=false,at=new Date().toISOString()}={}){
+// agentDefaults: the agent fills every question it owns with the default; questions for the 負責人 stay unanswered unless --set.
+export const ownerAsks=qs=>(qs.questions??[]).filter(q=>q.by==='owner');
+export function answersFrom(qs,{acceptDefaults=false,agentDefaults=false,set={},by,simulated=false,at=new Date().toISOString()}={}){
  const shown=qs.questions,answers={},errors=[];
  const pick=(q,raw)=>{const one=s=>{const i=LETTERS.indexOf(s);return i>=0?q.options[i]?.value:s;};
   if(q.multi){const parts=[...String(raw).split(/[,，、]/).map(s=>s.trim()).filter(Boolean)].flatMap(s=>/^[甲乙丙丁戊己庚辛]+$/.test(s)?[...s]:[s]);return raw===''||raw==='無'?[]:parts.map(one);}
@@ -140,8 +146,9 @@ export function answersFrom(qs,{acceptDefaults=false,set={},by,simulated=false,a
   if(!q){if(key==='outOfScope'){answers.outOfScope=pick({multi:true,options:[]},raw);continue;}errors.push('沒有第 '+key+' 題');continue;}
   const v=pick(q,raw);if(!validAnswer(q,v)){errors.push('第 '+(shown.indexOf(q)+1)+' 題的回答不在選項內：'+raw);continue;}answers[q.id]=v;
  }
+ if(agentDefaults&&!acceptDefaults)for(const q of shown)if(q.by!=='owner'&&!(q.id in answers)&&applies(q,{...Object.fromEntries(shown.map(x=>[x.id,x.default])),...answers}))answers[q.id]=q.default;
  if(acceptDefaults)for(const q of shown)if(!(q.id in answers)&&applies(q,{...Object.fromEntries(shown.map(x=>[x.id,x.default])),...answers}))answers[q.id]=q.default;
- return {answers:{schema:'trace-preflight-answers-v2',simulated:simulated===true,answeredBy:by??'UNKNOWN',answeredAt:at,acceptedDefaults:acceptDefaults,questionsSha256:qs.questionsSha256,answers},errors};
+ return {answers:{schema:'trace-preflight-answers-v2',simulated:simulated===true,answeredBy:by??'UNKNOWN',answeredAt:at,acceptedDefaults:acceptDefaults,agentDefaults:agentDefaults&&!acceptDefaults,questionsSha256:qs.questionsSha256,answers},errors};
 }
 // Resolve answers into a scope header. Unanswered items stay unauthorized.
 export function resolveScope(qs,ans){
@@ -164,11 +171,16 @@ export function resolveScope(qs,ans){
 }
 // The text an agent relays to the 負責人 as-is: numbered, one tap per question, plain Chinese.
 export function relayText(qs){
- const q=qs.questions,dep=q.filter(x=>x.dependsOn).length,out=['開卡前請負責人決定 '+(q.length-dep)+' 件事'+(dep?'（另有 '+dep+' 題只在前一題選了跑時才要答）':'')+'。直接回「照建議」，或只回要改的題號和選項，例如「1乙」或「3甲丙」：'];
- q.forEach((x,i)=>{const d=[].concat(x.default);
+ const mine=(qs.questions??[]).filter(x=>x.by!=='owner'),lab=x=>[].concat(x.default).map(v=>x.options.find(o=>o.value===v)?.label??v).join('、')||'無';
+ const agentLines=mine.length?['agent 依預設決定（不用回）：',...mine.map(x=>'　・'+x.decide.replace(/（可多選）/,'')+'→ '+lab(x))]:[];
+ if(!ownerAsks(qs).length)return ['不用問負責人：這次沒有連外網、花錢、真帳號、機密或讓模型下系統指令的需要。',...agentLines,...(qs.settled?.length?['已由掃描或安全規則決定：',...qs.settled.map(s=>'　・'+s.reason)]:[])].join('\n');
+ const q=ownerAsks(qs),dep=q.filter(x=>x.dependsOn).length,out=['開卡前請負責人決定 '+(q.length-dep)+' 件事'+(dep?'（另有 '+dep+' 題只在前一題選了跑時才要答）':'')+'。直接回「照建議」，或只回要改的題號和選項，例如「1乙」或「3甲丙」：'];
+ // numbers stay those of the full question list, so 「3甲」 maps to the same question in `answer --set`
+ q.forEach(x=>{const d=[].concat(x.default),i=qs.questions.indexOf(x);
   out.push((x.dependsOn?'　'+(i+1)+'.（前一題選了跑才要答）':(i+1)+'. ')+x.decide);
   out.push('　'+x.options.map((o,j)=>LETTERS[j]+' '+o.label+(d.includes(o.value)?'〔建議〕':'')).join('　'));
   out.push('　為什麼：'+x.why);});
+ out.push(...agentLines);
  if(qs.settled?.length){out.push('已由掃描或安全規則決定（不用回）：');for(const s of qs.settled)out.push('　・'+s.reason);}
  return out.join('\n');
 }

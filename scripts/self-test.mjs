@@ -567,7 +567,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...await g420Checks(root),...await g430Checks(root),...await g440Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
+  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...await g420Checks(root),...await g430Checks(root),...await g440Checks(root),...await g450Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2513,11 +2513,19 @@ function g370Checks(root){
  });
  check('one reply becomes the answers file; unanswered stays unauthorized and caps the decision',()=>{
   let {answers,errors}=answersFrom(q,{acceptDefaults:true,set:{[String(q.questions.findIndex(x=>x.id==='capabilities')+1)]:'甲丙'},by:'測試',simulated:true});
-  assert.deepEqual(errors,[]);assert.equal(answers.simulated,true);assert.deepEqual(answers.answers.capabilities,['fs-read','exec']);assert.equal(answers.answers.run,'none');assert(!('paidCalls' in answers.answers));
-  let r=resolveScope(q,answers);assert.deepEqual(r.pending,[]);assert.equal(r.decisionCap,null);assert.equal(r.scope.isolatedRun,false);assert.deepEqual(r.scope.outOfScope,['history/']);assert.equal(r.answers.agentInstructions.status,'settled');
+  assert.deepEqual(errors,[]);assert.equal(answers.simulated,true);assert.deepEqual(answers.answers.capabilities,['fs-read','exec']);assert.equal(answers.answers.run,'loopback');assert(!('paidCalls' in answers.answers));
+  let r=resolveScope(q,answers);assert.deepEqual(r.pending,[]);assert.equal(r.decisionCap,null);assert.equal(r.scope.isolatedRun,true);assert.deepEqual(r.scope.outOfScope,['history/']);assert.equal(r.answers.agentInstructions.status,'settled');
   ({answers}=answersFrom(q,{set:{run:'乙'},by:'測試'}));r=resolveScope(q,answers);assert(r.pending.includes('capabilities'));assert.equal(r.decisionCap,'有條件可接');assert.equal(r.scope.network,'deny');assert.deepEqual(r.scope.capabilities,[]);
   assert(answersFrom(q,{set:{1:'癸'},by:'x'}).errors.length);assert(answersFrom(q,{set:{outOfScope:'../x'},by:'x'}).errors.length);
   r=resolveScope(q,{...answersFrom(q,{acceptDefaults:true,by:'x'}).answers,questionsSha256:'0'.repeat(64)});assert.equal(r.decisionCap,'有條件可接');assert.equal(r.questionsMatch,false);
+ });
+ check('the agent answers its own questions by default; only network, spending, real accounts, secrets and a model shell go to the 負責人',()=>{
+  const capQ=q.questions.find(x=>x.id==='capabilities'),ownerNeeds=capQ.needs.filter(v=>['network','real-account','paid','secrets','mcp-shell'].includes(v));
+  assert.equal(capQ.by,ownerNeeds.length?'owner':'agent');for(const x of q.questions.filter(x=>x.id!=='capabilities'))assert.equal(x.by,'agent',x.id);
+  const ag=answersFrom(q,{agentDefaults:true,by:'agent'}).answers,ra=resolveScope(q,ag);assert.equal(ag.answers.run,'loopback');assert.equal(ag.agentDefaults,true);
+  if(capQ.by==='owner'){assert(!('capabilities' in ag.answers));assert.deepEqual(ra.pending,['capabilities']);assert.equal(ra.decisionCap,'有條件可接');assert(relayText(q).includes('開卡前請負責人決定 1 件事'));}
+  const none={...q,questions:q.questions.map(x=>({...x,by:'agent'}))},t=relayText(none);assert(t.startsWith('不用問負責人')&&t.includes('agent 依預設決定'),t);
+  const an=resolveScope(none,answersFrom(none,{agentDefaults:true,by:'agent'}).answers);assert.deepEqual(an.pending,[]);assert.equal(an.decisionCap,null);assert(an.scope.isolatedRun);
  });
  check('decision 可接 is refused while pending; section anchors count for the step; capability gaps are flagged',()=>{
   const c=startTrace('integrate','可否接入',repo);c.preflight=resolveScope(q,answersFrom(q,{set:{run:'none',outOfScope:'history/'},by:'x'}).answers);
@@ -2528,7 +2536,7 @@ function g370Checks(root){
   for(const id of ['D2','D5','D6','D7','D8'])assert.deepEqual(jargonHits(scopeNotes(c,id).join('\n')),[],id);
   const d=startTrace('integrate','可否接入',repo);d.preflight=resolveScope(q,answersFrom(q,{acceptDefaults:true,by:'x'}).answers);
   fillTrace(d,['--step','1','--note','讀','--chain','入口','--anchor','a.mjs:2:exec'],[]);assert(!inspectTrace(d).flags.some(f=>f.startsWith('第 1 步還沒有錨點')));
-  d.preflight.scope.capabilityNeeds=['exec'];fillTrace(d,['--step','8','--decision','可接'],[]);assert(inspectTrace(d).flags.some(f=>f.includes('沒准的能力')&&f.includes('執行其他程式')));
+  d.preflight.scope.capabilityNeeds=['network'];fillTrace(d,['--step','8','--decision','可接'],[]);assert(inspectTrace(d).flags.some(f=>f.includes('沒准的能力')&&f.includes('連外網')));
  });
  check('offline HTML: 30-second top block, tests separated, out-of-scope excluded, comments masked, agent JSON, nothing external',()=>{
   assert(!/IGNORE/.test(safeSnippet('x(); // '+bad)));assert(!/IGNORE/.test(safeSnippet('<!-- '+bad+' -->')));
@@ -2598,7 +2606,7 @@ async function g410Checks(root){
  const checks=[],area=join(root,'g410');const ast=await loadAst();
  if(!ast.ok){checks.push('G410 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
  // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
- if(!hasNetIsolation()){checks.push('G410 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
+ if(process.platform==='win32'||!hasNetIsolation()){checks.push('G410 SKIPPED: 這組試跑要 Linux 的 unshare -rn（Windows 經 WSL 只驗命令列，見 G450）');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G410 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G410 '+name);};
  const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body);};
  const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
@@ -2674,7 +2682,7 @@ async function g400Checks(root){
  const ast=await loadAst();
  if(!ast.ok){checks.push('G400 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
  // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
- if(!hasNetIsolation()){checks.push('G400 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
+ if(process.platform==='win32'||!hasNetIsolation()){checks.push('G400 SKIPPED: 這組試跑要 Linux 的 unshare -rn（Windows 經 WSL 只驗命令列，見 G450）');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G400 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G400 '+name);};
  const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body,'utf8');};
  const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
@@ -2762,7 +2770,7 @@ async function g390Checks(root){
  const ast=await loadAst();
  if(!ast.ok||!ast.langs.python){checks.push('G390 SKIPPED: tree-sitter-python not installed');return checks;}
  // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
- if(!hasNetIsolation()){checks.push('G390 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
+ if(process.platform==='win32'||!hasNetIsolation()){checks.push('G390 SKIPPED: 這組試跑要 Linux 的 unshare -rn（Windows 經 WSL 只驗命令列，見 G450）');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G390 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G390 '+name);};
  put('pyproject.toml','[project]\nname = "minipy"\nversion = "0.1.0"\n\n[project.scripts]\nminipy = "minipy.cli:main"\n');
  put('README.md','# minipy\n\n```\n$ cat input.csv | minipy > out.json\n```\n');
@@ -2837,13 +2845,32 @@ async function g440Checks(root){
  checks.push('G440 a capability the sentence names but the route never reaches is an unknown, never 「沒有寫檔」');
  return checks;
 }
+// G450: on Windows, command-line trials go through WSL (unshare -rnm, /mnt hidden). Runs only on Windows whose WSL can isolate.
+async function g450Checks(root){
+ const checks=[];if(process.platform!=='win32'){checks.push('G450 SKIPPED: 只在 Windows 驗 WSL 試跑');return checks;}
+ if(!hasNetIsolation()){checks.push('G450 SKIPPED: 這台的 WSL 建不出網路隔離');return checks;}
+ const repo=join(root,'g450'),put=(n,b)=>{fs.mkdirSync(join(repo,n,'..'),{recursive:true});fs.writeFileSync(join(repo,n),b,'utf8');};
+ put('pkg/__init__.py','');
+ put('pkg/__main__.py',"import sys,csv,json,os\nif not os.path.exists(sys.argv[1]):\n    print('no file',file=sys.stderr);sys.exit(2)\nprint(json.dumps(list(csv.DictReader(open(sys.argv[1],encoding='utf-8')))))\ntry:\n    import urllib.request;urllib.request.urlopen('http://example.com',timeout=3);print('NET_OK',file=sys.stderr)\nexcept Exception:\n    print('NET_BLOCKED',file=sys.stderr)\nprint('MNT='+str(os.path.exists('/mnt/c')),file=sys.stderr)\n");
+ const git=args=>spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...args],{cwd:repo,encoding:'utf8',windowsHide:true});
+ for(const x of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(git(x).status,0);
+ const t=runTrial(repo,{run:'python3 -m pkg {input}',question:'給它一份 CSV'});
+ if(t.ran===false&&/沒有 python3/.test(t.skipped??'')){checks.push('G450 SKIPPED: WSL 裡沒有 python3');return checks;}
+ const c=id=>t.cases.find(x=>x.id===id);
+ assert(t.ran&&/WSL/.test(t.isolation),JSON.stringify(t).slice(0,300));assert.equal(c('good').exit,0,c('good').stderr);assert(c('good').json.ok,c('good').stdout);
+ assert.equal(c('missing').exit,2);assert(/NET_BLOCKED/.test(c('good').stderr)&&!/NET_OK/.test(c('good').stderr),c('good').stderr);
+ assert(/MNT=False/.test(c('good').stderr),'Windows drives are hidden inside the trial');assert(!JSON.stringify(t).includes('/tmp/tcl-iso-'),'the WSL mount path is mapped back');
+ const n=runTrial(repo,{run:'nosuchprog_tcl pkg {input}',question:'給它一份 CSV'});assert(n.ran===false&&/沒有 nosuchprog_tcl/.test(n.skipped??''),JSON.stringify(n).slice(0,200));
+ checks.push('G450 Windows trial through WSL: no network, Windows drives hidden, exit codes and JSON recorded, a missing program is 試跑沒跑成');
+ return checks;
+}
 async function g380Checks(root){
  const checks=[],area=join(root,'g380'),repo=join(area,'repo');for(const d of ['bin','lib'])fs.mkdirSync(join(repo,d),{recursive:true});
  const put=(name,body)=>fs.writeFileSync(join(repo,name),body,'utf8');
  const ast=await loadAst();
  if(!ast.ok){checks.push('G380 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
  // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
- if(!hasNetIsolation()){checks.push('G380 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
+ if(process.platform==='win32'||!hasNetIsolation()){checks.push('G380 SKIPPED: 這組試跑要 Linux 的 unshare -rn（Windows 經 WSL 只驗命令列，見 G450）');return checks;}
  const check=async(name,fn)=>{await fn();checks.push('G380 '+name);};
  put('package.json','{"name":"mini","version":"1.0.0","bin":{"mini":"./bin/mini.js"},"main":"./lib/index.js"}\n');
  put('README.md','# mini\n\n```\n$ mini input.csv > out.json\n```\n');
@@ -2911,7 +2938,7 @@ async function g420Checks(root){
  const checks=[],area=join(root,'g420');const ast=await loadAst();
  if(!ast.ok){checks.push('G420 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
  // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
- if(!hasNetIsolation()){checks.push('G420 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
+ if(process.platform==='win32'||!hasNetIsolation()){checks.push('G420 SKIPPED: 這組試跑要 Linux 的 unshare -rn（Windows 經 WSL 只驗命令列，見 G450）');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G420 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G420 '+name);};
  const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body);};
  const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
@@ -3002,7 +3029,7 @@ async function g430Checks(root){
  const checks=[],area=join(root,'g430');const ast=await loadAst();
  if(!ast.ok){checks.push('G430 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
  // These groups chain on trial results; trials need a network namespace (unshare -rn, Linux) and never run without one.
- if(!hasNetIsolation()){checks.push('G430 SKIPPED: 試跑要 unshare -rn（Linux），這台沒有');return checks;}
+ if(process.platform==='win32'||!hasNetIsolation()){checks.push('G430 SKIPPED: 這組試跑要 Linux 的 unshare -rn（Windows 經 WSL 只驗命令列，見 G450）');return checks;}
  const check=async(name,fn)=>{try{await fn();}catch(e){e.message='G430 '+name.slice(0,40)+': '+e.message+' @'+String(e.stack).split('\n').find(l=>l.includes('self-test'))?.trim();throw e;}checks.push('G430 '+name);};
  const put=(repo,name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body);};
  const gitInit=repo=>{for(const a of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...a],{cwd:repo,encoding:'utf8',windowsHide:true}).status,0);};
