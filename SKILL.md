@@ -52,4 +52,4 @@ node scripts/trace.mjs status --card <卡片.json>
 
 ## 版本
 
-目前版本：1.38.0-rc.4（2026-11-20，測試中）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.38.0-rc.5（2026-11-21，測試中）。歷史見 [changelog](references/changelog.md)。

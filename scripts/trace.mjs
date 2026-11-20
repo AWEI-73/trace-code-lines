@@ -107,7 +107,7 @@ export function inspectTrace(input,books=playbooks){
   if(r.affects==='no')continue;
   if(r.flags.includes('未交代原因'))flags.push('未知第 '+(r.index+1)+' 項沒交代原因。');
   if(r.missing.length)flags.push('未知第 '+(r.index+1)+' 項交代未齊。');
-  if(r.flags.includes('UNKNOWN_CLASS_INVALID'))flags.push('未知第 '+(r.index+1)+' 項的類別無效。');
+  if(r.flags.includes('UNKNOWN_CLASS_INVALID'))flags.push('未知第 '+(r.index+1)+' 項的類別無效（'+'可用：沒去跑、由模型決定、單次異常、資料沒了、要負責人判斷、範圍或授權外'+'）；用 fix --class '+(r.index+1)+'=沒去跑 這類寫法改。');
   if(r.flags.includes('UNKNOWN_AFFECTS_INVALID'))flags.push('未知第 '+(r.index+1)+' 項的是否影響結論選項無效。');
   if(r.flags.includes('應先補做'))flags.push('未知第 '+(r.index+1)+' 項可先補做。');
  }
@@ -139,6 +139,7 @@ export function fillTrace(c,args,errors=[]){
    const p=value===undefined?[]:value.split('|');
    if(!value?.trim()||formats[flag]&&((flag==='--unknown'?![7,8].includes(p.length):p.length!==format.split('|').length)||p.some(x=>!x.trim()))||flag==='--version'&&(![1,2].includes(p.length)||p.some(x=>!x.trim())))throw Error('期望 '+format+'；收到 '+p.length+' 欄（各欄不可空白）');
    if(flag==='--unknown'&&p.length===8&&!['yes','no','unsure'].includes(p[7]))throw Error('末欄須選會、不會或不確定，輸入方式請見說明');
+   if(flag==='--unknown'&&!Object.values(UNKNOWN_CLASS_ZH).includes(UNKNOWN_CLASS_ZH[p[1].trim()]??p[1].trim()))throw Error('第 2 欄類別無效：'+p[1]+'；'+'可用：沒去跑、由模型決定、單次異常、資料沒了、要負責人判斷、範圍或授權外');
    if(flag==='--version'){c.version={...c.version,repo:c.root,commit:p[0],running:p[1]??c.version?.running??'UNKNOWN'};touched=true;continue;}
    if(flag==='--note'){if(!validStep)throw Error('無有效 --step，說明未寫入');step.notes=value;touched=true;continue;}
    if(flag==='--anchor'){
