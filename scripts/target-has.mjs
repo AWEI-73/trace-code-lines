@@ -65,7 +65,7 @@ export function targetHas(target,terms,{name=null,packages=[],question=''}={}){
   note:'文字搜尋，不是執行；「已有」要有程式證據：有人 import 的同名模組、有人呼叫的函式、或 import／宣告依賴了做這件事的知名套件；「部分」= 程式只接受這個格式，或定義了但沒人用；「只有文件提到」= 只在說明文件出現（弱，不算已有）；「缺口」= 沒找到（不等於確定沒有）。'};
 }
 // Terms worth checking: the question's format/work words + what the tool itself handles (XConverter classes, export targets).
-const FORMAT=new Set(['docx','doc','pdf','pptx','ppt','xlsx','xls','html','csv','json','epub','zip','ipynb','msg','rss','image','audio','markdown','md','odt','rtf','svg','png']);
+const FORMAT=new Set(['docx','doc','pdf','pptx','ppt','xlsx','xls','html','csv','json','epub','zip','ipynb','msg','rss','image','audio','markdown','md','odt','rtf','svg','png','sql']);
 export function toolTerms(g,question=''){const t=new Set();
  for(const w of question.toLowerCase().replace(/[\w-]+\.(json|md|ya?ml|toml|lock|js|ts|mjs)\b/g,' ').match(/[a-z][a-z0-9]{1,}/g)??[])if(FORMAT.has(w)&&!/^(markdown|md)$/.test(w)||/^(slide|slides|deck|codemod|template|scaffold|theme|component|export)s?$/.test(w))t.add(w.replace(/s$/,'')==='slide'?'slide':w);
  for(const f of g?.files?.values()??[])for(const u of f.units.values()){const m=u.cls&&u.name===u.cls&&/^_?([A-Z][a-z]+)(Converter|Exporter|Reader|Loader)$/.exec(u.cls);if(m&&FORMAT.has(m[1].toLowerCase())&&!/^(markdown|md)$/i.test(m[1]))t.add(m[1].toLowerCase());}

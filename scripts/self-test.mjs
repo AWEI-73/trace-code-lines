@@ -3090,5 +3090,21 @@ s.listen(0,'127.0.0.1',()=>console.log('  Local: http://localhost:'+s.address().
   assert.equal(a.status,1,a.stdout+a.stderr);assert(/120/.test(a.stdout),a.stdout);assert.equal(b.status,0,b.stdout+b.stderr);
   const t=spawnSync(process.execPath,[join(here,'trace.mjs'),'check-quotes','--root',src,ok],{encoding:'utf8'});assert(t.status===0||t.status===1,t.stderr);
  });
+ // --- blind test (sqlparse-like): console script `pkg.__main__:main` that only re-imports main from pkg/cli.py ---
+ const sp=join(area,'sqlfmt');
+ put(sp,'pyproject.toml','[project]\nname = "sqlfmt"\nversion = "1.0"\n\n[project.scripts]\nsqlfmt = "sqlfmt.__main__:main"\n');
+ put(sp,'sqlfmt/__init__.py','');put(sp,'sqlfmt/__main__.py','#!/usr/bin/env python\n# license header\n"""Entrypoint for python -m sqlfmt."""\n\nimport sys\n\nfrom sqlfmt.cli import main\n\nif __name__ == "__main__":\n    sys.exit(main())\n');
+ put(sp,'sqlfmt/cli.py',"import argparse\nimport sys\n\ndef main(args=None):\n    p = argparse.ArgumentParser()\n    p.add_argument('filename')\n    p.add_argument('-o', '--outfile')\n    a = p.parse_args(args)\n    if a.filename == '-':\n        s = sys.stdin.read()\n    else:\n        with open(a.filename) as f:\n            s = f.read()\n    s = s.upper()\n    if not a.outfile:\n        sys.stdout.write(s)\n        return 0\n    with open(a.outfile, 'w') as f:\n        f.write(s)\n    return 0\n");
+ put(sp,'README.md','# sqlfmt\n\n```bash\nsqlfmt --reindent query.sql\n```\n\n```yaml\n  hooks:\n    - id: sqlfmt\n```\n');gitInit(sp);
+ await check('blind test fixes: `mod:main` re-imported from cli.py is followed; entry line skips comments/docstring; YAML `- id:` is not usage; .sql example file is replaced; SQL fake input; stdin condition and an untried write are said',async()=>{
+  const q='給它一份 SQL 檔，排版（縮排）後輸出成新檔，會不會改到原檔？';const mm=await traceRoute(sp,{question:q,ast});
+  const st=mm.stations??mm.route;const ent=st.find(x=>x.role==='entry');assert.equal(ent.line,5,JSON.stringify(ent));
+  assert(mm.touches.route.some(t=>t.cap==='write-file'&&t.file==='sqlfmt/cli.py'),JSON.stringify(mm.touches.route.map(t=>t.cap+t.file)));
+  assert(!(mm.usage??[]).some(u=>/- id:/.test(u.text)),JSON.stringify(mm.usage));
+  const plan=inferRun(sp,mm);assert(/--reindent \{input\}$/.test(plan.run)&&!/query\.sql/.test(plan.run),plan.run);
+  const {fakeInput,formatOf}=await import('./fake-inputs.mjs');assert.equal(formatOf(q),'sql');assert.equal(fakeInput('sql').ext,'.sql');
+  const a=draftAnswer({...mm,trial:{inputs:{format:'sql',marker:'M'},cases:[{id:'good',exit:0,changed:[],stdout:'M',stderr:''}]}}).text;
+  assert(/a\.filename == '-' 時改讀標準輸入/.test(a),a);
+ });
  return checks;
 }

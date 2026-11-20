@@ -26,9 +26,10 @@ const FORMATS={
  pdf:{ext:'.pdf',good:pdf,bad:()=>Buffer.from('%PDF-1.4\n garbage, no objects\n')},
  html:{ext:'.html',good:()=>'<!doctype html><html><head><title>t</title></head><body><h1>'+MARKER+'</h1><p>Amy, 30, Taipei</p></body></html>\n',bad:()=>'<html><body><h1>unclosed <p <<<\n'},
  md:{ext:'.md',good:()=>'# '+MARKER+'\n\nAmy, 30, Taipei\n',bad:()=>'\u0000\u0001\n'},
+ sql:{ext:'.sql',good:()=>"select name, age from people where city = 'Taipei' and note = '"+MARKER+"';\n",bad:()=>"selec from ((( where 'unterminated\n"},
  txt:{ext:'.txt',good:()=>MARKER+'\nAmy, 30, Taipei\n',bad:()=>'\u0000\u0001not valid\n'},
 };
 // Which format the sentence is about: explicit words first (DOCX, PDF, HTML …), then CSV/JSON.
 export function formatOf(question=''){const q=question.toLowerCase();
- for(const [k,re] of [['docx',/docx|word 檔|word檔|\.doc\b/],['pdf',/pdf/],['html',/html|網頁/],['csv',/csv/],['md',/markdown 檔|\.md\b/],['json',/json/]])if(re.test(q))return k;return null;}
+ for(const [k,re] of [['docx',/docx|word 檔|word檔|\.doc\b/],['pdf',/pdf/],['html',/html|網頁/],['sql',/\bsql\b/],['csv',/csv/],['md',/markdown 檔|\.md\b/],['json',/json/]])if(re.test(q))return k;return null;}
 export function fakeInput(fmt){const f=FORMATS[fmt]??FORMATS.txt;return {ext:f.ext,good:f.good(),bad:f.bad(),fmt:FORMATS[fmt]?fmt:'txt'};}
