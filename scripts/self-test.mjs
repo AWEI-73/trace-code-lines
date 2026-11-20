@@ -567,7 +567,7 @@ try {
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
   newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
-  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...await g420Checks(root),...await g430Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
+  const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...await g420Checks(root),...await g430Checks(root),...await g440Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {
   const resolvedRoot=resolve(root),resolvedTemp=resolve(temp);
@@ -2815,6 +2815,26 @@ async function g390Checks(root){
   const sc=await astPreflight(repo);assert(sc.findings.some(f=>f.file==='minipy/plugins/xml.py'&&f.reached));assert(sc.findings.some(f=>f.file==='minipy/upload.py'&&!f.reached));
   const g0=buildGraph({...ast,langs:{...ast.langs,python:undefined}},repo);assert.equal([...g0.files.keys()].filter(f=>f.endsWith('.py')).length,0);
  });
+ return checks;
+}
+// G440: static route honesty, no trial (runs on any box with the parser). Real failure 2026-11-20: a CLI whose
+// subcommands live behind a registry got 「這條路沒有寫檔的站、未知 0 項」 while the route stopped at a version gate.
+async function g440Checks(root){
+ const checks=[],repo=join(root,'g440');const ast=await loadAst();
+ if(!ast.ok){checks.push('G440 SKIPPED: tree-sitter not installed ('+ast.reason+')');return checks;}
+ const put=(name,body)=>{fs.mkdirSync(join(repo,name,'..'),{recursive:true});fs.writeFileSync(join(repo,name),body,'utf8');};
+ put('package.json','{"name":"kit","version":"1.0.0","bin":{"kit":"./bin/kit.mjs"}}\n');
+ put('README.md','# kit\n\n```\n$ kit component Button\n```\n');
+ put('bin/kit.mjs',"const name=process.argv[2];\nif(!name){console.error('usage');process.exit(2);}\nconst mod=await import('../commands/'+name+'.mjs');\nawait mod.run(process.argv.slice(3));\n");
+ put('commands/component.mjs',"import fs from 'node:fs';\nexport async function run(a){fs.writeFileSync('cache.json',JSON.stringify(a));console.log(a[0]);}\n");
+ const git=args=>spawnSync('git',['-c','user.name=f','-c','user.email=f@example.invalid',...args],{cwd:repo,encoding:'utf8',windowsHide:true});
+ for(const x of [['init','-q'],['add','-A'],['commit','-q','-m','f']])assert.equal(git(x).status,0);
+ const m=await traceRoute(repo,{question:'用 kit component 查元件說明，會不會寫檔？',ast});
+ const nr=m.unknowns.filter(u=>u.kind==='not-reached');
+ assert(nr.length&&nr[0].term==='component'&&nr[0].file==='commands/component.mjs',JSON.stringify(m.unknowns));
+ assert(!m.answer.text.includes('這條路沒有寫檔的站'),m.answer.text);assert(/沒追到|不保證/.test(m.answer.text),m.answer.text);
+ assert(!m.answer.text.includes('kit <檔案>'),'no input file is read on this route');
+ checks.push('G440 a capability the sentence names but the route never reaches is an unknown, never 「沒有寫檔」');
  return checks;
 }
 async function g380Checks(root){

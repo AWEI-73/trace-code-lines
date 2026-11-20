@@ -201,6 +201,11 @@ export async function traceRoute(root,{question='',entry:hint=null,fn=null,ast=n
   else{model.framework={total:fwAll.length,picked:[],how:'全部'};if(fwAll.length>1)model.unknowns.push({kind:'framework',text:'repo 用 '+[...new Set(fwAll.map(e=>e.framework))].join('、')+' 註冊了 '+fwAll.length+' 個'+(fwAll.some(e=>e.kind==='route')?'路由／':'')+'指令（例：'+fwAll.slice(0,4).map(e=>e.name).join('、')+'），問句沒點名，這次全部算進路線，範圍會偏大；在問句寫指令名或路徑即可縮小。'});}}
  const parent=reach(g,roots,{classes:model.apiClasses??null,hints:KEYWORDS(question),framework:fwSel});if(parent.dynPicked)model.dynPicked=parent.dynPicked;if(parent.methodPicked){model.methodPicked=parent.methodPicked;for(const p of parent.methodPicked)model.unknowns.push({kind:'inferred',text:'有 '+p.total+' 個類別都有 '+p.method+'()，依問句只接 '+p.picked.join('、')+'（推論）；其他格式的處理不算這條路。'});}model.reachedUnits=parent.size;delete model.apiClasses;
  model.capabilities=whereIs(g,parent,model.toolTerms??[]);
+ // The sentence names a capability (component, export, slide …) whose module exists but is not on the route: the route never got there,
+ // so nothing it says about writes or network covers that part. Record it instead of a clean bill.
+ for(const term of model.toolTerms??[]){const hits=model.capabilities.filter(c=>c.term===term);
+  if(!hits.length||hits.some(c=>c.onRoute)||(model.framework?.picked??[]).some(x=>String(x.name).toLowerCase()===term))continue;const h=hits[0];
+  model.unknowns.push({kind:'not-reached',term,file:h.file,text:'問句點名的 `'+term+'` 沒追到：它在 '+h.file+(h.via.length?'（由 '+h.via.slice(0,2).map(v=>v.file+':'+v.line).join('、')+' 載入）':'')+'，從入口追不到（可能是動態分派或指令登錄表）；這部分寫不寫檔、連不連網都沒看到，要讀碼或試跑確認。'});}
  const all=touches(g,parent).filter(t=>!(t.file===entryFile&&t.cap==='dynamic'&&false));
  const test=t=>TEST_PATH.test(t.file);
  // A touch with no condition of its own may still sit in a function only called under a condition (if magic: run()).
@@ -283,20 +288,20 @@ export function draftAnswer(m){
  if(!e)return {text:'還找不到入口；請用 --entry 指定。',parts};
  if(m.engine?.name!=='tree-sitter')return {text:'沒有語法解析，這次無法自動追路線。入口看起來是'+(e.kind==='bin'?'命令列 `'+e.name+'`（'+e.file+'）':'函式庫 `'+e.name+'`（'+e.file+'）')+'。請先在 skill 資料夾執行 `npm install --ignore-scripts`，或改用 preflight＋start 的讀碼流程；下面列的是文字比對看到的線索，沒分是不是這條路會走到。',parts:{caveats:[]},draft:true};
  const cmd0=m.framework?.picked?.find(x=>x.kind==='command')?.name;
- parts.entry=e.kind==='bin'?'可以先接命令列入口 `'+e.name+(cmd0?' '+cmd0:'')+' <檔案>`'+(m.framework?.picked?.some(x=>x.kind==='route')?'，這條路走 '+m.framework.picked.filter(x=>x.kind==='route').slice(0,3).map(x=>'`'+x.name+'`').join('、')+' 路由':''):'可以先接函式入口 `require(\''+e.name+'\')`'+(m.target?.names?.length?' 的 `'+m.target.names.join('`、`')+'`':'');
+ parts.entry=e.kind==='bin'?'可以先接命令列入口 `'+e.name+(cmd0?' '+cmd0:'')+(R.some(t=>t.cap==='read-file'||t.cap==='stdin')?' <檔案>':' …')+'`'+(m.framework?.picked?.some(x=>x.kind==='route')?'，這條路走 '+m.framework.picked.filter(x=>x.kind==='route').slice(0,3).map(x=>'`'+x.name+'`').join('、')+' 路由':''):'可以先接函式入口 `require(\''+e.name+'\')`'+(m.target?.names?.length?' 的 `'+m.target.names.join('`、`')+'`':'');
  if(e.kind!=='bin'&&!m.target&&(m.unknowns??[]).some(u=>u.kind==='target'))parts.entry+='（問句點名的函式找不到，以下以整個 API 為範圍，可用 --fn 指定）';
  const reads=R.filter(t=>t.cap==='read-file'&&!/exists|stat|access/.test(t.canon??''));
  parts.input=reads.length?'它讀你給的檔（'+[...new Set(reads.map(t=>short(t.canon)))].join('、')+'）'+(has('stdin')?(()=>{const t=R.find(t=>t.cap==='stdin'),c=(t?.ownCtx??t?.ctx??[]).find(x=>/^當 /.test(x));return c?'，'+c.replace(/^當 /,'')+' 時改讀標準輸入（'+t.file+':'+t.line+'）':'，也會讀標準輸入（'+t.file+':'+t.line+'）';})():''):has('stdin')?'它從標準輸入讀資料':'輸入從參數傳入';
  const writes=R.filter(t=>t.cap==='write-file');
  // never say 「不寫檔」 when something on the route was not followed (external packages, dynamic calls) or a write sits behind a pattern we cannot read
- const unseen=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import'].includes(u.kind));const KIND={dynamic:'動態載入','dynamic-call':'動態呼叫',package:'外部套件','unresolved-import':'找不到的 import'};
+ const unseen=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import','not-reached'].includes(u.kind));const KIND={'not-reached':'問句點名的功能沒追到',dynamic:'動態載入','dynamic-call':'動態呼叫',package:'外部套件','unresolved-import':'找不到的 import'};
  const noWrite=unseen.length?'沒看到寫檔，但有 '+unseen.length+' 處（'+[...new Set(unseen.map(u=>KIND[u.kind]))].join('、')+'）沒追進去，不保證':'這條路沒有寫檔的站';parts.noWrite=noWrite;
  const blindW=R.filter(t=>t.blind?.length);parts.blind=blindW.map(t=>t.file+':'+t.line+' '+t.blind[0]);
  const onlyIfW=x=>!!x.guard||(x.ownCtx??x.ctx??[]).some(c=>/^當 /.test(c)&&!/不成立/.test(c));
  const gWhy=t=>t.guard?t.guard.text+'（'+t.file+':'+t.line+'；條件 '+t.guard.lines.join('、')+' 行）':short(t.canon)+' '+t.file+':'+t.line+' 只在「'+(t.ownCtx??t.ctx)[0].slice(0,40)+'」時';
  parts.output=writes.length&&writes.every(onlyIfW)?'只在特定情況寫檔：'+[...new Set(writes.slice(0,2).map(gWhy))].join('；')+'；其餘'+(has('stdout')?'結果印到標準輸出':'結果由回傳值交回'):writes.length?'會寫檔（'+[...new Set(writes.map(t=>short(t.canon)))].join('、')+'），要給它專用資料夾':has('stdout')?'結果印到標準輸出；'+noWrite:'結果由回傳值交回；'+noWrite;
  const other=[...new Set(R.filter(t=>OTHER_PROGRAM.has(t.cap)).map(t=>t.label))];
- const pend=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import'].includes(u.kind)).length;
+ const pend=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import','not-reached'].includes(u.kind)).length;
  const narrow=(m.unknowns??[]).find(u=>u.kind==='narrow');
  const onlyIf=x=>(x.ownCtx??x.ctx??[]).some(c=>/^當 /.test(c)&&!/不成立/.test(c));
  const allCond=other.length&&R.filter(t=>OTHER_PROGRAM.has(t.cap)).every(onlyIf);
@@ -369,7 +374,7 @@ export function draftAnswer(m){
  if(/登入|login|claude|codex|gemini|模型|agent/i.test(m.question??'')){const ag=x=>x.filter(t=>t.agentCli);const onR=ag(R),els=ag(m.touches?.elsewhere??[]);
   parts.agent=onR.length?'這條路會啟動 '+[...new Set(onR.map(t=>t.agentCli))].join('、')+'（'+onR[0].file+':'+onR[0].line+'），要用你的登入與額度':els.length?'這條路不用登入 AI 代理；repo 另一處會啟動 '+[...new Set(els.map(t=>t.agentCli))].join('、')+'（'+els.slice(0,2).map(t=>t.file+':'+t.line).join('、')+'，不在這條路上），用到那部分才要你的登入':'沒看到它啟動 Claude、Codex 等 AI 代理 CLI';}
  // the question asks for something this route never reaches (export in a UI button, a codemod in another command …)
- const FMT=/^(pdf|pptx|ppt|docx|xlsx|html|csv|epub|png|svg|codemod|scaffold|template|theme)$/,caps=(m.capabilities??[]).filter(c=>FMT.test(c.term)||c.term==='export'&&!(m.capabilities??[]).some(x=>FMT.test(x.term)));
+ const FMT=/^(pdf|pptx|ppt|docx|xlsx|html|csv|epub|png|svg|codemod|scaffold|template|theme|component|slides?|deck)$/,caps=(m.capabilities??[]).filter(c=>FMT.test(c.term)||c.term==='export'&&!(m.capabilities??[]).some(x=>FMT.test(x.term)));
  const off=caps.filter(c=>!c.onRoute),on=new Set(caps.filter(c=>c.onRoute).map(c=>c.term));const offT=[...new Set(off.filter(c=>!on.has(c.term)).map(c=>c.term))];
  if(offT.length&&t?.project)parts.offRoute='原碼路線只追到入口與指令分派，'+offT.slice(0,3).map(x=>x.toUpperCase()).join('、')+' 的實作（'+off.filter(c=>offT.includes(c.term)).slice(0,2).map(c=>c.file).join('、')+'）由指令執行時載入，以上各指令的行為以試跑為準';
  else if(offT.length)parts.offRoute='問句要的 '+offT.slice(0,3).map(t=>t.toUpperCase()+' 在 '+off.filter(c=>c.term===t).slice(0,2).map(c=>c.file+(c.via.length?'（由 '+c.via.slice(0,2).map(v=>v.file+':'+v.line).join('、')+' 載入'+(c.ui?'，介面功能':'')+'）':'（沒找到誰載入）')).join('、')).join('；')+'，這條入口走不到，不能當成這個步驟的輸出';
