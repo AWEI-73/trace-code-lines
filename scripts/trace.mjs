@@ -9,7 +9,7 @@ import {noLinks} from './walker.mjs';
 import {gitRead} from './git-evidence.mjs';
 import {targetHas} from './target-has.mjs';
 import {adapterContract} from './adapter-contract.mjs';
-import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun,packageNames,choiceNotes} from './usage-route.mjs';
+import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun,packageNames,choiceNotes,guardTriggers} from './usage-route.mjs';
 import {renderRouteHtml} from './route-report-html.mjs';
 import {uiTargets} from './ui-trial.mjs';
 import {checkQuotes} from './check-quotes.mjs';
@@ -240,7 +240,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
       let uiJob=null;if(!args.includes('--no-ui-trial')&&uiTargets(m).length){console.log('介面試跑：'+uiTargets(m).map(t=>t.term.toUpperCase()+'（'+t.file+'）').join('、')+'，在隔離副本開 dev 伺服器，用無頭瀏覽器按按鈕（和命令列試跑同時跑）…');
        const d=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-uijob-'));fs.writeFileSync(path.join(d,'m.json'),JSON.stringify({root:m.root,question:m.question,capabilities:m.capabilities}));
        const ch=spawn(process.execPath,[fileURLToPath(new URL('./ui-trial.mjs',import.meta.url)),path.join(d,'m.json'),path.join(d,'r.json'),get('--ui-keep')?path.resolve(get('--ui-keep')):''],{stdio:'ignore'});uiJob={d,done:new Promise(r=>ch.on('exit',r))};}
-      m.trial=runTrial(root,{run,plan,server:listens?{paths:(m.framework?.picked??[]).filter(e=>e.kind==='route'&&/GET|ALL/.test(e.method??'GET')).map(e=>e.name.replace(/^\S+\s+/,'')).filter(p=>p.startsWith('/')&&!/[:*{(]/.test(p))}:null,input:get('--fake-input')&&path.resolve(get('--fake-input')),badInput:get('--bad-input')&&path.resolve(get('--bad-input')),question:m.question});
+      m.trial=runTrial(root,{run,plan,triggers:guardTriggers(m),server:listens?{paths:(m.framework?.picked??[]).filter(e=>e.kind==='route'&&/GET|ALL/.test(e.method??'GET')).map(e=>e.name.replace(/^\S+\s+/,'')).filter(p=>p.startsWith('/')&&!/[:*{(]/.test(p))}:null,input:get('--fake-input')&&path.resolve(get('--fake-input')),badInput:get('--bad-input')&&path.resolve(get('--bad-input')),question:m.question});
       if(m.trial.cases.find(c=>c.id==='good')?.json?.ok){for(const s of m.stations)if(/^推論/.test(s.status))s.status+='；試跑有正確輸出，間接支持';for(const u of m.unknowns)if(u.kind==='inferred')u.text+='試跑有正確輸出，間接支持這些推論。';}
       if(uiJob){await uiJob.done;try{m.uiTrial=JSON.parse(fs.readFileSync(path.join(uiJob.d,'r.json'),'utf8'));}catch{m.uiTrial={ran:false,skipped:'介面試跑沒有留下結果'};}fs.rmSync(uiJob.d,{recursive:true,force:true});}
       m.answer=draftAnswer(m);}
@@ -253,7 +253,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
    if(get('--target')&&command!=='route-report'){const GENERIC=/^(slide|deck|export)$/;m.targetHas=targetHas(path.resolve(get('--target')),m.toolTerms??[],{name:get('--target-name'),packages:packageNames(m.root),question:m.question});const th=m.targetHas;
     if(m.answer&&(th.rows.length||th.uses?.length)){const ev=r=>r.evidence[0]?r.evidence[0].file+':'+r.evidence[0].line:'';const has=th.rows.filter(r=>r.status==='has');
      const usesTxt=th.uses?.length?th.target+' 已經裝了 '+[...new Map(th.uses.map(u=>[u.name+u.version,u])).values()].slice(0,3).map(u=>u.name+' '+u.version+'（'+u.file+':'+u.line+'）').join('、')+(m.repo?.version||m.entry?.version?'，這次看的是 '+(m.entry?.version??m.repo.version):'')+'；':'';
-     const txt=usesTxt+(has.length?th.target+' 已有 '+has.map(r=>r.term.toUpperCase()+'（'+ev(r)+'）').join('、')+'，這部分不算缺口':th.target+' 沒找到同功能的模組')+([...th.gap,...th.partial,...(th.docOnly??[])].some(x=>!GENERIC.test(x))?'；真正補的是 '+[...th.partial.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase()+'（程式只接受這個格式或定義了沒人用）'),...(th.docOnly??[]).filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase()+'（只有文件提到）'),...th.gap.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase())].slice(0,6).join('、'):'')+'（文字搜尋，見接線）';
+     const txt=usesTxt+(has.length?th.target+' 已有 '+has.map(r=>r.term.toUpperCase()+'（'+ev(r)+'）').join('、')+'，這部分不算缺口':th.target+' 沒找到同功能的模組')+([...th.gap,...th.partial,...(th.docOnly??[])].some(x=>!GENERIC.test(x))?(!has.length&&!th.partial.length&&!(th.docOnly??[]).length?'，接進來就是補上 ':'；要補的是 ')+[...th.partial.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase()+'（程式只接受這個格式或定義了沒人用）'),...(th.docOnly??[]).filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase()+'（只有文件提到）'),...th.gap.filter(x=>!GENERIC.test(x)).map(x=>x.toUpperCase())].slice(0,6).join('、'):'')+'（文字搜尋，見接線）';
      m.answer.parts.target=txt;m.answer.text=m.answer.text.replace(/。?$/,'。')+txt+'。';}}
    if(m.stations&&command!=='wired')m.adapter=adapterContract(m);
    const html=command==='route-report'?path.resolve(out):get('--html')&&path.resolve(get('--html'));

@@ -1,6 +1,7 @@
 // 1.38 usage-route: start from "how I want to use this repo", trace that one route station by station.
 // 使用說明 → 入口 → 讀取輸入 → 轉換 → 輸出 (+ 錯誤). Only touches this route reaches count as 接入條件;
 // the rest are listed as "repo 有、這條路沒走到". Read-only unless --trial (isolated copy, network off).
+import {attachGuards} from './guards.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -205,8 +206,9 @@ export async function traceRoute(root,{question='',entry:hint=null,fn=null,ast=n
  // A touch with no condition of its own may still sit in a function only called under a condition (if magic: run()).
  const callerCtx=t=>{if(t.ctx?.length)return [];const p=pathTo(parent,t.unit);for(const s of p.slice(-3).reverse())if(s.ctx?.length)return ['呼叫處 '+s.file+':'+s.line+' '+s.ctx[0]];return [];};
  model.touches.route=all.filter(t=>t.reached).map(t=>{const cc=callerCtx(t);return {...t,ownCtx:t.ctx??[],ctx:[...(t.ctx??[]),...cc],via:pathTo(parent,t.unit).map(s=>s.file?s.file+':'+s.line:null).filter(Boolean).slice(-6)};});
+ try{attachGuards(root,model.touches.route);}catch(e){model.unknowns.push({kind:'guard',text:'寫檔條件分析失敗：'+String(e.message).slice(0,80)});}
  model.touches.elsewhere=all.filter(t=>!t.reached&&!test(t));
- const st=[],add=(label,role,x,extra={})=>{if(!x)return;const c=codeAt(g,root,x.file,x.line);st.push({label,role,file:x.file,line:x.line,...c,unit:x.unit??null,ctx:x.ctx??[],via:x.via??[],status:x.status??'原碼已核對',...extra});};
+ const st=[],add=(label,role,x,extra={})=>{if(!x)return;const c=codeAt(g,root,x.file,x.line);st.push({label,role,file:x.file,line:x.line,...c,unit:x.unit??null,ctx:x.ctx??[],via:x.via??[],status:x.status??'原碼已核對',...(x.guard?{guard:x.guard}:{}),...extra});};
  const kw0=KEYWORDS(question).filter(k=>!['convert','transform','parse','process','render','compile','format','handle'].includes(k)),mine=found.usage.filter(u=>u.entry===entry.kind+':'+entry.name);
  const u0=mine.find(u=>kw0.some(k=>u.text.toLowerCase().includes(k))&&(!model.framework?.picked?.[0]||u.text.includes(' '+model.framework.picked[0].name)))??mine.find(u=>kw0.some(k=>u.text.toLowerCase().includes(k)))??mine.find(u=>/\bFILE\b|<\s*\S|\bcat\b/.test(u.text))??mine[0]??(entry.kind==='bin'?null:found.usage[0]);
  if(u0)add('使用說明','usage',{...u0,status:'文件'});
@@ -271,6 +273,11 @@ function firstCodeLine(f){if(!f)return 1;let doc=null;// skips comments (# in Py
  const i=f.lines.findIndex(l=>{const t=l.trim();if(doc){if(t.includes(doc))doc=null;return false;}const q=t.match(/^[rRuU]?("""|''')/);if(q){if(!t.slice(q.index+q[0].length).includes(q[1]))doc=q[1];return false;}return t&&!/^\s*(#|\/\/|\/\*|\*|['"]use strict)/.test(l);});return i<0?1:i+1;}
 const short=c=>String(c??'').replace(/^global\.|^node:|^py:|^pkg:/,'').replace(/^(local|file):[^:|]*(::|\|\.?)/,'');
 // The one-paragraph "怎麼接" answer, built only from stations, touches and trial facts.
+// what the extra trial runs with the output flags did (written file, original input changed or not)
+function trigText(t){const cs=(t?.cases??[]).filter(c=>c.trigger);if(!cs.length)return '';
+ return '；試跑加旗標：'+cs.map(c=>{const x=c.trigger;return '`'+x.flag+(x.value?' <新檔>':'')+'` '+(c.exit!==0?'結束碼 '+c.exit+(c.stderr?'（'+c.stderr.split('\n').filter(Boolean).pop().slice(0,60)+'）':''):(x.outWritten?'寫出新檔（'+x.outBytes+' 位元組）':'沒寫出新檔')+'，'+(x.inputChanged?'原檔被覆蓋了':'原檔沒變')+(c.changed.filter(f=>!/^<輸入資料夾>|out\./.test(f)).length?'，另外動到 '+c.changed.filter(f=>!/^<輸入資料夾>|out\./.test(f)).slice(0,2).join('、'):''));}).join('；');}
+// flags that make a guarded write happen, for the trial (value flags get a new file path; at most three)
+export function guardTriggers(m){const out=[];for(const t of m.touches?.route??[])if(t.cap==='write-file')for(const x of t.guard?.triggers??[])if(!out.some(o=>o.flag===x.flag))out.push({flag:x.flag,value:x.value,file:x.file,line:x.line});return out.slice(0,3);}
 export function draftAnswer(m){
  const e=m.entry,R=m.touches?.route??[],has=c=>R.some(t=>t.cap===c),parts={};
  if(!e)return {text:'還找不到入口；請用 --entry 指定。',parts};
@@ -281,8 +288,9 @@ export function draftAnswer(m){
  const reads=R.filter(t=>t.cap==='read-file'&&!/exists|stat|access/.test(t.canon??''));
  parts.input=reads.length?'它讀你給的檔（'+[...new Set(reads.map(t=>short(t.canon)))].join('、')+'）'+(has('stdin')?(()=>{const t=R.find(t=>t.cap==='stdin'),c=(t?.ownCtx??t?.ctx??[]).find(x=>/^當 /.test(x));return c?'，'+c.replace(/^當 /,'')+' 時改讀標準輸入（'+t.file+':'+t.line+'）':'，也會讀標準輸入（'+t.file+':'+t.line+'）';})():''):has('stdin')?'它從標準輸入讀資料':'輸入從參數傳入';
  const writes=R.filter(t=>t.cap==='write-file');
- const onlyIfW=x=>(x.ownCtx??x.ctx??[]).some(c=>/^當 /.test(c)&&!/不成立/.test(c));
- parts.output=writes.length&&writes.every(onlyIfW)?'只在特定情況寫檔（'+writes.slice(0,2).map(t=>short(t.canon)+' '+t.file+':'+t.line+' 只在「'+(t.ownCtx??t.ctx)[0].slice(0,40)+'」時').join('；')+'），其餘'+(has('stdout')?'結果印到標準輸出':'結果由回傳值交回'):writes.length?'會寫檔（'+[...new Set(writes.map(t=>short(t.canon)))].join('、')+'），要給它專用資料夾':has('stdout')?'結果印到標準輸出，這條路不寫檔':'結果由回傳值交回';
+ const onlyIfW=x=>!!x.guard||(x.ownCtx??x.ctx??[]).some(c=>/^當 /.test(c)&&!/不成立/.test(c));
+ const gWhy=t=>t.guard?t.guard.text+'（'+t.file+':'+t.line+'；條件 '+t.guard.lines.join('、')+' 行）':short(t.canon)+' '+t.file+':'+t.line+' 只在「'+(t.ownCtx??t.ctx)[0].slice(0,40)+'」時';
+ parts.output=writes.length&&writes.every(onlyIfW)?'只在特定情況寫檔：'+[...new Set(writes.slice(0,2).map(gWhy))].join('；')+'；其餘'+(has('stdout')?'結果印到標準輸出':'結果由回傳值交回'):writes.length?'會寫檔（'+[...new Set(writes.map(t=>short(t.canon)))].join('、')+'），要給它專用資料夾':has('stdout')?'結果印到標準輸出，這條路不寫檔':'結果由回傳值交回';
  const other=[...new Set(R.filter(t=>OTHER_PROGRAM.has(t.cap)).map(t=>t.label))];
  const pend=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import'].includes(u.kind)).length;
  const narrow=(m.unknowns??[]).find(u=>u.kind==='narrow');
@@ -296,7 +304,9 @@ export function draftAnswer(m){
  const errs=R.filter(t=>(t.cap==='stderr'||t.cap==='exit')&&errCtx(t));
  const leak=R.filter(t=>t.cap==='stdout'&&errCtx(t));
  parts.error=errs.length?'出錯時'+(errs.some(t=>t.cap==='stderr')?'把錯誤印到錯誤輸出':'')+(errs.some(t=>t.cap==='exit')?(errs.some(t=>t.cap==='stderr')?'並':'')+'以非 0 結束':'')+(leak.length?'，但有錯誤訊息印到標準輸出（'+leak.slice(0,2).map(t=>t.file+':'+t.line).join('、')+'），別把標準輸出整段當 JSON':''):(e.kind==='bin'?'錯誤處理讀碼看不出來':'出錯時是拋例外還是回傳錯誤，讀碼沒確認')+'，待試跑';
- const t=m.trial,caveats=[];
+ const t=m.trial,caveats=[],normal=[];
+ // a formatter / pretty-printer does not validate: a malformed input formatted with exit 0 is expected, not a warning
+ const formatter=/排版|格式化|美化|縮排|\b(format|formatter|prettier|prettify|beautif\w*|fmt|lint)\b/i.test(m.question??'')||/fmt|format|pretty|beautif/i.test(m.entry?.name??'');
  if(t?.ran&&t.project){const cs=t.cases;const nm=c=>'`'+(t.multi.find(x=>x.cmd===c.id)?.display??c.id)+'`';
   const own=c=>c.changed.filter(f=>!/^<家目錄或暫存>\//.test(f)),wf=c=>/--(apply|write)\b/.test(c.id),ro=cs.filter(c=>c.exit===0&&!own(c).length&&!wf(c)),wr=cs.filter(c=>own(c).length),idle=cs.filter(c=>c.exit===0&&!own(c).length&&wf(c));
   parts.entry='可以先接命令列，各指令分開接：'+cs.map(nm).join('、');parts.input='這些指令讀的是所在專案（package.json、原始碼），不吃另外的輸入檔';
@@ -317,12 +327,12 @@ export function draftAnswer(m){
   parts.verified='已在隔離副本（無網路）的空資料夾跑 '+t.cases.length+' 次確認寫了什麼。';}
  else if(t?.ran){const good=t.cases.find(c=>c.id==='good'),bad=t.cases.find(c=>c.id==='bad'),miss=t.cases.find(c=>c.id==='missing'),again=t.cases.find(c=>c.id==='good-again');
   if(good?.json?.ok&&!writes.length)parts.output='結果是標準輸出的 JSON（試跑：'+good.json.shape+'），這條路不寫檔';
-  else if(good?.marker&&!good.json?.ok&&good.exit===0)parts.output='結果印到標準輸出（試跑：假 '+(t.inputs?.format??'').toUpperCase()+' 裡的「'+t.inputs.marker+'」有出現在輸出）'+(good.changed.length?'':'，試跑沒寫任何檔')+(writes.length&&writes.every(onlyIfW)?'；只在「'+(writes[0].ownCtx??writes[0].ctx)[0].replace(/^當 /,'').slice(0,30)+'」時寫檔（'+writes[0].file+':'+writes[0].line+'）':writes.length&&!good.changed.length?(()=>{const w=writes[0];let near=[];try{const L=fs.readFileSync(path.join(m.root??'',w.file),'utf8').split(/\r?\n/).slice(Math.max(0,w.line-16),w.line);near=[...new Set(L.filter(l=>/\b(if|elif|case|when)\b|\?/.test(l)).join('\n').match(/\b(?:args|opts|options|argv|flags)\.(\w+)/g)??[])].map(x=>x.split('.')[1]);}catch{}
-   return '；但原碼另有寫檔（'+w.file+':'+w.line+'），這次試跑沒走到'+(near.length?'，看前面的條件應該是 '+near.slice(0,4).join('、')+' 參數會觸發，接之前要確認會不會覆蓋原檔':'，要查哪個參數會觸發');})():'');
+  else if(good?.marker&&!good.json?.ok&&good.exit===0)parts.output='結果印到標準輸出（試跑：假 '+(t.inputs?.format??'').toUpperCase()+' 裡的「'+t.inputs.marker+'」有出現在輸出）'+(good.changed.length?'':'，試跑沒寫任何檔')+(writes.length&&writes.every(onlyIfW)?'；'+[...new Set(writes.slice(0,2).map(gWhy))].join('；'):writes.length&&!good.changed.length?'；但原碼另有寫檔（'+writes[0].file+':'+writes[0].line+'），這次試跑沒走到，要查哪個參數會觸發':'');
   else if(good&&good.marker===false&&good.exit===0&&t.inputs?.marker)caveats.push('正常輸入結束碼 0，但輸出裡找不到假檔的內容（「'+t.inputs.marker+'」），要確認它真的有轉');
   const srv=good?.server;
   if(srv){const ok=srv.gets.filter(g=>g.status&&g.status<400),host=(srv.base??'').replace(/^https?:\/\//,'');
    parts.output=srv.listened?'試跑：服務只在本機 '+host+' 起來，GET '+ok.slice(0,4).map(g=>new URL(g.url).pathname+(g.shape?'（'+g.shape+'）':'')).join('、')+(ok.length?' 有回資料':'都沒回 2xx')+'；GET 前後'+(good.changed.length?'改了 '+good.changed.slice(0,3).join('、'):'檔案沒變'):'試跑時服務沒在 8 秒內開起連線埠'+(good.exit!=null?'（結束碼 '+good.exit+'）':'');}
+  if(!srv)parts.output+=trigText(t);
   if(good&&good.exit!==0&&!(srv?.stoppedByProbe))caveats.push('正常輸入卻回結束碼 '+good.exit+'，先看試跑紀錄');
   const named=srv?[]:good?.changed.filter(f=>!/^</.test(f)&&(t.run??'').split(/\s+/).includes(f))??[];
   if(srv){}else if(good?.changed.length&&named.length===good.changed.length)parts.output='試跑只寫了指令裡指定的 '+named.join('、')+'，沒動其他檔'+(good.stdout.trim()?'；標準輸出另有內容':'');
@@ -332,6 +342,7 @@ export function draftAnswer(m){
   if(good?.exit===0&&good.stderr.trim()&&!srv)caveats.push('正常時錯誤輸出也有字（'+good.stderr.replace(/\u001b\[[0-9;]*m/g,'').trim().split('\n').pop().slice(0,40)+'），不能用「錯誤輸出有字」判斷失敗，要看結束碼');
   if(again&&again.sameStdout===false&&!srv)caveats.push('同一份重跑輸出不同');
   if(bad){if(bad.exit!==0)caveats.push('格式錯時結束碼 '+bad.exit+(bad.stderr.trim()?'、錯誤在錯誤輸出':'')+(bad.stdout.trim()&&!bad.json.ok?'，但標準輸出已印出半截內容，要用結束碼判斷成功，不要只看輸出':''));
+   else if(formatter&&!bad.json.ok)normal.push('格式錯的輸入也照樣排版、回結束碼 0（排版工具本來就不驗語法，正常；要擋壞檔得另外檢查）');
    else{const echo=(t.inputs?.bad??'').replace(/[·\s]+/g,' ').trim().slice(0,16);caveats.push('格式錯時仍回結束碼 0'+(bad.json.ok?'，並輸出 JSON（'+bad.json.shape+'）':echo.length>6&&bad.stdout.replace(/[\u0000-\u0008\s]+/g,' ').includes(echo.replace(/·/g,'').trim().slice(2,14))?'，還把壞檔的原始內容當成文字印出來（不會報錯）':'')+'，要自己檢查內容');}}
   const empty=t.cases.find(c=>c.id==='empty');
   if(empty){if(empty.exit===0)caveats.push('空輸入時結束碼 0'+(empty.json.ok?'，輸出 '+empty.json.shape:empty.stdout.trim()?'，標準輸出有非 JSON 內容':'、沒有輸出')+'，空資料要自己判斷');else caveats.push('空輸入時結束碼 '+empty.exit+(empty.stderr.trim()?'、錯誤在錯誤輸出':''));}
@@ -346,7 +357,7 @@ export function draftAnswer(m){
   parts.verified='原碼 '+m.stations.length+' 站已核對，已在隔離副本（'+(t.network==='off'?(t.server?'只有本機回環、連不到外面':'無網路'):'網路未隔離')+'）用假檔試跑 '+t.cases.length+' 種情況確認。';}
  else parts.verified='原碼 '+(m.stations?.length??0)+' 站已核對，實際輸出格式待試跑確認。';
  if(m.dynPicked?.length)parts.input+='，再交給 '+m.dynPicked.slice(0,2).map(d=>d.file).join('、')+' 解析（原碼是動態載入，依問句挑的）';
- parts.caveats=caveats;
+ parts.caveats=caveats;parts.normal=normal;
  // the question asks about logging in to an AI agent (Claude / Codex …): say where the repo launches one, on this route or not
  if(/登入|login|claude|codex|gemini|模型|agent/i.test(m.question??'')){const ag=x=>x.filter(t=>t.agentCli);const onR=ag(R),els=ag(m.touches?.elsewhere??[]);
   parts.agent=onR.length?'這條路會啟動 '+[...new Set(onR.map(t=>t.agentCli))].join('、')+'（'+onR[0].file+':'+onR[0].line+'），要用你的登入與額度':els.length?'這條路不用登入 AI 代理；repo 另一處會啟動 '+[...new Set(els.map(t=>t.agentCli))].join('、')+'（'+els.slice(0,2).map(t=>t.file+':'+t.line).join('、')+'，不在這條路上），用到那部分才要你的登入':'沒看到它啟動 Claude、Codex 等 AI 代理 CLI';}
@@ -356,7 +367,7 @@ export function draftAnswer(m){
  if(offT.length&&t?.project)parts.offRoute='原碼路線只追到入口與指令分派，'+offT.slice(0,3).map(x=>x.toUpperCase()).join('、')+' 的實作（'+off.filter(c=>offT.includes(c.term)).slice(0,2).map(c=>c.file).join('、')+'）由指令執行時載入，以上各指令的行為以試跑為準';
  else if(offT.length)parts.offRoute='問句要的 '+offT.slice(0,3).map(t=>t.toUpperCase()+' 在 '+off.filter(c=>c.term===t).slice(0,2).map(c=>c.file+(c.via.length?'（由 '+c.via.slice(0,2).map(v=>v.file+':'+v.line).join('、')+' 載入'+(c.ui?'，介面功能':'')+'）':'（沒找到誰載入）')).join('、')).join('；')+'，這條入口走不到，不能當成這個步驟的輸出';
  if(m.uiTrial){parts.uiTrial=uiTrialSentence(m.uiTrial);if(parts.offRoute&&m.uiTrial.results?.some(r=>r.ok))parts.offRoute=parts.offRoute.replace('，這條入口走不到，不能當成這個步驟的輸出','，命令列入口走不到');}
- const text=[parts.entry+'。'+parts.input+'；'+parts.output+'。',parts.touches+'。',caveats.length?caveats.join('；')+'。':parts.error+'。',parts.offRoute?parts.offRoute+'。':'',parts.uiTrial?parts.uiTrial+'。':'',parts.agent?parts.agent+'。':'',parts.verified].join('');
+ const text=[parts.entry+'。'+parts.input+'；'+parts.output+'。',parts.touches+'。',caveats.length?caveats.join('；')+'。':parts.error+'。',normal.length?normal.join('；')+'。':'',parts.offRoute?parts.offRoute+'。':'',parts.uiTrial?parts.uiTrial+'。':'',parts.agent?parts.agent+'。':'',parts.verified].join('');
  return {text,parts,draft:true};
 }
 // ---- isolated trial ----
@@ -421,7 +432,7 @@ export function inferRun(root,m,{timeoutMs=8000}={}){
   if(cmd)w.push(u.text.includes(' '+cmd)?'是問句的 '+cmd+' 指令':'不是 '+cmd+' 指令');if(template(u.text))w.push('是範本寫法 <…>');
   const ex=tk.filter(x=>/^--?[a-z]/i.test(x)&&!kwU.some(k=>x.toLowerCase().includes(k)));if(ex.length)w.push('多了旗標 '+ex.slice(0,3).join(' '));if(/https?:\/\//.test(u.text))w.push('要網址');return w;};
  const useRank=[...uses].filter(u=>!/\\$/.test(u.text)&&(!cmd||u.text.includes(' '+cmd+' ')||u.text.endsWith(' '+cmd))).map(u=>({u,s:score(u)})).sort((a,b)=>b.s-a.s),pickUse=useRank[0]?.u??null;
- const useChoice=useRank.length?{what:'試跑用法',how:'README／文件用法行',ranked:useRank.slice(0,4).map(x=>({name:x.u.text.slice(0,90),file:x.u.file,line:x.u.line,score:Math.round(x.s*10)/10,why:useWhy(x.u)}))}:null;
+ const useChoice=useRank.length?{what:'試跑用法',how:'README／文件用法行',ranked:useRank.filter((x,i)=>useRank.findIndex(y=>y.u.text===x.u.text)===i).slice(0,4).map(x=>({name:x.u.text.slice(0,90),file:x.u.file,line:x.u.line,score:Math.round(x.s*10)/10,why:useWhy(x.u)}))}:null;
  let args=[],stdin=false;
  if(pickUse){const line=pickUse.text.replace(/^\$\s*/,'');const line2=line.replace(/<[\w -]+>/g,'X');stdin=new RegExp('\\|\\s*'+esc+'\\b').test(line2)||new RegExp(esc+'\\b[^|>]*<\\s*\\S').test(line2);
   const after=(line.split(new RegExp('(?:^|\\s)'+esc+'(?=\\s|$)'))[1]??'').replace(/<([\w -]+)>/g,(x,y)=>'⟨'+y.trim().replace(/\s+/g,'_')+'⟩').replace(/\[[^\]]*\]/g,' ');const toks=after.split(/\s*[|>]\s*/)[0].replace(/<\s*\S+/,'').trim().split(/\s+/).filter(Boolean);
@@ -470,7 +481,7 @@ function execIso(iso,root,cmd,{timeoutMs=8000,input}={}){
  if(/^python[\d.]*$/.test(cmd[0])&&pyVenv(root))cmd=[pyVenv(root),...cmd.slice(1)];
  const unshare=spawnSync('unshare',['-rn','true']).status===0,full=unshare?['unshare','-rn','--',...cmd]:cmd;
  return spawnSync(full[0],full.slice(1),{cwd:iso.copy,env:trialEnv(iso,cmd[0]),encoding:'utf8',timeout:timeoutMs,input,stdio:[input!=null?'pipe':'ignore','pipe','pipe'],maxBuffer:4*1024*1024});}
-export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',plan=null,server=null}={}){
+export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',plan=null,server=null,triggers=[]}={}){
  root=path.resolve(root);if(!run)throw Error('試跑要給 --run，例如 --run "node bin/cli.js {input}"');
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo'),inDir=path.join(base,'inputs');copyRepo(root,copy);fs.mkdirSync(inDir);
  linkModules(root,copy);
@@ -516,6 +527,10 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
  else  if(scaffold){runOne('good','空資料夾跑一次',null);runOne('good-again','同一資料夾再跑',null,'good');
   const g0=cases[0];if(plan?.offlineFlags?.length&&(g0.timedOut||g0.exit!==0)){const r0=run;run=run+' '+plan.offlineFlags.join(' ');runOne('offline','加 '+plan.offlineFlags.join(' ')+' 再跑',null);run=r0;}}
  else{runOne('good','正常輸入',good);runOne('good-again','同一份重跑',good);runOne('bad','格式錯的輸入',bad);if(viaStdin){const empty=path.join(inDir,'empty'+path.extname(good));fs.writeFileSync(empty,'');runOne('empty','空輸入',empty);}else runOne('missing','檔案不存在',path.join(inDir,'no-such-file'+path.extname(good)));}
+ // guarded writes: run once more per output flag on a copy of the good input (value flags write to a new file in the work folder)
+ if(!scaffold&&!plan?.multi&&!viaStdin&&!server)triggers.slice(0,3).forEach((x,k)=>{const ext=path.extname(good),inp=path.join(inDir,'trig-'+(k+1)+ext);fs.copyFileSync(good,inp);const h0=fs.readFileSync(inp);
+  const outP=path.join(base,'work-trig-'+(k+1),'out'+ext);const r0=run;run=run.replace('{input}',x.flag+(x.value?' '+outP:'')+' {input}');runOne('trig-'+(k+1),'加 '+x.flag+(x.value?' <新檔>':''),inp);run=r0;
+  const c=cases.at(-1),ow=fs.existsSync(outP);c.trigger={flag:x.flag,value:x.value,defined:x.file+':'+x.line,outWritten:ow,outBytes:ow?fs.statSync(outP).size:0,outHead:ow?fs.readFileSync(outP,'utf8').slice(0,300):null,inputChanged:!fs.readFileSync(inp).equals(h0)};});
  const a=cases.find(c=>c.id==='good'),b=cases.find(c=>c.id==='good-again');if(a&&b)b.sameStdout=a.stdout===b.stdout;
  const out={ran:true,...(plan?.multi?{project:true,peers:plan.peers??{},multi:plan.multi.map(x=>({cmd:x.cmd,display:x.display,why:x.why}))}:scaffold?{scaffold:true}:{}),viaStdin,python:py,...(venv?{venv:path.relative(root,venv)}:{}),...(plan?{inferred:true,display:plan.display,why:plan.why,help:plan.help,sure:plan.sure}:{}),network:unshare?'off':'guarded',...(server&&unshare?{server:true}:{}),isolation:unshare?(server?'獨立網路命名空間（只有本機回環，連不到外面），在 repo 副本裡跑；服務起來後用 GET 試讀再關掉':'獨立網路命名空間（完全沒有網路），在 repo 副本裡跑'):'沒有 unshare，網路沒隔離',run,inputs:{format:input?path.extname(input):fk.fmt,marker:input?null:MARKER,good:/^(docx|pdf)$/.test(fk.fmt??'')&&!input?'（'+fk.fmt+' 二進位檔，內含「'+MARKER+'」）':fs.readFileSync(good,'utf8').slice(0,400),bad:fs.readFileSync(bad,'utf8').slice(0,400).replace(/[\u0000-\u0008]/g,'·')},cases,at:new Date().toISOString()};
  fs.rmSync(base,{recursive:true,force:true});return out;

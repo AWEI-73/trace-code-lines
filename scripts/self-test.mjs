@@ -3106,5 +3106,26 @@ s.listen(0,'127.0.0.1',()=>console.log('  Local: http://localhost:'+s.address().
   const a=draftAnswer({...mm,trial:{inputs:{format:'sql',marker:'M'},cases:[{id:'good',exit:0,changed:[],stdout:'M',stderr:''}]}}).text;
   assert(/a\.filename == '-' 時改讀標準輸入/.test(a),a);
  });
+ await check('write guards: if/elif/else with an early return, a not-guard return, nested except not counted; flags from argparse, click, commander, yargs and parseArgs; JS blocker flag',async()=>{
+  const {guardAt,flagMap,attachGuards}=await import('./guards.mjs');
+  const py=["def run(args, filename):","    if filename == '-':","        s = read_stdin()","    else:","        try:","            s = open(filename).read()","        except OSError:","            return 1","    if args.inplace:","        out = filename","    elif args.outfile:","        out = args.outfile","    else:","        print(s)","        return 0","    with open(out, 'w') as f:","        f.write(s)"];
+  const g=guardAt(py,16);assert.deepEqual(g.any.map(c=>c.text),['args.inplace','args.outfile'],JSON.stringify(g));assert.deepEqual(g.all,[]);
+  const g2=guardAt(py,14);assert.deepEqual(g2.all.map(c=>c.text+(c.neg?'!':'')),['args.outfile!','args.inplace!'],JSON.stringify(g2));
+  const gr=join(area,'guards');put(gr,'a.py',"p.add_argument('-o', '--outfile', dest='outfile')\np.add_argument('--in-place', dest='inplace', action='store_true')\n@click.option('--dry-run', 'dry', is_flag=True)\n");
+  put(gr,'b.js',"program.option('-o, --out <file>').option('--dry-run');\nyargs.option('force',{alias:'f',type:'boolean'});\nparseArgs({options:{target:{type:'string',short:'t'}}});\nconst opts=program.opts();\nfunction run(s){\n  if (!opts.out) {\n    console.log(s);\n    return;\n  }\n  if (opts.dryRun) return;\n  fs.writeFileSync(opts.out, s);\n}\n");
+  const fm=flagMap(gr,['a.py','b.js']);const f=k=>fm.get(k)&&fm.get(k).flag+(fm.get(k).value?'=':'');
+  assert.deepEqual(['outfile','inplace','dry','out','dryRun','force','target'].map(f),['--outfile=','--in-place','--dry-run','--out=','--dry-run','--force','--target='],JSON.stringify([...fm]));
+  const t=[{cap:'write-file',file:'b.js',line:11}];attachGuards(gr,t);assert.equal(t[0].guard.text,'加 --out <值> 才會寫檔（加 --dry-run 就不會）');
+ });
+ await check('guarded write in the route and the trial: the station says which flag makes it write; the trial reruns with that flag on a copy and reports the new file and the untouched original',async()=>{
+  const q='給它一份 SQL 檔，排版後輸出成新檔，會不會改到原檔？';const mm=await traceRoute(sp,{question:q,ast});
+  const w=mm.stations.find(s=>s.guard);assert(w&&w.guard.text==='加 --outfile <值> 才會寫檔',JSON.stringify(mm.stations.map(s=>s.guard?.text)));
+  const {guardTriggers}=await import('./usage-route.mjs');const tr=guardTriggers(mm);assert.deepEqual(tr.map(x=>x.flag),['--outfile']);
+  const t=runTrial(sp,{run:'python3 -m sqlfmt {input}',question:q,triggers:tr});const c=t.cases.find(c=>c.trigger);
+  assert(c&&c.exit===0&&c.trigger.outWritten&&!c.trigger.inputChanged,JSON.stringify(c));assert(/SELECT/.test(c.trigger.outHead));
+  mm.trial=t;const a=draftAnswer(mm).text;assert(/加 --outfile <值> 才會寫檔/.test(a)&&/`--outfile <新檔>` 寫出新檔（\d+ 位元組），原檔沒變/.test(a),a);
+  assert(/格式錯的輸入也照樣排版/.test(a)&&!/格式錯時仍回結束碼 0/.test(a),a);
+  const h=renderRouteHtml(mm);assert(h.includes('原檔沒變')&&h.includes('加 --outfile &lt;值&gt; 才會寫檔')||h.includes('加 --outfile <值> 才會寫檔'));
+ });
  return checks;
 }
