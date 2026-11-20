@@ -13,7 +13,7 @@ import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun,package
 import {renderRouteHtml} from './route-report-html.mjs';
 import {uiTargets} from './ui-trial.mjs';
 import {checkQuotes} from './check-quotes.mjs';
-import {preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,relayText,capLabel,parseCapability} from './preflight.mjs';
+import {trialGate,preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,relayText,capLabel,parseCapability} from './preflight.mjs';
 // Dogfood ext round: the step hints say 超出範圍 etc. in Chinese, so --unknown accepts the Chinese class labels too.
 const UNKNOWN_CLASS_ZH={'沒去跑':'not-run','沒跑':'not-run','未試跑':'not-run','由模型決定':'model-choice','單次異常':'one-off','資料沒了':'evidence-lost','要負責人判斷':'owner-only','負責人判斷':'owner-only','範圍或授權外':'out-of-scope','超出範圍':'out-of-scope'};
 
@@ -231,13 +231,18 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
     if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('路線檔請放在受查資料夾外。');
     if(command==='wired'){if(!get('--from')||!get('--to'))throw Error('wired 要給 --from 檔案:函式 與 --to 函式');m=await traceWired(root,{from:get('--from'),to:get('--to'),question:get('--question')});}
     else{m=await traceRoute(root,{question:get('--question')??'',entry:get('--entry'),fn:get('--fn')});
-     if(args.includes('--trial')){
+     // the owner's answers are read before anything runs: no answer / not approved = no CLI trial, no --help probe, no dev server, no browser
+     const pf=get('--preflight')?(()=>{const af=path.resolve(get('--preflight')),ans=JSON.parse(fs.readFileSync(af,'utf8')),qs=JSON.parse(fs.readFileSync(path.resolve(path.dirname(af),ans.questionsFile),'utf8'));return resolveScope(qs,ans);})():null;
+     const gate=args.includes('--trial')?trialGate(pf,{listens:(m.touches?.route??[]).some(t=>t.cap==='listen'),ui:!args.includes('--no-ui-trial')&&uiTargets(m).length>0}):null;
+     if(gate&&!gate.cli){m.trial={ran:false,skipped:gate.reason,cases:[]};if(uiTargets(m).length&&!args.includes('--no-ui-trial'))m.uiTrial={ran:false,skipped:gate.uiReason??gate.reason};console.log('試跑不跑：'+gate.reason);m.answer=draftAnswer(m);}
+     else if(gate){
       // no --run: infer it from README usage, --help (run in the isolated copy) and the sentence; marked 推論
       const plan=get('--run')?null:inferRun(root,m);const run=get('--run')??plan?.run;if(!run)throw Error('這個入口不是命令列，試跑要給 --run');if(plan)console.log('試跑指令（推論）：'+plan.display+'\n　依據：'+plan.why.join('；'));
       const listens=(m.touches?.route??[]).some(t=>t.cap==='listen');
       if(plan?.choice)m.choices=[...(m.choices??[]),plan.choice];
       // the capability the sentence wants lives only behind a UI control: open the app (loopback only) and press it, alongside the command-line trial
-      let uiJob=null;if(!args.includes('--no-ui-trial')&&uiTargets(m).length){console.log('介面試跑：'+uiTargets(m).map(t=>t.term.toUpperCase()+'（'+t.file+'）').join('、')+'，在隔離副本開 dev 伺服器，用無頭瀏覽器按按鈕（和命令列試跑同時跑）…');
+      let uiJob=null;if(!gate.ui&&gate.uiReason){m.uiTrial={ran:false,skipped:gate.uiReason};console.log('介面試跑不跑：'+gate.uiReason);}
+      if(gate.ui){console.log('介面試跑：'+uiTargets(m).map(t=>t.term.toUpperCase()+'（'+t.file+'）').join('、')+'，在隔離副本開 dev 伺服器，用無頭瀏覽器按按鈕（和命令列試跑同時跑）…');
        const d=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-uijob-'));fs.writeFileSync(path.join(d,'m.json'),JSON.stringify({root:m.root,question:m.question,capabilities:m.capabilities}));
        const ch=spawn(process.execPath,[fileURLToPath(new URL('./ui-trial.mjs',import.meta.url)),path.join(d,'m.json'),path.join(d,'r.json'),get('--ui-keep')?path.resolve(get('--ui-keep')):''],{stdio:'ignore'});uiJob={d,done:new Promise(r=>ch.on('exit',r))};}
       m.trial=runTrial(root,{run,plan,triggers:guardTriggers(m),server:listens?{paths:(m.framework?.picked??[]).filter(e=>e.kind==='route'&&/GET|ALL/.test(e.method??'GET')).map(e=>e.name.replace(/^\S+\s+/,'')).filter(p=>p.startsWith('/')&&!/[:*{(]/.test(p))}:null,input:get('--fake-input')&&path.resolve(get('--fake-input')),badInput:get('--bad-input')&&path.resolve(get('--bad-input')),question:m.question});

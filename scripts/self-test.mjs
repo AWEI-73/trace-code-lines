@@ -3138,5 +3138,43 @@ s.listen(0,'127.0.0.1',()=>console.log('  Local: http://localhost:'+s.address().
   const w={...mm,touches:{...mm.touches,route:mm.touches.route.map(x=>x.cap==='write-file'?{...x,blind:['條件是函式呼叫（f(a)），沒追進去看它判斷什麼']}:x)}};w.stations=w.stations.map(s=>s.role==='output'&&/寫檔/.test(s.label)?{...s,blind:['條件是函式呼叫（f(a)），沒追進去看它判斷什麼']}:s);
   assert(/這裡看不到，不保證/.test(draftAnswer(w).text));assert(renderRouteHtml(w).includes('這裡看不到，不保證'));
  });
+ // --- review P1s: the owner's answer gates every trial before anything starts; no network namespace = no trial (fail closed) ---
+ const {trialGate}=await import('./preflight.mjs'),{trialStats,netIsolation}=await import('./usage-route.mjs');
+ await check('trial gate: no answer / 不跑 / unanswered / mismatched / container = nothing runs; 網路全關 allows only a CLI trial without a port; 只開本機 allows the UI trial and servers',()=>{
+  const r=(run,extra={})=>({questionsMatch:true,pending:[],scope:{network:run??'none'},...extra});
+  for(const [g,re] of [[trialGate(null,{ui:true}),/沒有開卡前答覆/],[trialGate(r('none'),{ui:true}),/不跑，只讀程式碼/],[trialGate(r(null,{pending:['run']}),{ui:true}),/還沒回答/],[trialGate(r('loopback',{questionsMatch:false}),{ui:true}),/對不上/],[trialGate(r('container'),{ui:true}),/容器/]]){assert(!g.cli&&!g.ui,JSON.stringify(g));assert(re.test(g.reason),g.reason);}
+  let g=trialGate(r('deny'),{ui:true});assert(g.cli&&!g.ui&&/只開本機/.test(g.uiReason),JSON.stringify(g));
+  g=trialGate(r('deny'),{listens:true});assert(!g.cli&&/連線埠/.test(g.reason));
+  g=trialGate(r('loopback'),{ui:true,listens:true});assert(g.cli&&g.ui);
+ });
+ const gt=join(area,'gate');
+ put(gt,'pyproject.toml','[project]\nname = "sqlfmt"\nversion = "1.0"\n\n[project.scripts]\nsqlfmt = "sqlfmt.__main__:main"\n');put(gt,'sqlfmt/__init__.py','');
+ put(gt,'sqlfmt/__main__.py',"import sys\n\ndef main():\n    open("+JSON.stringify(join(area,'gate-ran.txt'))+", 'w').write('ran')\n    print(open(sys.argv[1]).read().upper())\n");
+ put(gt,'src/app/export-pdf.ts','export function exportPdf(){window.print();}\n');put(gt,'src/app/Menu.tsx',"import {exportPdf} from './export-pdf';\nexport function Menu(){return <button onClick={exportPdf}>Export as PDF</button>;}\n");
+ put(gt,'package.json','{"name":"web","private":true,"scripts":{"dev":"node serve.mjs"}}\n');put(gt,'serve.mjs',"import fs from 'node:fs';fs.writeFileSync("+JSON.stringify(join(area,'gate-ran.txt'))+",'dev');\n");gitInit(gt);
+ await check('review P1-1/P1-2 end to end (CLI): without an approving answer neither the CLI trial nor the UI trial starts (spawn counter: no unshare, no python, no dev server, no temp copy); with 網路全關 but no namespace the trial is skipped, never run un-isolated',()=>{
+  const cli=fileURLToPath(new URL('./trace.mjs',import.meta.url)),fake=join(area,'gate-bin'),log=join(area,'gate-spawns.log'),tmp=join(area,'gate-tmp');fs.mkdirSync(fake,{recursive:true});fs.mkdirSync(tmp,{recursive:true});
+  for(const n of ['unshare','python3','python'])fs.writeFileSync(join(fake,n),'#!/bin/sh\necho "'+n+' $*" >> '+JSON.stringify(log)+'\nexit 1\n',{mode:0o755});
+  const env={...process.env,PATH:fake+':'+process.env.PATH,TCL_PLAYWRIGHT_PYTHON:join(fake,'python3'),TMPDIR:tmp,TEMP:tmp,TMP:tmp};
+  const run=(...a)=>spawnSync(process.execPath,[cli,...a],{encoding:'utf8',env});const plain=(...a)=>spawnSync(process.execPath,[cli,...a],{encoding:'utf8'});
+  const q='給它一份 SQL 檔，排版後能不能匯出 PDF？',qf=join(area,'gate-q.json');assert.equal(plain('preflight','--root',gt,'--out',qf).status,0);
+  const ans=(name,...set)=>{const af=join(area,name);const r=plain('answer','--questions',qf,'--out',af,'--by','測','--accept-defaults','--simulated',...set);assert.equal(r.status,0,r.stderr);return af;};
+  const route=(tag,...extra)=>{const o=join(area,'gate-'+tag+'.json');const r=run('route','--root',gt,'--question',q,'--out',o,'--trial',...extra);assert.equal(r.status,0,r.stderr+r.stdout);return JSON.parse(fs.readFileSync(o,'utf8'));};
+  for(const [tag,extra,re] of [['none',[],/沒有開卡前答覆/],['no',['--preflight',ans('gate-no.json')],/不跑，只讀程式碼/]]){
+   const m=route(tag,...extra);assert.equal(m.trial.ran,false);assert(re.test(m.trial.skipped),m.trial.skipped);assert(m.uiTrial&&m.uiTrial.ran===false&&re.test(m.uiTrial.skipped),JSON.stringify(m.uiTrial));
+   assert(!fs.existsSync(log),tag+': something was spawned: '+(fs.existsSync(log)?fs.readFileSync(log,'utf8'):''));assert(!fs.existsSync(join(area,'gate-ran.txt')));assert.deepEqual(fs.readdirSync(tmp).filter(x=>/^tcl-(trial|uijob)-/.test(x)),[]);
+   assert(/試跑沒跑/.test(m.answer.text),m.answer.text);assert(/沒跑<\/b>：/.test(renderRouteHtml(m)));}
+  const m=route('deny','--preflight',ans('gate-deny.json','--set','run=deny'));
+  assert.equal(m.trial.ran,false);assert.equal(m.trial.network,'unavailable');assert(/不能建立網路隔離/.test(m.trial.skipped),m.trial.skipped);assert(/只開本機/.test(m.uiTrial.skipped),JSON.stringify(m.uiTrial));
+  const calls=fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n'):[];assert(calls.length&&calls.every(l=>l==='unshare -rn true'),calls.join(' | '));
+  assert(!fs.existsSync(join(area,'gate-ran.txt')));assert(/不能建立網路隔離/.test(m.answer.text),m.answer.text);
+ });
+ await check('review P1-2 (in process): no namespace → runTrial and the UI trial return skipped with the reason and start nothing (spawn counter unchanged); with it they run inside unshare',()=>{
+  const before=trialStats.spawned,old=process.env.TCL_TEST_NO_UNSHARE;process.env.TCL_TEST_NO_UNSHARE='1';
+  try{assert.equal(netIsolation(),false);const t=runTrial(sp,{run:'python3 -m sqlfmt {input}',question:'排版'});assert.equal(t.ran,false);assert.deepEqual(t.cases,[]);assert(/unshare/.test(t.skipped));
+   const u=runUiTrial(ui,um);assert.equal(u.ran,false);assert(u.skipped);assert.equal(trialStats.spawned,before);}
+  finally{if(old===undefined)delete process.env.TCL_TEST_NO_UNSHARE;else process.env.TCL_TEST_NO_UNSHARE=old;}
+  if(netIsolation()){const t=runTrial(sp,{run:'python3 -m sqlfmt {input}',question:'排版'});assert(t.ran&&t.network==='off');assert(trialStats.spawned>before);}
+ });
  return checks;
 }

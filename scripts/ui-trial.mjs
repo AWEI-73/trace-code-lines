@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {copyRepo,snapshot,snapOther,subPackages} from './usage-route.mjs';
+import {copyRepo,snapshot,snapOther,subPackages,netIsolation,trialStats} from './usage-route.mjs';
 const readJson=p=>{try{return JSON.parse(fs.readFileSync(p,'utf8'));}catch{return null;}};
 const HERE=path.dirname(new URL(import.meta.url).pathname);
 // formats a question can ask for, and how each shows up on a button
@@ -59,7 +59,7 @@ export function inspectOutput(file){const b=fs.readFileSync(file);const head=b.s
  return {kind:'unknown',ok:b.length>0,note:'前幾個位元組 '+JSON.stringify(head)};}
 export function runUiTrial(root,m,{budgetS=300,keepDir=null}={}){
  root=path.resolve(root);const targets=uiTargets(m);if(!targets.length)return null;
- const t0=Date.now(),serve=findServe(root,targets[0].file),drv=findDriver(),unshare=spawnSync('unshare',['-rn','true']).status===0;
+ const t0=Date.now(),serve=findServe(root,targets[0].file),drv=findDriver(),unshare=netIsolation();
  const base={ran:false,targets:targets.map(t=>({term:t.term,file:t.file})),serve:serve&&{dir:serve.dir,script:serve.script,line:serve.line,why:serve.why}};
  if(!serve)return {...base,skipped:'找不到會開這個介面的 dev／start 指令'};
  if(!serve.bin)return {...base,skipped:'dev 指令的程式 '+serve.prog+' 在副本裡找不到（沒裝依賴？）'};
@@ -71,6 +71,7 @@ export function runUiTrial(root,m,{budgetS=300,keepDir=null}={}){
   const cmd=isJs?[process.execPath,binAbs,...serve.args]:[binAbs,...serve.args];
   const env={PATH:process.env.PATH,HOME:tmp,TMPDIR:tmp,LANG:'C.UTF-8',NO_COLOR:'1',TCL_UI_PROBE:JSON.stringify({cmd,cwd:path.join(copy,serve.dir),waitMs:90000,driver:{python:drv.python,cfg:{targets:targets.map(t=>({term:t.term,re:t.re,file:t.file})),downloadDir:dl,chrome:drv.chrome,budgetS}}})};
   if(process.env.PLAYWRIGHT_BROWSERS_PATH)env.PLAYWRIGHT_BROWSERS_PATH=process.env.PLAYWRIGHT_BROWSERS_PATH;
+  trialStats.spawned++;
   const r=spawnSync('unshare',['-rn','--','sh','-c','ip link set lo up 2>/dev/null; exec "$0" "$1"',process.execPath,path.join(HERE,'ui-probe.mjs')],{env,encoding:'utf8',timeout:(budgetS+180)*1000,maxBuffer:32*1024*1024});
   const line=(r.stdout??'').split('\n').find(l=>l.startsWith('@@TCL_UI@@'));const probe=line?JSON.parse(line.slice(line.indexOf('{'))):{error:((r.stderr??'')+(r.error?String(r.error):'')).slice(-800)};
   const after=snapshot(copy),afterH=snapOther(tmp);const squash=ks=>{const g=new Map();for(const k of ks){const top=k.split('/').slice(0,k.startsWith('node_modules')||/^\./.test(k)?2:3).join('/');g.set(top,(g.get(top)??0)+1);}return [...g].map(([k,n])=>n>1?k+'/…（'+n+' 個）':k);};

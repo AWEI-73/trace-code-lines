@@ -186,3 +186,15 @@ export function scopeNotes(c,stepId){
  if(p.decisionCap&&stepId==='D8'&&!['有條件可接','不建議'].includes(c.integration?.decision))n.push('負責人仍有未回覆項目（'+pendingText(p)+'），結論最多「有條件可接」。');
  return n;
 }
+// Is a trial allowed? Only with the owner's answer to「能不能實際跑」: deny = isolated, no network at all;
+// loopback = isolated with only the loopback interface (needed for servers and the UI trial); none / unanswered / container = no run.
+export function trialGate(r,{listens=false,ui=false}={}){
+ const no=reason=>({cli:false,ui:false,reason,uiReason:reason});
+ if(!r)return no('沒有開卡前答覆（--preflight），試跑一律不跑；先跑 preflight 問負責人，再帶 --preflight <答覆.json>');
+ if(!r.questionsMatch)return no('答覆對不上這份問題（題目變過），當作沒准；請重新回答');
+ const run=r.scope?.network;
+ if(r.pending?.includes('run'))return no('「能不能實際跑」還沒回答，當作沒准');
+ if(!run||run==='none')return no('負責人選了「不跑，只讀程式碼」');
+ if(run==='container')return no('負責人要在自己準備的無網路容器裡跑；查線不自己跑，請在容器裡執行');
+ const lb=run==='loopback',needLb='要開本機連線埠，負責人只准「網路全關」；要試跑請選「只開本機」';
+ return {cli:listens?lb:true,ui:ui&&lb,reason:listens&&!lb?'這條路會開連線埠，'+needLb:null,uiReason:ui&&!lb?'介面試跑'+needLb:null,network:run};}

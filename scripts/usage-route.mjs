@@ -358,8 +358,10 @@ export function draftAnswer(m){
   if(t.display||t.viaStdin)parts.entry='可以先接命令列 `'+(t.display??t.run).replace(/\{input\}/,'<檔案>')+'`'+(t.inferred?'（參數是推論的，見試跑）':'')+(!t.display&&e.lang==='python'&&/-m\s/.test(t.run)&&!/^python -m/.test(e.name)?'（裝好後就是 `'+e.name+'`）':'')+(m.framework?.picked?.some(x=>x.kind==='route')?'，這條路走 '+m.framework.picked.filter(x=>x.kind==='route').slice(0,3).map(x=>'`'+x.name+'`').join('、')+' 路由':'');
   if(t.viaStdin){
    const reads2=R.filter(x=>x.cap==='read-file'&&!/exists|stat|access|listdir|scandir|walk|glob/.test(x.canon??''));parts.input='它從標準輸入讀資料'+(reads2.length?'（原碼另有 '+reads2.slice(0,2).map(x=>short(x.canon)+' '+x.file+':'+x.line).join('、')+' 會讀檔，這次用法沒給檔名）':'');}
-  parts.verified='原碼 '+m.stations.length+' 站已核對，已在隔離副本（'+(t.network==='off'?(t.server?'只有本機回環、連不到外面':'無網路'):'網路未隔離')+'）用假檔試跑 '+t.cases.length+' 種情況確認。';}
- else parts.verified='原碼 '+(m.stations?.length??0)+' 站已核對，實際輸出格式待試跑確認。';
+  parts.verified='原碼 '+m.stations.length+' 站已核對，已在隔離副本（'+(t.server?'只有本機回環、連不到外面':'無網路')+'）用假檔試跑 '+t.cases.length+' 種情況確認。';}
+ else parts.verified='原碼 '+(m.stations?.length??0)+' 站已核對，實際輸出格式待試跑確認。'
+ if(t&&!t.ran&&t.skipped)parts.verified+='試跑沒跑：'+t.skipped+'。';
+ if(m.uiTrial&&!m.uiTrial.ran&&m.uiTrial.skipped&&!(t&&!t.ran&&t.skipped===m.uiTrial.skipped))parts.verified+='介面試跑沒跑：'+m.uiTrial.skipped+'。';
  if(m.dynPicked?.length)parts.input+='，再交給 '+m.dynPicked.slice(0,2).map(d=>d.file).join('、')+' 解析（原碼是動態載入，依問句挑的）';
  if(parts.blind.length)caveats.push('這裡看不到，不保證：'+parts.blind.slice(0,2).join('；'));
  parts.caveats=caveats;parts.normal=normal;
@@ -479,22 +481,29 @@ function linkModules(root,copy){const walk=(rel,depth)=>{let es;try{es=fs.readdi
   for(const x of es){if(!x.isDirectory())continue;const r=rel?rel+'/'+x.name:x.name;
    if(x.name==='node_modules'){if(fs.existsSync(path.join(copy,rel))&&!fs.existsSync(path.join(copy,r)))fs.symlinkSync(path.join(root,r),path.join(copy,r),'dir');}
    else if(depth<4&&!/^(\.git|\.venv|venv|__pycache__|dist|build)$/.test(x.name)&&!x.name.startsWith('.'))walk(r,depth+1);}};walk('',0);}
+// Trials only ever run inside a fresh network namespace (unshare -rn). If that cannot be created, nothing runs (fail closed).
+// TCL_TEST_NO_UNSHARE=1 simulates a box without it (self-test); trialStats counts every program a trial actually started.
+export const trialStats={spawned:0};
+export function netIsolation(){if(process.env.TCL_TEST_NO_UNSHARE==='1')return false;return spawnSync('unshare',['-rn','true']).status===0;}
+export const NO_ISOLATION='這台不能建立網路隔離（unshare -rn 失敗），為了不連外，試跑不跑（不會改用沒隔離的方式跑）';
 function isoCopy(root){const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo');copyRepo(root,copy);linkModules(root,copy);return {base,copy};}
 function trialEnv(iso,cmd0){const env={PATH:process.env.PATH,HOME:iso.base,TMPDIR:iso.base,LANG:'C.UTF-8',NO_COLOR:'1',TERM:'dumb',COLUMNS:'100'};
  if(/(^|\/)python[\d.]*$/.test(cmd0))Object.assign(env,{PYTHONPATH:pyPathOf(iso.copy),PYTHONDONTWRITEBYTECODE:'1',PYTHONNOUSERSITE:'1',PYTHONIOENCODING:'utf-8'});return env;}
 function execIso(iso,root,cmd,{timeoutMs=8000,input}={}){
  if(/^python[\d.]*$/.test(cmd[0])&&pyVenv(root))cmd=[pyVenv(root),...cmd.slice(1)];
- const unshare=spawnSync('unshare',['-rn','true']).status===0,full=unshare?['unshare','-rn','--',...cmd]:cmd;
+ if(!netIsolation())return {status:null,stdout:'',stderr:NO_ISOLATION,error:Object.assign(Error(NO_ISOLATION),{code:'NO_ISOLATION'})};
+ const full=['unshare','-rn','--',...cmd];trialStats.spawned++;
  return spawnSync(full[0],full.slice(1),{cwd:iso.copy,env:trialEnv(iso,cmd[0]),encoding:'utf8',timeout:timeoutMs,input,stdio:[input!=null?'pipe':'ignore','pipe','pipe'],maxBuffer:4*1024*1024});}
 export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',plan=null,server=null,triggers=[]}={}){
  root=path.resolve(root);if(!run)throw Error('試跑要給 --run，例如 --run "node bin/cli.js {input}"');
+ if(!netIsolation())return {ran:false,skipped:NO_ISOLATION,network:'unavailable',run,cases:[]};
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo'),inDir=path.join(base,'inputs');copyRepo(root,copy);fs.mkdirSync(inDir);
  linkModules(root,copy);
  // fake input in the format the sentence names (CSV, JSON, DOCX, PDF, HTML …); the good one carries MARKER
  const fmt=input?null:formatOf(question)??(/\.csv$/i.test(input??'')?'csv':null),fk=fakeInput(fmt);
  const good=path.join(inDir,'good'+(input?path.extname(input)||'.txt':fk.ext));fs.writeFileSync(good,input?fs.readFileSync(input):fk.good);
  const bad=path.join(inDir,'bad'+path.extname(good));fs.writeFileSync(bad,badInput?fs.readFileSync(badInput):input?'\u0000\u0001not valid\n':fk.bad);
- const unshare=spawnSync('unshare',['-rn','true']).status===0;
+ const unshare=true;// checked above: never run without the namespace
  const argv=s=>s.match(/"[^"]*"|'[^']*'|\S+/g).map(x=>x.replace(/^["']|["']$/g,''));
  const env={PATH:process.env.PATH,HOME:base,TMPDIR:base,LANG:'C.UTF-8',NO_COLOR:'1'};
  // Python: import from the copy, never write .pyc into it, no user site-packages; deps are whatever the box already has (no install).
@@ -510,7 +519,7 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
   cmd=cmd.map((x,i)=>!x.startsWith('-')&&!path.isAbsolute(x)&&/[\/.]/.test(x)&&fs.existsSync(path.join(copy,x))&&(i===0||fs.statSync(path.join(copy,x)).isFile())?path.join(copy,x):x);
   // servers: loopback only (still no outside network), probe with GETs, then stop it
   const probe=server&&unshare&&!viaStdin;const penv=probe?{...env,TCL_PROBE:JSON.stringify({cmd,paths:server.paths??[],waitMs:8000})}:env;
-  const full=probe?['unshare','-rn','--','sh','-c','ip link set lo up 2>/dev/null; exec "$0" "$1"',process.execPath,path.join(path.dirname(new URL(import.meta.url).pathname),'serve-probe.mjs')]:unshare?['unshare','-rn','--',...cmd]:cmd;
+  const full=probe?['unshare','-rn','--','sh','-c','ip link set lo up 2>/dev/null; exec "$0" "$1"',process.execPath,path.join(path.dirname(new URL(import.meta.url).pathname),'serve-probe.mjs')]:['unshare','-rn','--',...cmd];trialStats.spawned++;
   const r0=spawnSync(full[0],full.slice(1),{cwd:work,env:penv,encoding:'utf8',timeout:timeoutMs,input:viaStdin?fs.readFileSync(file):undefined,stdio:[viaStdin?'pipe':'ignore','pipe','pipe'],maxBuffer:4*1024*1024});
   let r=r0,srv=null;if(probe){const line=(r0.stdout??'').split('\n').find(l=>l.startsWith('@@TCL_PROBE@@'));if(line){srv=JSON.parse(line.slice(13));r={status:srv.exit,stdout:srv.stdout,stderr:srv.stderr};for(const x of srv.gets)if(x.body)x.body=x.body.replaceAll(base,'<隔離>');}}
   const stdout=r.stdout??'',stderr=r.stderr??'';
@@ -537,7 +546,7 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
   const outP=path.join(base,'work-trig-'+(k+1),'out'+ext);const r0=run;run=run.replace('{input}',x.flag+(x.value?' '+outP:'')+' {input}');runOne('trig-'+(k+1),'加 '+x.flag+(x.value?' <新檔>':''),inp);run=r0;
   const c=cases.at(-1),ow=fs.existsSync(outP);c.trigger={flag:x.flag,value:x.value,defined:x.file+':'+x.line,outWritten:ow,outBytes:ow?fs.statSync(outP).size:0,outHead:ow?fs.readFileSync(outP,'utf8').slice(0,300):null,inputChanged:!fs.readFileSync(inp).equals(h0)};});
  const a=cases.find(c=>c.id==='good'),b=cases.find(c=>c.id==='good-again');if(a&&b)b.sameStdout=a.stdout===b.stdout;
- const out={ran:true,...(plan?.multi?{project:true,peers:plan.peers??{},multi:plan.multi.map(x=>({cmd:x.cmd,display:x.display,why:x.why}))}:scaffold?{scaffold:true}:{}),viaStdin,python:py,...(venv?{venv:path.relative(root,venv)}:{}),...(plan?{inferred:true,display:plan.display,why:plan.why,help:plan.help,sure:plan.sure}:{}),network:unshare?'off':'guarded',...(server&&unshare?{server:true}:{}),isolation:unshare?(server?'獨立網路命名空間（只有本機回環，連不到外面），在 repo 副本裡跑；服務起來後用 GET 試讀再關掉':'獨立網路命名空間（完全沒有網路），在 repo 副本裡跑'):'沒有 unshare，網路沒隔離',run,inputs:{format:input?path.extname(input):fk.fmt,marker:input?null:MARKER,good:/^(docx|pdf)$/.test(fk.fmt??'')&&!input?'（'+fk.fmt+' 二進位檔，內含「'+MARKER+'」）':fs.readFileSync(good,'utf8').slice(0,400),bad:fs.readFileSync(bad,'utf8').slice(0,400).replace(/[\u0000-\u0008]/g,'·')},cases,at:new Date().toISOString()};
+ const out={ran:true,...(plan?.multi?{project:true,peers:plan.peers??{},multi:plan.multi.map(x=>({cmd:x.cmd,display:x.display,why:x.why}))}:scaffold?{scaffold:true}:{}),viaStdin,python:py,...(venv?{venv:path.relative(root,venv)}:{}),...(plan?{inferred:true,display:plan.display,why:plan.why,help:plan.help,sure:plan.sure}:{}),network:'off',...(server?{server:true}:{}),isolation:server?'獨立網路命名空間（只有本機回環，連不到外面），在 repo 副本裡跑；服務起來後用 GET 試讀再關掉':'獨立網路命名空間（完全沒有網路），在 repo 副本裡跑',run,inputs:{format:input?path.extname(input):fk.fmt,marker:input?null:MARKER,good:/^(docx|pdf)$/.test(fk.fmt??'')&&!input?'（'+fk.fmt+' 二進位檔，內含「'+MARKER+'」）':fs.readFileSync(good,'utf8').slice(0,400),bad:fs.readFileSync(bad,'utf8').slice(0,400).replace(/[\u0000-\u0008]/g,'·')},cases,at:new Date().toISOString()};
  fs.rmSync(base,{recursive:true,force:true});return out;
 }
 // ---- short mode: "is feature X wired?" A → … → B, plus whether a test reaches B. ----
