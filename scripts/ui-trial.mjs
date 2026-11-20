@@ -64,6 +64,7 @@ export function runUiTrial(root,m,{budgetS=300,keepDir=null}={}){
  if(!serve)return {...base,skipped:'找不到會開這個介面的 dev／start 指令'};
  if(!serve.bin)return {...base,skipped:'dev 指令的程式 '+serve.prog+' 在副本裡找不到（沒裝依賴？）'};
  if(!drv.python)return {...base,skipped:'這台沒有可用的瀏覽器驅動（Python playwright）；設 TCL_PLAYWRIGHT_PYTHON 指到裝了 playwright 的 python 再跑'};
+ if(process.platform==='win32')return {...base,skipped:'Windows 不做介面試跑（要 Linux 的只開本機回環）；在 Linux 上再試'};
  if(!unshare)return {...base,skipped:'沒有 unshare，無法只開本機回環；為了不連外，介面試跑略過'};
  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-ui-')),copy=path.join(tmp,'repo'),dl=path.join(tmp,'downloads');fs.mkdirSync(dl);
  try{copyRepo(root,copy);linkModulesShallow(root,copy);

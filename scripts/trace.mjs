@@ -13,7 +13,7 @@ import {traceRoute,traceWired,runTrial,draftAnswer,astPreflight,inferRun,package
 import {renderRouteHtml} from './route-report-html.mjs';
 import {uiTargets} from './ui-trial.mjs';
 import {checkQuotes} from './check-quotes.mjs';
-import {trialGate,preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,relayText,capLabel,parseCapability} from './preflight.mjs';
+import {trialGate,preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,ownerAsks,relayText,capLabel,parseCapability} from './preflight.mjs';
 // Dogfood ext round: the step hints say 超出範圍 etc. in Chinese, so --unknown accepts the Chinese class labels too.
 const UNKNOWN_CLASS_ZH={'沒去跑':'not-run','沒跑':'not-run','未試跑':'not-run','由模型決定':'model-choice','單次異常':'one-off','資料沒了':'evidence-lost','要負責人判斷':'owner-only','負責人判斷':'owner-only','範圍或授權外':'out-of-scope','超出範圍':'out-of-scope'};
 
@@ -279,9 +279,12 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
    const live=q.target.findings.filter(f=>!f.test&&!f.retired&&!f.typesOnly&&!f.unreached).length,unreached=q.target.findings.filter(f=>f.unreached&&!f.test).length;
    const eng=q.target.engine;console.log(eng.name==='tree-sitter'?'掃描方式：語法樹（tree-sitter '+eng.version+'，'+eng.files+' 個 JS/TS/Python 檔）；入口 '+((q.target.entries??[]).map(e=>e.kind+':'+e.name).join('、')||'找不到，全部列入')+(unreached?'；repo 有但入口走不到的線索 '+unreached+' 項，不問':''):'掃描方式：文字比對（'+(eng.reason??'')+'）');
    console.log(['開卡前檢查：讀 '+q.target.fileCount+' 檔'+(paths.length?'（只看 '+paths.join('、')+'）':'')+'；需要負責人知道的線索 '+live+' 項（另有測試、退役、型別宣告或入口走不到 '+(q.target.findings.length-live)+' 項）。'+(!paths.length&&q.target.fileCount>500?'\n範圍很大（'+q.target.fileCount+' 檔）：若只要接其中一部分，請重做並加 --paths 子目錄，問題和報告都會小很多。':''),'',relayText(q),'',
-    '給 agent：把上面原文轉給負責人；收到回覆後執行',
-    '  node scripts/trace.mjs answer --questions '+JSON.stringify(target)+' --out <答覆.json> --by "回覆者" --accept-defaults [--set 題號=甲乙丙]',
-    '  回「照建議」就只加 --accept-defaults；模擬演練一定要加 --simulated。'].join('\n'));
+    ...(ownerAsks(q).length?['給 agent：只把上面「請負責人決定」那幾題轉給負責人；其餘由你依預設答。收到回覆後執行',
+    '  node scripts/trace.mjs answer --questions '+JSON.stringify(target)+' --out <答覆.json> --by "回覆者" --agent-defaults [--set 題號=甲乙丙]',
+    '  回「照建議」就改加 --accept-defaults；負責人還沒回時先只加 --agent-defaults，那幾項記為沒准；模擬演練一定要加 --simulated。']
+    :['給 agent：不用問負責人，直接執行',
+    '  node scripts/trace.mjs answer --questions '+JSON.stringify(target)+' --out <答覆.json> --by agent --agent-defaults']),
+    ].join('\n'));
   }catch(e){console.error('問題清單未建立：'+e.message);process.exitCode=1;}
  }
  else if(command==='answer'){
@@ -290,7 +293,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
    const qs=JSON.parse(fs.readFileSync(qf,'utf8')),set={};
    args.forEach((a,i)=>{if(a==='--set'){const m=String(args[i+1]??'').match(/^([^=]+)=(.*)$/);if(!m)throw Error('--set 要寫成 題號=選項，例如 1=乙');set[m[1].trim()]=m[2];}});
    const by=get('--by');if(!by)throw Error('請用 --by 寫明是誰回覆的。');
-   const {answers,errors}=answersFrom(qs,{acceptDefaults:args.includes('--accept-defaults'),set,by,simulated:args.includes('--simulated')});
+   const {answers,errors}=answersFrom(qs,{acceptDefaults:args.includes('--accept-defaults'),agentDefaults:args.includes('--agent-defaults'),set,by,simulated:args.includes('--simulated')});
    if(errors.length)throw Error(errors.join('；'));
    answers.questionsFile=path.relative(path.dirname(path.resolve(out)),qf)||path.basename(qf);
    const target=path.resolve(out);noLinks(target);fs.writeFileSync(target,JSON.stringify(answers,null,2)+'\n',{encoding:'utf8',flag:'wx'});

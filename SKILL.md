@@ -1,7 +1,7 @@
 ---
 name: trace-code-lines
 metadata:
-  version: 1.38.0-rc.3
+  version: 1.38.0-rc.4
 description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，沿問題讀碼，交付可追到證據的鏈卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
 
@@ -25,7 +25,7 @@ node scripts/trace.mjs status --card <卡片.json>
 
 想知道某工具怎麼用、能不能接進自己的系統（JS/TS/Python）：`route`；只確認功能有沒有接好：`wired`；草稿引用的數字對回原文：`check-quotes`。用法與能力邊界見 [用途路線](references/route.md)。
 
-接入或要試跑時，先 `preflight` 把要負責人決定的事一次問完；`--trial` 只在答覆准了「網路全關」或「只開本機」、而且建得出網路隔離時才跑，否則一律不跑並寫明原因。
+接入或要試跑時，先 `preflight`，再 `answer --agent-defaults`：讀檔、寫檔、跑其他程式與隔離試跑由 agent 依預設答，只有連外網、花錢、真帳號、機密、讓模型下系統指令才問負責人。`--trial` 只在答覆准了試跑、而且建得出網路隔離時才跑，否則一律不跑並寫明原因。
 
 一鍵填卡：`node scripts/trace.mjs fill --card <卡> --step <n> --note "說明" --anchor "檔:行:文字"`；可重複錨點，跳步加 `--skip`，寫回即核對並印下一步。
 同命令可加 `--chain "一站"`、`--conflict "現象|方向"`、`--cleared "排除項"`、`--verify "檢查|結果"`、`--unknown "問題|類別|原因|試過|下一步|成本|理解|會不會改變本題結論"`；末欄可省略：`yes`＝會、`no`＝不會、`unsure`＝不確定；接入欄位見 [接入分診](references/integrate.md)。
@@ -52,4 +52,4 @@ node scripts/trace.mjs status --card <卡片.json>
 
 ## 版本
 
-目前版本：1.38.0-rc.3（2026-11-20，測試中）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.38.0-rc.4（2026-11-20，測試中）。歷史見 [changelog](references/changelog.md)。

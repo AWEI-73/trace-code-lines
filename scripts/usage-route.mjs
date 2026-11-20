@@ -201,6 +201,11 @@ export async function traceRoute(root,{question='',entry:hint=null,fn=null,ast=n
   else{model.framework={total:fwAll.length,picked:[],how:'全部'};if(fwAll.length>1)model.unknowns.push({kind:'framework',text:'repo 用 '+[...new Set(fwAll.map(e=>e.framework))].join('、')+' 註冊了 '+fwAll.length+' 個'+(fwAll.some(e=>e.kind==='route')?'路由／':'')+'指令（例：'+fwAll.slice(0,4).map(e=>e.name).join('、')+'），問句沒點名，這次全部算進路線，範圍會偏大；在問句寫指令名或路徑即可縮小。'});}}
  const parent=reach(g,roots,{classes:model.apiClasses??null,hints:KEYWORDS(question),framework:fwSel});if(parent.dynPicked)model.dynPicked=parent.dynPicked;if(parent.methodPicked){model.methodPicked=parent.methodPicked;for(const p of parent.methodPicked)model.unknowns.push({kind:'inferred',text:'有 '+p.total+' 個類別都有 '+p.method+'()，依問句只接 '+p.picked.join('、')+'（推論）；其他格式的處理不算這條路。'});}model.reachedUnits=parent.size;delete model.apiClasses;
  model.capabilities=whereIs(g,parent,model.toolTerms??[]);
+ // The sentence names a capability (component, export, slide …) whose module exists but is not on the route: the route never got there,
+ // so nothing it says about writes or network covers that part. Record it instead of a clean bill.
+ for(const term of model.toolTerms??[]){const hits=model.capabilities.filter(c=>c.term===term);
+  if(!hits.length||hits.some(c=>c.onRoute)||(model.framework?.picked??[]).some(x=>String(x.name).toLowerCase()===term))continue;const h=hits[0];
+  model.unknowns.push({kind:'not-reached',term,file:h.file,text:'問句點名的 `'+term+'` 沒追到：它在 '+h.file+(h.via.length?'（由 '+h.via.slice(0,2).map(v=>v.file+':'+v.line).join('、')+' 載入）':'')+'，從入口追不到（可能是動態分派或指令登錄表）；這部分寫不寫檔、連不連網都沒看到，要讀碼或試跑確認。'});}
  const all=touches(g,parent).filter(t=>!(t.file===entryFile&&t.cap==='dynamic'&&false));
  const test=t=>TEST_PATH.test(t.file);
  // A touch with no condition of its own may still sit in a function only called under a condition (if magic: run()).
@@ -283,20 +288,20 @@ export function draftAnswer(m){
  if(!e)return {text:'還找不到入口；請用 --entry 指定。',parts};
  if(m.engine?.name!=='tree-sitter')return {text:'沒有語法解析，這次無法自動追路線。入口看起來是'+(e.kind==='bin'?'命令列 `'+e.name+'`（'+e.file+'）':'函式庫 `'+e.name+'`（'+e.file+'）')+'。請先在 skill 資料夾執行 `npm install --ignore-scripts`，或改用 preflight＋start 的讀碼流程；下面列的是文字比對看到的線索，沒分是不是這條路會走到。',parts:{caveats:[]},draft:true};
  const cmd0=m.framework?.picked?.find(x=>x.kind==='command')?.name;
- parts.entry=e.kind==='bin'?'可以先接命令列入口 `'+e.name+(cmd0?' '+cmd0:'')+' <檔案>`'+(m.framework?.picked?.some(x=>x.kind==='route')?'，這條路走 '+m.framework.picked.filter(x=>x.kind==='route').slice(0,3).map(x=>'`'+x.name+'`').join('、')+' 路由':''):'可以先接函式入口 `require(\''+e.name+'\')`'+(m.target?.names?.length?' 的 `'+m.target.names.join('`、`')+'`':'');
+ parts.entry=e.kind==='bin'?'可以先接命令列入口 `'+e.name+(cmd0?' '+cmd0:'')+(R.some(t=>t.cap==='read-file'||t.cap==='stdin')?' <檔案>':' …')+'`'+(m.framework?.picked?.some(x=>x.kind==='route')?'，這條路走 '+m.framework.picked.filter(x=>x.kind==='route').slice(0,3).map(x=>'`'+x.name+'`').join('、')+' 路由':''):'可以先接函式入口 `require(\''+e.name+'\')`'+(m.target?.names?.length?' 的 `'+m.target.names.join('`、`')+'`':'');
  if(e.kind!=='bin'&&!m.target&&(m.unknowns??[]).some(u=>u.kind==='target'))parts.entry+='（問句點名的函式找不到，以下以整個 API 為範圍，可用 --fn 指定）';
  const reads=R.filter(t=>t.cap==='read-file'&&!/exists|stat|access/.test(t.canon??''));
  parts.input=reads.length?'它讀你給的檔（'+[...new Set(reads.map(t=>short(t.canon)))].join('、')+'）'+(has('stdin')?(()=>{const t=R.find(t=>t.cap==='stdin'),c=(t?.ownCtx??t?.ctx??[]).find(x=>/^當 /.test(x));return c?'，'+c.replace(/^當 /,'')+' 時改讀標準輸入（'+t.file+':'+t.line+'）':'，也會讀標準輸入（'+t.file+':'+t.line+'）';})():''):has('stdin')?'它從標準輸入讀資料':'輸入從參數傳入';
  const writes=R.filter(t=>t.cap==='write-file');
  // never say 「不寫檔」 when something on the route was not followed (external packages, dynamic calls) or a write sits behind a pattern we cannot read
- const unseen=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import'].includes(u.kind));const KIND={dynamic:'動態載入','dynamic-call':'動態呼叫',package:'外部套件','unresolved-import':'找不到的 import'};
+ const unseen=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import','not-reached'].includes(u.kind));const KIND={'not-reached':'問句點名的功能沒追到',dynamic:'動態載入','dynamic-call':'動態呼叫',package:'外部套件','unresolved-import':'找不到的 import'};
  const noWrite=unseen.length?'沒看到寫檔，但有 '+unseen.length+' 處（'+[...new Set(unseen.map(u=>KIND[u.kind]))].join('、')+'）沒追進去，不保證':'這條路沒有寫檔的站';parts.noWrite=noWrite;
  const blindW=R.filter(t=>t.blind?.length);parts.blind=blindW.map(t=>t.file+':'+t.line+' '+t.blind[0]);
  const onlyIfW=x=>!!x.guard||(x.ownCtx??x.ctx??[]).some(c=>/^當 /.test(c)&&!/不成立/.test(c));
  const gWhy=t=>t.guard?t.guard.text+'（'+t.file+':'+t.line+'；條件 '+t.guard.lines.join('、')+' 行）':short(t.canon)+' '+t.file+':'+t.line+' 只在「'+(t.ownCtx??t.ctx)[0].slice(0,40)+'」時';
  parts.output=writes.length&&writes.every(onlyIfW)?'只在特定情況寫檔：'+[...new Set(writes.slice(0,2).map(gWhy))].join('；')+'；其餘'+(has('stdout')?'結果印到標準輸出':'結果由回傳值交回'):writes.length?'會寫檔（'+[...new Set(writes.map(t=>short(t.canon)))].join('、')+'），要給它專用資料夾':has('stdout')?'結果印到標準輸出；'+noWrite:'結果由回傳值交回；'+noWrite;
  const other=[...new Set(R.filter(t=>OTHER_PROGRAM.has(t.cap)).map(t=>t.label))];
- const pend=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import'].includes(u.kind)).length;
+ const pend=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import','not-reached'].includes(u.kind)).length;
  const narrow=(m.unknowns??[]).find(u=>u.kind==='narrow');
  const onlyIf=x=>(x.ownCtx??x.ctx??[]).some(c=>/^當 /.test(c)&&!/不成立/.test(c));
  const allCond=other.length&&R.filter(t=>OTHER_PROGRAM.has(t.cap)).every(onlyIf);
@@ -369,7 +374,7 @@ export function draftAnswer(m){
  if(/登入|login|claude|codex|gemini|模型|agent/i.test(m.question??'')){const ag=x=>x.filter(t=>t.agentCli);const onR=ag(R),els=ag(m.touches?.elsewhere??[]);
   parts.agent=onR.length?'這條路會啟動 '+[...new Set(onR.map(t=>t.agentCli))].join('、')+'（'+onR[0].file+':'+onR[0].line+'），要用你的登入與額度':els.length?'這條路不用登入 AI 代理；repo 另一處會啟動 '+[...new Set(els.map(t=>t.agentCli))].join('、')+'（'+els.slice(0,2).map(t=>t.file+':'+t.line).join('、')+'，不在這條路上），用到那部分才要你的登入':'沒看到它啟動 Claude、Codex 等 AI 代理 CLI';}
  // the question asks for something this route never reaches (export in a UI button, a codemod in another command …)
- const FMT=/^(pdf|pptx|ppt|docx|xlsx|html|csv|epub|png|svg|codemod|scaffold|template|theme)$/,caps=(m.capabilities??[]).filter(c=>FMT.test(c.term)||c.term==='export'&&!(m.capabilities??[]).some(x=>FMT.test(x.term)));
+ const FMT=/^(pdf|pptx|ppt|docx|xlsx|html|csv|epub|png|svg|codemod|scaffold|template|theme|component|slides?|deck)$/,caps=(m.capabilities??[]).filter(c=>FMT.test(c.term)||c.term==='export'&&!(m.capabilities??[]).some(x=>FMT.test(x.term)));
  const off=caps.filter(c=>!c.onRoute),on=new Set(caps.filter(c=>c.onRoute).map(c=>c.term));const offT=[...new Set(off.filter(c=>!on.has(c.term)).map(c=>c.term))];
  if(offT.length&&t?.project)parts.offRoute='原碼路線只追到入口與指令分派，'+offT.slice(0,3).map(x=>x.toUpperCase()).join('、')+' 的實作（'+off.filter(c=>offT.includes(c.term)).slice(0,2).map(c=>c.file).join('、')+'）由指令執行時載入，以上各指令的行為以試跑為準';
  else if(offT.length)parts.offRoute='問句要的 '+offT.slice(0,3).map(t=>t.toUpperCase()+' 在 '+off.filter(c=>c.term===t).slice(0,2).map(c=>c.file+(c.via.length?'（由 '+c.via.slice(0,2).map(v=>v.file+':'+v.line).join('、')+' 載入'+(c.ui?'，介面功能':'')+'）':'（沒找到誰載入）')).join('、')).join('；')+'，這條入口走不到，不能當成這個步驟的輸出';
@@ -479,13 +484,30 @@ function listTestText(root){let out='',n=0;const walk=(d,rel,depth)=>{if(depth>4
 // node_modules of the root and of each workspace package (pnpm keeps one per package), linked read-through into the copy
 function linkModules(root,copy){const walk=(rel,depth)=>{let es;try{es=fs.readdirSync(path.join(root,rel),{withFileTypes:true});}catch{return;}
   for(const x of es){if(!x.isDirectory())continue;const r=rel?rel+'/'+x.name:x.name;
-   if(x.name==='node_modules'){if(fs.existsSync(path.join(copy,rel))&&!fs.existsSync(path.join(copy,r)))fs.symlinkSync(path.join(root,r),path.join(copy,r),'dir');}
+   if(x.name==='node_modules'){if(fs.existsSync(path.join(copy,rel))&&!fs.existsSync(path.join(copy,r)))fs.symlinkSync(path.join(root,r),path.join(copy,r),WIN?'junction':'dir');}
    else if(depth<4&&!/^(\.git|\.venv|venv|__pycache__|dist|build)$/.test(x.name)&&!x.name.startsWith('.'))walk(r,depth+1);}};walk('',0);}
 // Trials only ever run inside a fresh network namespace (unshare -rn). If that cannot be created, nothing runs (fail closed).
 // TCL_TEST_NO_UNSHARE=1 simulates a box without it (self-test); trialStats counts every program a trial actually started.
 export const trialStats={spawned:0};
-export function netIsolation(){if(process.env.TCL_TEST_NO_UNSHARE==='1')return false;return spawnSync('unshare',['-rn','true']).status===0;}
-export const NO_ISOLATION='這台不能建立網路隔離（unshare -rn 失敗），為了不連外，試跑不跑（不會改用沒隔離的方式跑）';
+// Windows: the same namespace inside WSL (`unshare -rnm`), the scratch folder bind-mounted in and /mnt hidden, so neither the
+// network nor Windows programs (WSL interop) are reachable. Command-line trials only; servers and UI trials need Linux.
+export const WIN=process.platform==='win32';let wslOk=null;
+const toWsl=p=>{const m=/^([A-Za-z]):[\\/](.*)$/.exec(p);return m?'/mnt/'+m[1].toLowerCase()+'/'+m[2].replace(/\\/g,'/'):p.replace(/\\/g,'/');};
+export function netIsolation(){if(process.env.TCL_TEST_NO_UNSHARE==='1')return false;
+ if(WIN){if(wslOk===null)wslOk=spawnSync('wsl.exe',['-e','unshare','-rnm','true'],{windowsHide:true,timeout:30000}).status===0;return wslOk;}
+ return spawnSync('unshare',['-rn','true']).status===0;}
+export const NO_ISOLATION=WIN?'這台不能在 WSL 裡建立網路隔離（wsl.exe unshare -rnm 失敗），為了不連外，試跑不跑（不會改用沒隔離的方式跑）':'這台不能建立網路隔離（unshare -rn 失敗），為了不連外，試跑不跑（不會改用沒隔離的方式跑）';
+export const WIN_CLI_ONLY='Windows 經 WSL 只做命令列試跑；會開連線埠的路線與介面試跑要在 Linux 上試';
+// Run cmd with no network. base is the scratch folder holding everything the run may touch (copy, inputs, work folders, home).
+function nsSpawn(cmd,{base,cwd,env,timeout,input,stdio}){
+ const o={encoding:'utf8',timeout,input,stdio,maxBuffer:4*1024*1024};
+ if(!WIN)return spawnSync('unshare',['-rn','--',...cmd],{...o,cwd,env});
+ const M='/tmp/tcl-iso-'+path.basename(base),map=s=>typeof s==='string'&&s.includes(base)?s.split(base).join(M).replace(/\\/g,'/'):s;
+ const lenv={PATH:'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'};
+ for(const [k,v] of Object.entries(env??{}))if(k!=='PATH')lenv[k]=k==='PYTHONPATH'?String(v).split(path.delimiter).map(map).join(':'):map(String(v));
+ const script='mkdir -p "$1" && mount --bind "$2" "$1" && mount -t tmpfs none /mnt && cd "$3" && shift 3 && exec "$@"';
+ const r=spawnSync('wsl.exe',['-e','env','-i',...Object.entries(lenv).map(([k,v])=>k+'='+v),'unshare','-rnm','--','sh','-c',script,'sh',M,toWsl(base),map(cwd),...cmd.map(map)],{...o,windowsHide:true});
+ const back=s=>typeof s==='string'?s.split(M).join(base):s;return {...r,stdout:back(r.stdout),stderr:back(r.stderr)};}
 // No isolation: an empty scratch folder only (execIso refuses to run anything), never a copy of the repo.
 function isoCopy(root){const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo');if(!netIsolation())return {base,copy};
  try{copyRepo(root,copy);linkModules(root,copy);}catch(e){fs.rmSync(base,{recursive:true,force:true});throw e;}return {base,copy};}
@@ -494,11 +516,12 @@ function trialEnv(iso,cmd0){const env={PATH:process.env.PATH,HOME:iso.base,TMPDI
 function execIso(iso,root,cmd,{timeoutMs=8000,input}={}){
  if(/^python[\d.]*$/.test(cmd[0])&&pyVenv(root))cmd=[pyVenv(root),...cmd.slice(1)];
  if(!netIsolation())return {status:null,stdout:'',stderr:NO_ISOLATION,error:Object.assign(Error(NO_ISOLATION),{code:'NO_ISOLATION'})};
- const full=['unshare','-rn','--',...cmd];trialStats.spawned++;
- return spawnSync(full[0],full.slice(1),{cwd:iso.copy,env:trialEnv(iso,cmd[0]),encoding:'utf8',timeout:timeoutMs,input,stdio:[input!=null?'pipe':'ignore','pipe','pipe'],maxBuffer:4*1024*1024});}
+ trialStats.spawned++;
+ return nsSpawn(cmd,{base:iso.base,cwd:iso.copy,env:trialEnv(iso,cmd[0]),timeout:timeoutMs,input,stdio:[input!=null?'pipe':'ignore','pipe','pipe']});}
 export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',plan=null,server=null,triggers=[]}={}){
  root=path.resolve(root);if(!run)throw Error('試跑要給 --run，例如 --run "node bin/cli.js {input}"');
  if(!netIsolation())return {ran:false,skipped:NO_ISOLATION,network:'unavailable',run,cases:[]};
+ if(WIN&&server)return {ran:false,skipped:WIN_CLI_ONLY,network:'unavailable',run,cases:[]};
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'tcl-trial-')),copy=path.join(base,'repo'),inDir=path.join(base,'inputs');copyRepo(root,copy);fs.mkdirSync(inDir);
  linkModules(root,copy);
  // fake input in the format the sentence names (CSV, JSON, DOCX, PDF, HTML …); the good one carries MARKER
@@ -522,7 +545,8 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
   // servers: loopback only (still no outside network), probe with GETs, then stop it
   const probe=server&&unshare&&!viaStdin;const penv=probe?{...env,TCL_PROBE:JSON.stringify({cmd,paths:server.paths??[],waitMs:8000})}:env;
   const full=probe?['unshare','-rn','--','sh','-c','ip link set lo up 2>/dev/null; exec "$0" "$1"',process.execPath,path.join(path.dirname(new URL(import.meta.url).pathname),'serve-probe.mjs')]:['unshare','-rn','--',...cmd];trialStats.spawned++;
-  const r0=spawnSync(full[0],full.slice(1),{cwd:work,env:penv,encoding:'utf8',timeout:timeoutMs,input:viaStdin?fs.readFileSync(file):undefined,stdio:[viaStdin?'pipe':'ignore','pipe','pipe'],maxBuffer:4*1024*1024});
+  const sio={timeout:timeoutMs,input:viaStdin?fs.readFileSync(file):undefined,stdio:[viaStdin?'pipe':'ignore','pipe','pipe']};
+  const r0=probe?spawnSync(full[0],full.slice(1),{...sio,cwd:work,env:penv,encoding:'utf8',maxBuffer:4*1024*1024}):nsSpawn(cmd,{...sio,base,cwd:work,env:penv});
   let r=r0,srv=null;if(probe){const line=(r0.stdout??'').split('\n').find(l=>l.startsWith('@@TCL_PROBE@@'));if(line){srv=JSON.parse(line.slice(13));r={status:srv.exit,stdout:srv.stdout,stderr:srv.stderr};for(const x of srv.gets)if(x.body)x.body=x.body.replaceAll(base,'<隔離>');}}
   const stdout=r.stdout??'',stderr=r.stderr??'';
   const dep=stderr.match(/(?:ModuleNotFoundError|ImportError): No module named '([\w.]+)'/)?.[1]??stderr.match(/Cannot find (?:module|package) '([^']+)'/)?.[1]??null;
@@ -534,7 +558,7 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
   fs.writeFileSync(path.join(proj,'package.json'),JSON.stringify({name:'trial-app',version:'0.0.0',private:true,type:'module',dependencies:{react:'^19.0.0'}},null,2)+'\n');
   // peer packages the tool expects in a project (e.g. @astryxdesign/core) and that live in this repo: linked into the made-up project
   const peers=Object.keys(plan.peers??{});const pj=JSON.parse(fs.readFileSync(path.join(proj,'package.json'),'utf8'));
-  for(const n of peers){const d=plan.peers[n];const dst=path.join(proj,'node_modules',...n.split('/'));fs.mkdirSync(path.dirname(dst),{recursive:true});fs.symlinkSync(path.join(copy,d),dst,'dir');pj.dependencies[n]=JSON.parse(fs.readFileSync(path.join(copy,d,'package.json'),'utf8')).version??'*';}
+  for(const n of peers){const d=plan.peers[n];const dst=path.join(proj,'node_modules',...n.split('/'));fs.mkdirSync(path.dirname(dst),{recursive:true});fs.symlinkSync(path.join(copy,d),dst,WIN?'junction':'dir');pj.dependencies[n]=JSON.parse(fs.readFileSync(path.join(copy,d,'package.json'),'utf8')).version??'*';}
   fs.writeFileSync(path.join(proj,'package.json'),JSON.stringify(pj,null,2)+'\n');
   // project files the sentence names (AGENTS.md, CLAUDE.md …) already exist with the owner's own text, as in a real project
   for(const f of new Set((question.match(/\b[A-Za-z][\w-]*\.md\b/g)??[])))fs.writeFileSync(path.join(proj,f),'# my rules\n');
@@ -547,8 +571,12 @@ export function runTrial(root,{run,input,badInput,timeoutMs=15000,question='',pl
  if(!scaffold&&!plan?.multi&&!viaStdin&&!server)triggers.slice(0,3).forEach((x,k)=>{const ext=path.extname(good),inp=path.join(inDir,'trig-'+(k+1)+ext);fs.copyFileSync(good,inp);const h0=fs.readFileSync(inp);
   const outP=path.join(base,'work-trig-'+(k+1),'out'+ext);const r0=run;run=run.replace('{input}',x.flag+(x.value?' '+outP:'')+' {input}');runOne('trig-'+(k+1),'加 '+x.flag+(x.value?' <新檔>':''),inp);run=r0;
   const c=cases.at(-1),ow=fs.existsSync(outP);c.trigger={flag:x.flag,value:x.value,defined:x.file+':'+x.line,outWritten:ow,outBytes:ow?fs.statSync(outP).size:0,outHead:ow?fs.readFileSync(outP,'utf8').slice(0,300):null,inputChanged:!fs.readFileSync(inp).equals(h0)};});
+ // the program itself is missing where the trial runs (e.g. no node inside WSL): nothing about the tool was learned
+ const NOTFOUND=/(?:exec: |^)(\S+): (?:not found|No such file)/m;
+ const gone=cases.length&&cases.every(c=>c.exit===127&&NOTFOUND.test(c.stderr));
+ if(gone){const prog=cases[0].stderr.match(NOTFOUND)?.[1]??'這個程式';fs.rmSync(base,{recursive:true,force:true});return {ran:false,skipped:(WIN?'WSL 裡':'試跑環境裡')+'沒有 '+prog+'，試跑沒跑成'+(WIN?'（要在 WSL 裝 '+prog+'，或到 Linux 試）':''),network:'off',run,cases:[]};}
  const a=cases.find(c=>c.id==='good'),b=cases.find(c=>c.id==='good-again');if(a&&b)b.sameStdout=a.stdout===b.stdout;
- const out={ran:true,...(plan?.multi?{project:true,peers:plan.peers??{},multi:plan.multi.map(x=>({cmd:x.cmd,display:x.display,why:x.why}))}:scaffold?{scaffold:true}:{}),viaStdin,python:py,...(venv?{venv:path.relative(root,venv)}:{}),...(plan?{inferred:true,display:plan.display,why:plan.why,help:plan.help,sure:plan.sure}:{}),network:'off',...(server?{server:true}:{}),isolation:server?'獨立網路命名空間（只有本機回環，連不到外面），在 repo 副本裡跑；服務起來後用 GET 試讀再關掉':'獨立網路命名空間（完全沒有網路），在 repo 副本裡跑',run,inputs:{format:input?path.extname(input):fk.fmt,marker:input?null:MARKER,good:/^(docx|pdf)$/.test(fk.fmt??'')&&!input?'（'+fk.fmt+' 二進位檔，內含「'+MARKER+'」）':fs.readFileSync(good,'utf8').slice(0,400),bad:fs.readFileSync(bad,'utf8').slice(0,400).replace(/[\u0000-\u0008]/g,'·')},cases,at:new Date().toISOString()};
+ const out={ran:true,...(plan?.multi?{project:true,peers:plan.peers??{},multi:plan.multi.map(x=>({cmd:x.cmd,display:x.display,why:x.why}))}:scaffold?{scaffold:true}:{}),viaStdin,python:py,...(venv?{venv:path.relative(root,venv)}:{}),...(plan?{inferred:true,display:plan.display,why:plan.why,help:plan.help,sure:plan.sure}:{}),network:'off',...(server?{server:true}:{}),isolation:server?'獨立網路命名空間（只有本機回環，連不到外面），在 repo 副本裡跑；服務起來後用 GET 試讀再關掉':WIN?'WSL 裡的獨立網路命名空間（完全沒有網路，Windows 磁碟藏起來），在 repo 副本裡跑':'獨立網路命名空間（完全沒有網路），在 repo 副本裡跑',run,inputs:{format:input?path.extname(input):fk.fmt,marker:input?null:MARKER,good:/^(docx|pdf)$/.test(fk.fmt??'')&&!input?'（'+fk.fmt+' 二進位檔，內含「'+MARKER+'」）':fs.readFileSync(good,'utf8').slice(0,400),bad:fs.readFileSync(bad,'utf8').slice(0,400).replace(/[\u0000-\u0008]/g,'·')},cases,at:new Date().toISOString()};
  fs.rmSync(base,{recursive:true,force:true});return out;
 }
 // ---- short mode: "is feature X wired?" A → … → B, plus whether a test reaches B. ----
