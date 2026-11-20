@@ -26,7 +26,7 @@ export function adapterContract(m){
  const signals={success:good?(good.exit===0?'結束碼 0':'正常輸入回結束碼 '+good.exit)+(bad?.exit===0?'；但壞檔也回 0，成功要再檢查輸出內容':''):'未試跑',
   failure:[bad&&{case:'格式錯',exit:bad.exit,stderr:!!bad.stderr.trim(),stdoutDirty:!!bad.stdout.trim()&&!bad.json?.ok},miss&&{case:'檔案不存在',exit:miss.exit,stderr:!!miss.stderr.trim(),...(miss.changed?.length?{created:miss.changed}:{})},empty&&{case:'空輸入',exit:empty.exit}].filter(Boolean)};
  const ms=Math.max(0,...(t?.cases??[]).map(x=>x.ms??0));if(ms)signals.timeoutSuggestMs=Math.max(5000,Math.ceil(ms*5/1000)*1000);
- const files={reads:[...new Set(R.filter(x=>x.cap==='read-file').map(x=>short(x.canon)+' '+at(x)))].slice(0,4),writes:writes.slice(0,4).map(w=>({at:at(w),how:short(w.canon),when:onlyIf(w)?when(w):'每次'})),trialChanged:good?.changed??null};
+ const files={noWrite:m.answer?.parts?.noWrite??null,reads:[...new Set(R.filter(x=>x.cap==='read-file').map(x=>short(x.canon)+' '+at(x)))].slice(0,4),writes:writes.slice(0,4).map(w=>({at:at(w),how:short(w.canon),when:onlyIf(w)?when(w):'每次'})),trialChanged:good?.changed??null};
  const grants=[...new Map(R.filter(x=>GRANT[x.cap]).map(x=>[x.cap,x])).values()].map(x=>{const all=R.filter(y=>y.cap===x.cap),cond=all.every(onlyIf);return {need:GRANT[x.cap],at:at(x),conditional:cond,...(cond?{when:when(x)}:{})};})
   .sort((a,b)=>a.conditional-b.conditional);
  const unknowns=(m.unknowns??[]).filter(u=>['dynamic','dynamic-call','package','unresolved-import','framework','inferred','narrow'].includes(u.kind)).map(u=>u.text.slice(0,140)).slice(0,6);

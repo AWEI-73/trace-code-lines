@@ -68,15 +68,23 @@ export function flagMap(root,files){const map=new Map();const camel=s=>s.replace
 // flags named by a condition text
 function flagsIn(text,map){const out=[];for(const m of text.matchAll(/(?:\.|\b)([A-Za-z_$][\w$]*)/g)){const o=map.get(m[1]);if(o&&!out.some(x=>x.flag===o.flag))out.push({...o,var:m[1]});}return out;}
 
+// patterns this text analysis cannot see through, near a side effect: the report says 「這裡看不到，不保證」
+export function blindAt(L,n,g){const out=[];const conds=g?[...g.any,...g.all].map(c=>c.text):[];
+ const call=c=>[...c.matchAll(/([A-Za-z_$][\w$.]*)\(/g)].some(m=>!/^(in|not|and|or|is|if|typeof|await|len|isinstance|hasattr|getattr|str|int|bool|Boolean|String|Number|Array\.isArray)$/.test(m[1]));
+ const hc=conds.find(call);if(hc)out.push('條件是函式呼叫（'+hc.slice(0,40)+'），沒追進去看它判斷什麼');
+ const W=n-1,cur=ind(L[W]??'');let lv=cur;for(let i=W-1;i>=0&&i>W-80;i--){const s=L[i];if(blank(s))continue;const v=ind(s),t=s.trim();if(v<lv){if(FN.test(t))break;if(/^(match|switch)\b|^case\b|^default\s*:/.test(t)){out.push('在 match／switch／case 裡（第 '+(i+1)+' 行），分支條件沒解析');break;}lv=v;}}
+ if(/\?[^?:]+:/.test(L[W]??'')&&!/^\s*(\/\/|#)/.test(L[W]??'')||/\bif\b.+\belse\b/.test(L[W]??'')&&/^\s*[\w.]+\s*=/.test(L[W]??''))out.push('這行用三元運算挑值，條件沒解析');
+ return out;}
 // Attach guards to side-effect touches on the route (writes, other programs, network …).
 export const GUARDED=new Set(['write-file','subprocess','network','delete','listen','paid','real-account']);
 export function attachGuards(root,touches){const files=[...new Set(touches.map(t=>t.file))];const map=flagMap(root,files);const cache=new Map();
  const lines=f=>{if(!cache.has(f)){let L=[];try{L=fs.readFileSync(path.join(root,f),'utf8').split(/\r?\n/);}catch{}cache.set(f,L);}return cache.get(f);};
- for(const t of touches){if(!GUARDED.has(t.cap))continue;const g=guardAt(lines(t.file),t.line);if(!g)continue;
+ for(const t of touches){if(!GUARDED.has(t.cap))continue;const L=lines(t.file),g=guardAt(L,t.line);const bl=blindAt(L,t.line,g);if(bl.length)t.blind=bl;if(!g)continue;
   const any=g.any.map(c=>({...c,flags:flagsIn(c.text,map)})),all=g.all.map(c=>({...c,flags:flagsIn(c.text,map)}));
   // triggers: flags whose being set makes the side effect possible; blockers: flags that stop it
   const trig=[...any.filter(c=>!c.neg),...all.filter(c=>!c.neg)].flatMap(c=>c.flags),block=all.filter(c=>c.neg&&!/\b(and|or)\b|&&|\|\|/.test(c.text)).flatMap(c=>c.flags);
   const uniq=a=>a.filter((x,i)=>a.findIndex(y=>y.flag===x.flag)===i);
+  if(![...any,...all].some(c=>c.flags.length)&&[...any,...all].some(c=>/\b(args|opts|options|argv|flags|params|config|cfg)\.\w+/.test(c.text)))(t.blind??=[]).push('條件用到的選項沒在這條路的檔案裡找到定義，對不回旗標');
   t.guard={any,all,lines:g.lines,file:t.file,triggers:uniq(trig),blockers:uniq(block).filter(b=>!trig.some(x=>x.flag===b.flag)),inferred:true,
    text:guardText(t,uniq(trig),uniq(block),any,all)};}
  return map;}

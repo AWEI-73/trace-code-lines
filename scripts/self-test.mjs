@@ -3127,5 +3127,16 @@ s.listen(0,'127.0.0.1',()=>console.log('  Local: http://localhost:'+s.address().
   assert(/格式錯的輸入也照樣排版/.test(a)&&!/格式錯時仍回結束碼 0/.test(a),a);
   const h=renderRouteHtml(mm);assert(h.includes('原檔沒變')&&h.includes('加 --outfile &lt;值&gt; 才會寫檔')||h.includes('加 --outfile <值> 才會寫檔'));
  });
+ await check('boundaries: helper-function guards, match/case and unmapped option conditions are marked 「這裡看不到，不保證」; 「不寫檔」 only when nothing on the route was left unfollowed',async()=>{
+  const {attachGuards}=await import('./guards.mjs');const br=join(area,'blind');
+  put(br,'a.py',"def run(args, s):\n    if should_write(args):\n        with open(args.out, 'w') as f:\n            f.write(s)\n    match args.mode:\n        case 'x':\n            open('y', 'w').write(s)\n    if args.target:\n        open(args.target, 'w').write(s)\n");
+  const t=[{cap:'write-file',file:'a.py',line:3},{cap:'write-file',file:'a.py',line:7},{cap:'write-file',file:'a.py',line:9}];attachGuards(br,t);
+  assert(/函式呼叫/.test(t[0].blind[0]));assert(/match／switch／case/.test(t[1].blind[0]));assert(/對不回旗標/.test(t[2].blind[0]),JSON.stringify(t[2]));
+  const mm=await traceRoute(sp,{question:'給它一份 SQL 檔，排版後印出來',ast});const base={...mm,touches:{...mm.touches,route:mm.touches.route.filter(x=>x.cap!=='write-file')}};
+  const clean=draftAnswer({...base,unknowns:[]}).text,dirty=draftAnswer({...base,unknowns:[{kind:'package',text:'x'}]}).text;
+  assert(/這條路沒有寫檔的站/.test(clean),clean);assert(/沒看到寫檔，但有 1 處（外部套件）沒追進去，不保證/.test(dirty)&&!/這條路沒有寫檔的站|不寫檔/.test(dirty),dirty);
+  const w={...mm,touches:{...mm.touches,route:mm.touches.route.map(x=>x.cap==='write-file'?{...x,blind:['條件是函式呼叫（f(a)），沒追進去看它判斷什麼']}:x)}};w.stations=w.stations.map(s=>s.role==='output'&&/寫檔/.test(s.label)?{...s,blind:['條件是函式呼叫（f(a)），沒追進去看它判斷什麼']}:s);
+  assert(/這裡看不到，不保證/.test(draftAnswer(w).text));assert(renderRouteHtml(w).includes('這裡看不到，不保證'));
+ });
  return checks;
 }

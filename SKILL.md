@@ -1,7 +1,7 @@
 ---
 name: trace-code-lines
 metadata:
-  version: 1.38.0-rc.1
+  version: 1.38.0-rc.2
 description: 查線、依賴、孤兒候選、這條路線有沒有跑過、到底哪份程式在跑、專案或 skill 有沒有寫歪時使用。讀版本、原碼與宣告，沿問題讀碼，交付可追到證據的鏈卡；需要動態證據時，在授權隔離副本用測試或情境試跑。一般寫碼或設計諮詢不觸發。
 ---
 
@@ -40,6 +40,25 @@ node scripts/trace.mjs status --card <卡片.json>
 ```text
 node scripts/trace.mjs check-quotes --map OS=<repo>,WL=<repo> 草稿.md …   # 也可 node scripts/check-quotes.mjs …；--json 給機器讀
 ```
+
+### 能力邊界
+
+看得到（有自測、實際 repo 驗過）：
+- 入口追進真正的程式：package.json bin／exports、console_scripts（含 `mod:main` 只是從別檔 import 進來）、`python -m`、框架註冊的指令與路由。
+- 寫檔、跑程式、連網的觸發條件：外層 if／elif／else 與提早 return／raise／exit 的分支，對回 argparse、click、commander、yargs、`util.parseArgs` 的旗標（「加 --outfile <值> 才會寫檔」）。
+- 試跑：隔離副本、無網路，四種情況加上每個觸發寫檔的旗標各跑一次（新檔、原檔有沒有被覆蓋）。
+- 介面按鈕：有文字的按鈕（含先開 Download／Export 選單），收下載或列印成 PDF。
+- 目標系統已有／缺口：只把程式證據（import、呼叫、宣告依賴）算已有。
+
+看不到（報告標「這裡看不到，不保證」，不會說成安全）：
+- 呼叫進已安裝的外部套件後的行為；動態載入、動態呼叫。
+- 寫在函式裡的判斷（`if should_write(args)`）、match／switch／case、三元運算挑值。
+- 旗標定義在這條路以外的檔案時，條件對不回旗標。
+- 要好幾個旗標一起、或子指令專屬旗標才觸發的寫檔（試跑只各加一個）。
+- 只有圖示、沒有文字的按鈕；Python 沒有型別推論；介面試跑要有 Playwright 與 Chrome／Chromium。
+- 條件行號清單可能混進同一段不相干的錯誤檢查（例如 sqlparse 第 178 行）。
+
+沒看到寫檔時，只有路線上沒有寫檔的站、而且沒有沒追進去的外部套件或動態呼叫，才寫「這條路沒有寫檔的站」；否則寫「沒看到寫檔，但有 N 處 … 沒追進去，不保證」。
 
 ```text
 node scripts/trace.mjs route --root <repo> --question "給它一份 CSV，它能不能只讀這份檔，然後把 JSON 交回來？" --out <路線.json> --html <報告.html> [--trial [--run "python3 -m 套件 --csv < {input}"]] [--preflight <答覆.json>] [--target <系統 repo> --target-name 名稱] [--entry bin:名稱|library|檔] [--fn 檔:函式] [--no-ui-trial] [--ui-keep <資料夾>]
@@ -84,4 +103,4 @@ node scripts/trace.mjs report --card <卡片.json> --out <報告.html>
 
 ## 版本
 
-目前版本：1.38.0-rc.1（2026-11-20，測試中）。歷史見 [changelog](references/changelog.md)。
+目前版本：1.38.0-rc.2（2026-11-20，測試中）。歷史見 [changelog](references/changelog.md)。
