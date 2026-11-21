@@ -3219,7 +3219,7 @@ s.listen(0,'127.0.0.1',()=>console.log('  Local: http://localhost:'+s.address().
   const q='給它一份 SQL 檔，排版後能不能匯出 PDF？',qf=join(area,'gate-q.json');assert.equal(plain('preflight','--root',gt,'--out',qf).status,0);
   const ans=(name,...set)=>{const af=join(area,name);const r=plain('answer','--questions',qf,'--out',af,'--by','測','--accept-defaults','--simulated',...set);assert.equal(r.status,0,r.stderr);return af;};
   const route=(tag,...extra)=>{const o=join(area,'gate-'+tag+'.json');const r=run('route','--root',gt,'--question',q,'--out',o,'--trial',...extra);assert.equal(r.status,0,r.stderr+r.stdout);return JSON.parse(fs.readFileSync(o,'utf8'));};
-  for(const [tag,extra,re] of [['none',[],/沒有開卡前答覆/],['no',['--preflight',ans('gate-no.json')],/不跑，只讀程式碼/]]){
+  for(const [tag,extra,re] of [['none',[],/沒有開卡前答覆/],['no',['--preflight',ans('gate-no.json','--set','run=none')],/不跑，只讀程式碼/]]){
    const m=route(tag,...extra);assert.equal(m.trial.ran,false);assert(re.test(m.trial.skipped),m.trial.skipped);assert(m.uiTrial&&m.uiTrial.ran===false&&re.test(m.uiTrial.skipped),JSON.stringify(m.uiTrial));
    assert(!fs.existsSync(log),tag+': something was spawned: '+(fs.existsSync(log)?fs.readFileSync(log,'utf8'):''));assert(!fs.existsSync(join(area,'gate-ran.txt')));assert.deepEqual(fs.readdirSync(tmp).filter(x=>/^tcl-(trial|uijob)-/.test(x)),[]);
    assert(/試跑沒跑/.test(m.answer.text),m.answer.text);assert(/沒跑<\/b>：/.test(renderRouteHtml(m)));}
