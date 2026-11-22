@@ -8,6 +8,7 @@ import {gitRead} from './git-evidence.mjs';
 import {discoverEntries} from './discover-entries.mjs';
 import {scanStopSites,scanPromptSites,effectCategory} from './stop-sites.mjs';
 import {summaryLine} from './cli-output.mjs';
+import {isMain} from './is-main.mjs';
 
 const codeFile=f=>/\.(?:[cm]?[jt]sx?|py)$/i.test(f);
 const secretFile=f=>/(?:^|\/)(?:\.env(?:\..*)?|\.npmrc|\.pypirc|credentials(?:\..*)?|secrets?(?:\..*)?|.*\.(?:pem|key|p12|pfx))$/i.test(f);
@@ -284,7 +285,7 @@ export function integrationSummary(r){
   ...(r.mode==='flows'?flowLimitations:[]),'全部待讀碼確認，未認定弱點。'
  ].map(summaryLine);
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  try{const [mode,...args]=process.argv.slice(2),get=k=>args.includes(k)?args[args.indexOf(k)+1]:undefined;
   if(mode==='--help')console.log('分診用法：node scripts/integrate.mjs <surface|secrets|flows|deps|import-sarif> --root <原碼> [--paths <目錄,檔案>] [--no-git（四個掃描命令，不可搭配 --rev）] [--rev <提交>] [--file <掃描結果>] [--out <輸出>] [--summary] [--all（flows 全列）]');
   else{const r=scanIntegration(mode,{root:get('--root'),paths:get('--paths'),rev:get('--rev'),file:get('--file'),safeDirectory:get('--safe-directory'),all:args.includes('--all'),noGit:args.includes('--no-git')}),out=get('--out');

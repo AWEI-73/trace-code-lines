@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {pathToFileURL} from 'node:url';
+import {isMain} from './is-main.mjs';
 const get=(v,k)=>(Array.isArray(k)?k:k.split('.')).reduce((v,p)=>v?.[p],v);
 const within=(root,p)=>{const r=path.relative(root,p);return r===''||(!r.startsWith('..'+path.sep)&&r!=='..'&&!path.isAbsolute(r));};
 // Parse validated JSON text a second time only for exact property locators.
@@ -103,7 +104,7 @@ export function trace(c) {
   return {contract:contract('RECORD',[...writerIO.sources.values(),...[...stores.values()].flat().map(r=>({path:r.file,sha256:r.sha256})),...(classification?[{path:classification.path,sha256:classification.sha256}]:[])],[{id:'selected-job',semantics:classification?'CLASSIFIED':'NAME_ONLY_UNVERIFIED',classificationOutput:classification?.path??null,definition:'Caller-selected retained job and configured stores'}],[{selector:'joins[*].checks.length',population:'selected-job',unit:'recorded field comparisons'}]),schema:'trace-one-job-v1',layer:'retained-records',measuredAt:new Date().toISOString(),root,job,population:c.population??path.relative(root,job).split(path.sep)[0],
     stores:Object.fromEntries(stores),joins,pathConventions,gaps,anomalies:joins.filter(j=>j.status==='FAIL').map(j=>j.id),evaluation:'DEFERRED_UNTIL_ALL_LAYERS_READ'};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node trace-one-job.mjs [validate] --config file");process.exit(0);}
 
  try{

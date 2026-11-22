@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {census} from './record-census.mjs';
+import {isMain} from './is-main.mjs';
 const get=(v,k)=> (Array.isArray(k)?k:k.split('.')).reduce((v,p)=>v?.[p],v);
 export function skeletons(config) {
   const result=census({...config,retainEvents:true}), routes=new Map();
@@ -24,7 +25,7 @@ export function skeletons(config) {
   return {...result,schema:'route-skeletons-v1',status:result.gaps.length?'PARTIAL':'PASS',routes:[...routes.values()].sort((a,b)=>b.runs-a.runs),
     limitations:[...result.limitations,'Adjacent identical steps collapse; runs count records, not event repetitions. Ordering uses sequenceKey or sorted file/line order.']};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node route-skeletons.mjs --config file");process.exit(0);}
 
   try{if(process.argv[2]!=='--config'||process.argv.length!==4)throw Error('Usage: route-skeletons.mjs --config file');

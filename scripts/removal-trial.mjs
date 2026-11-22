@@ -8,6 +8,7 @@ import {contract} from './contract.mjs';
 import {execFileSync} from 'node:child_process';
 import {readBounded} from './walker.mjs';
 import {languageEdges} from './language-static.mjs';
+import {isMain} from './is-main.mjs';
 const save=(p,v)=>fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n','utf8');
 const expand=(v,bindings)=>typeof v==='string'?Object.entries(bindings).reduce((s,[k,x])=>s.split(String.fromCharCode(36,123)+k+'}').join(x),v):Array.isArray(v)?v.map(x=>expand(x,bindings)):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,expand(x,bindings)])):v;
 function copy(source,dest){noLinks(source);fs.cpSync(source,dest,{recursive:true,filter:p=>{if(fs.lstatSync(p).isSymbolicLink())throw Error('Linked trial source');return true;}});}
@@ -89,6 +90,6 @@ export async function removalTrial(c,{enable=false,evaluate}={}) {
  if(paths.length)await test(paths);
   report.processStatus=rows.some(r=>r.status==='NOT_TRIED')?'UNKNOWN':'PASS';report.candidateStatus=rows.some(r=>r.status==='REMOVAL_TRIAL_BREAKS')?'FAIL':rows.some(r=>r.status!=='REMOVAL_TRIAL_PASS')?'UNKNOWN':'PASS';report.status=report.candidateStatus==='FAIL'?'FAIL':rows.some(r=>r.status==='WEAK_VALIDATION_SET')?'WEAK_VALIDATION_SET':report.candidateStatus;save(c.output,report);return report;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node removal-trial.mjs --config file [--enable]");process.exit(0);}
 const a=process.argv.slice(2);try{console.log(JSON.stringify(await removalTrial(JSON.parse(fs.readFileSync(a[a.indexOf('--config')+1],'utf8')),{enable:a.includes('--enable')}),null,2));}catch(e){console.error(e.message);process.exitCode=1;}}

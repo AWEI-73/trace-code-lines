@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {get,reader,discover} from './evidence.mjs';
+import {isMain} from './is-main.mjs';
 // Declarative rules only. Never evaluates config expressions as code.
 export function classifyRecords(c){
   if(!c.records?.root||!c.records.pattern||!Array.isArray(c.classes))throw Error('records root/pattern and classes required');
@@ -66,7 +67,7 @@ export function classifyRecords(c){
   const counts=Object.fromEntries([...names,'UNKNOWN','AMBIGUOUS'].map(n=>[n,results.filter(r=>r.classification===n).length]));
   return {contract:contract('RECORD',[...io.sources.values()],[{id:'selected-records',semantics:'CLASSIFIED',classificationOutput:'SELF',definition:'Records satisfying config.filter; every matching class retained, conflicts AMBIGUOUS.'}], [{selector:'counts.*',population:'selected-records',unit:'records'},{selector:'total',population:'selected-records',unit:'records'}]),schema:'classify-records-v1',measuredAt:new Date().toISOString(),status:!results.length?'UNKNOWN':gaps.length?'PARTIAL':'PASS',counts,total:results.length,records:results,gaps,sources:[...io.sources.values()],config:c};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node classify-records.mjs --config file");process.exit(0);}
 
   try{if(process.argv[2]!=='--config'||process.argv.length!==4)throw Error('Usage: classify-records.mjs --config file');

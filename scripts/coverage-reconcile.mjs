@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath,pathToFileURL} from 'node:url';
+import {isMain} from './is-main.mjs';
 const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
 const norm=p=>p.replaceAll('\\','/').replace(/\/$/,'');
 const sha=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
@@ -96,7 +97,7 @@ export function reconcile(c) {
       'Endpoint witnesses supplied by caller must bind exact roots and this run; restored seeds are not new business output.',
       'Counts include all processes in the supplied directory; do not mix runs or versions.']};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node coverage-reconcile.mjs --config file");process.exit(0);}
 
   try{if(process.argv[2]!=='--config'||process.argv.length!==4)throw Error('Usage: coverage-reconcile.mjs --config file');

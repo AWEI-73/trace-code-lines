@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawn,spawnSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
+import {isMain} from './is-main.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 export const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
 export const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
@@ -241,7 +242,7 @@ export function finalize(file){
  m.afterSnapshot=fileSnapshot(m.config.writeRoots,[m.config.outputDirectory]);const now=tree(m.config.outputDirectory),known=new Set(m.files.map(f=>f.path));for(const f of now.files)if(!known.has(f.path))m.files.push(f);
  m.directories=[...new Set([...m.directories,...now.directories])];m.endedAt=new Date().toISOString();seal(m,path.resolve(file));return {manifest:file,files:m.files.length};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node instrument.mjs plan|run|collect|remove|finalize --config file or --manifest file [--enable]");process.exit(0);}
 
  const a=process.argv.slice(2),cmd=a.shift(),get=k=>a[a.indexOf(k)+1];

@@ -2,6 +2,7 @@ import {spawnSync} from 'node:child_process';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {readOptions,printReport,summaryLine} from './cli-output.mjs';
+import {isMain} from './is-main.mjs';
 
 // No shell, hooks, external diff, configuration writes or implicit trust changes.
 export function gitRead(root,args,options={}){
@@ -74,7 +75,7 @@ export function historySummary(r){
   '行號指該提交第一處文字差異（刪除用前版）；不是目前工作樹或執行證據。'
  ];
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  const [mode,...args]=process.argv.slice(2),options=readOptions(args);
  if(mode==='--help'||options.help)console.log('唯讀歷史：recent --root <repo> --paths <a,b>；pickaxe --root <repo> --text <字面>；churn --root <repo>；cochange --root <repo> --path <檔>。可選 --since、--top、--rev、--safe-directory、--summary、--out <JSON>。');
  else try{printReport(gitEvidence(mode,options),options,historySummary);}catch(e){console.error(e.message);process.exitCode=1;}

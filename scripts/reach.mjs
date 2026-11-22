@@ -6,6 +6,7 @@ import {execFileSync} from 'node:child_process';
 import {safeName,noLinks,readBounded,sha256} from './walker.mjs';
 import {tokens} from './language-static.mjs';
 import {toolVersion} from './derive-map.mjs';
+import {isMain} from './is-main.mjs';
 
 const unique=rows=>[...new Map(rows.map(r=>[JSON.stringify(r),r])).values()];
 const within=(root,p)=>{const r=relative(root,p);return r===''||(!r.startsWith('..'+(process.platform==='win32'?'\\':'/'))&&r!=='..'&&!isAbsolute(r));};
@@ -136,7 +137,7 @@ export function reach(map,targets){
 }
 
 const usage='Usage: node reach.mjs --map file --target path [--target path ...] [--targets-file file] [--out file]';
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  try{
   const args=process.argv.slice(2);if(args.length===1&&args[0]==='--help'){console.log(usage);process.exit(0);}
   let mapFile,out,targetsFile;const targets=[];

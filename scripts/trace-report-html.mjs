@@ -12,6 +12,7 @@ import {scanIntegration} from './integrate.mjs';
 import {writeChainCard} from './chain-card.mjs';
 import {capLabel,TEST_PATH,LETTERS} from './preflight.mjs';
 import {renderRouteHtml} from './route-report-html.mjs';
+import {isMain} from './is-main.mjs';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
 const tryRead=p=>{try{return p&&fs.existsSync(p)?read(p):null;}catch{return null;}};
@@ -219,7 +220,7 @@ export async function makeReport({cardFile,out,chainDir,proto=[],boundary,instru
   '你要決定 '+machine.ownerDecisions.length+' 件；程式碼線索 '+machine.counts.code+' 筆，測試 '+machine.counts.test+' 筆另計，不查 '+machine.counts.excluded+' 筆；錨點 '+machine.anchors.pass+'／'+machine.anchors.total+'；鏈卡錨點複核 '+(chain.anchorReview?.status??'未知')+'。',
   '報告：'+out,'證據：'+evDir+'（分診 '+((Date.now()-t0)/1000).toFixed(1)+' 秒）'],bytes:Buffer.byteLength(html),sha256:crypto.createHash('sha256').update(html).digest('hex')};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  const args=process.argv.slice(2),get=k=>args.includes(k)?args[args.indexOf(k)+1]:undefined,all=k=>args.flatMap((a,i)=>a===k?[args[i+1]]:[]);
  if(args.includes('--make')&&get('--route')){try{
   // Merged page: route (怎麼接 + stations + trial) on top, card verdict and decisions folded in; card-only page kept beside it.

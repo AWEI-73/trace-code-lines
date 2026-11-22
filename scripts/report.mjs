@@ -10,6 +10,7 @@ import {pathToFileURL} from 'node:url';
 import {execFileSync} from 'node:child_process';
 import {tokens,writerCandidates} from './language-static.mjs';
 import {readBounded,noLinks,sha256} from './walker.mjs';
+import {isMain} from './is-main.mjs';
 
 export const headings=['\u7bc4\u570d\u8207\u7248\u672c','\u5165\u53e3','\u7d71\u8a08','\u65b7\u7dda','\u602a\u7570','\u53ea\u6709\u6e2c\u8a66\u5728\u7528','\u6c92\u4eba\u7528','\u5de5\u5177\u9650\u5236','\u53ef\u91cd\u8dd1\u547d\u4ee4'];
 const names={broken:'\u65b7\u7dda',generated:'\u6253\u5305\u5f8c\u624d\u6709',redirect:'\u53ef\u80fd\u9760\u8f49\u5740\u63a5\u4e0a',nonproduction:'\u6b63\u5f0f\u7a0b\u5f0f\u4f9d\u8cf4\u975e\u6b63\u5f0f\u5340\u584a',testOnly:'\u53ea\u6709\u6e2c\u8a66\u5728\u7528',unused:'\u6c92\u4eba\u7528',limitation:'\u5de5\u5177\u9650\u5236'};
@@ -299,7 +300,7 @@ export function runReport(configFile){
   writeUTF8(path.join(out,'report-receipt.json'),JSON.stringify({status:'PASS',sourceReadback:'PASS',head,stats:report.stats,flow:flow?{status:flow.status,pass:flow.pass,fail:flow.fail}:null,outputs:receipts},null,2)+'\n');
   return {stats:report.stats,flow:flow?.status,outputs:receipts.map(r=>r.file)};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   try{const args=process.argv.slice(2);if(args.length===1&&args[0]==='--help')console.log('Usage: node report.mjs --config report-config.json');
     else{if(args.length!==2||args[0]!=='--config')throw Error('Usage: node report.mjs --config report-config.json');console.log(JSON.stringify(runReport(args[1])));}
   }catch(error){console.error(JSON.stringify({status:'ERROR',message:error.message}));process.exitCode=1;}

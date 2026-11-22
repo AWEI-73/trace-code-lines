@@ -5,6 +5,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {tokens as languageTokens} from './language-static.mjs';
+import {isMain} from './is-main.mjs';
 
 // A conservative lexical candidate scan, not an AST or runtime assertion.
 export function tokens(source) {
@@ -203,7 +204,7 @@ function main(){
     ]},null,2));
   if(gaps.length)process.exitCode=2;
 }
-if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node scan-empty-catch.mjs --repo absolute-repo");process.exit(0);}
 
   try{main();}catch(e){console.error(e.message);process.exitCode=1;}

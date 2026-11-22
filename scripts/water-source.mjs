@@ -6,6 +6,7 @@ import {runOnce} from './run-once.mjs';
 import {inside,noLinks} from './instrument.mjs';
 import {hash,preflight,commandPolicy,anchor} from './cassette.mjs';
 import {coverageFiles,judgeScenario,commandStatuses,classifyTests,jsonPointer} from './observations.mjs';
+import {isMain} from './is-main.mjs';
 const save=(p,v)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n','utf8');};
 // Report rows keep each attempt's identity and file hash; full observations stay in attempt-N.json.
 // Only an attempt-limited result that has no observation of its own keeps its last observed attempt inline.
@@ -151,7 +152,7 @@ export async function waterSource(c,{enable=false,toolDev=false}={}){
  if(toolDev){Object.assign(report,{toolDev:true,countsTowardVerdict:false,label:DEV_LABEL,devStatus:report.status,status:'NOT_COUNTED'});save(path.join(c.outputRoot,'water-source.tool-dev.json'),report);return report;}
  save(path.join(c.outputRoot,'water-source.json'),report);return report;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node water-source.mjs --config file [--enable] [--tool-dev] [--verbose]  (--tool-dev lifts the 3-attempt limit; results are labelled NOT counted)');process.exit(0);}
 
  try{const a=process.argv.slice(2),p=a[a.indexOf('--config')+1],c=JSON.parse(fs.readFileSync(p,'utf8')),r=await waterSource(c,{enable:a.includes('--enable'),toolDev:a.includes('--tool-dev')});const summary={schema:r.schema,status:r.status??'PLANNED',executed:Object.hasOwn(r,'executed')?r.executed:(r.results?.some(x=>x.executed===true)?true:r.results?.some(x=>x.executed===null)?null:false),scenarios:r.results?.map(x=>({id:x.id,status:x.status,failedExpectations:(x.verdict?.checks??[]).filter(v=>v.status==='FAIL').map(v=>v.expected),reason:x.reason??x.verdict?.reason??null,evidence:x.evidence??null}))??r.scenarios,evidenceFile:a.includes('--enable')&&r.results?path.resolve(c.outputRoot,a.includes('--tool-dev')?'water-source.tool-dev.json':'water-source.json'):null};console.log(JSON.stringify(a.includes('--verbose')?r:summary,null,2));if(r.status==='FAIL')process.exitCode=1;}catch(e){console.error(e.stack);process.exitCode=1;}

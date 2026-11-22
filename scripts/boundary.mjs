@@ -10,6 +10,7 @@ import {walk,readBounded,noLinks,sha256} from './walker.mjs';
 import {tokens,callArgs,localFunctions,localRequirePredicate} from './language-static.mjs';
 import {toolVersion} from './derive-map.mjs';
 import {glob,configuration} from './boundary-rules.mjs';
+import {isMain} from './is-main.mjs';
 export {glob,configuration};
 
 const codeFile=p=>/\.(?:[cm]?[jt]s|tsx|jsx|py|gs)$/i.test(p);
@@ -252,7 +253,7 @@ export function boundary(config){
 export function renderBoundaryMarkdown(result,jsonFile='boundary.json'){
  return '# 邊界檢查\n\n'+Object.entries(result.counts).map(([k,v])=>k+': '+v).join(' / ')+'\n\n'+Object.entries(result.categoryCounts??{}).map(([k,v])=>k+': '+v).join(' / ')+'\n\n'+renderGroupsMarkdown(result.display??displayGroups(result.findings),{json:jsonFile})+'\n\nStatic marker evidence; runtimeVerified=false. Full scope, gaps and integrity are retained in JSON.\n';
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  try{
   const args=process.argv.slice(2);if(args.length===1&&args[0]==='--help'){console.log('Usage: node boundary.mjs --config file [--out file]');process.exit(0);}
   if(args[0]!=='--config'||!args[1]||![2,4].includes(args.length)||args.length===4&&(args[2]!=='--out'||!args[3]))throw Error('Usage: node boundary.mjs --config file [--out file]');

@@ -7,6 +7,7 @@ import {loadManifest} from './instrument.mjs';
 import {readRecords,validLocation,normalizeTarget,sameTarget,gapSites,gapIdentity,inferenceIdentity} from './inference-layer.mjs';
 import {tokens,localFunctions} from './language-static.mjs';
 import {sha256,noLinks,readBounded} from './walker.mjs';
+import {isMain} from './is-main.mjs';
 const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
 const source=p=>({path:path.resolve(p),sha256:sha256(fs.readFileSync(p))});
 const norm=p=>p.replaceAll('\\','/').replace(/\/$/,'');
@@ -209,7 +210,7 @@ export function gapSummary(result){
   if(result.issues.length)lines.push(`\u8b49\u64da\u7f3a\u53e3\uff1a${result.issues.length}\uff0c\u8acb\u8b80 JSON issues\u3002`,'');
   return lines.join('\n');
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node gap-reconcile.mjs --config file [--summary file.md] [--out file.json]');process.exit(0);}
   try{
     const args=process.argv.slice(2),options={};

@@ -9,6 +9,7 @@ import {writeUTF8} from './report.mjs';
 import {renderRouteMap} from './route-map-html.mjs';
 import {importUses} from './reach.mjs';
 import {tokens} from './language-static.mjs';
+import {isMain} from './is-main.mjs';
 const lex=JSON.parse(fs.readFileSync(new URL('../assets/plain-language.json',import.meta.url),'utf8'));
 const unique=xs=>[...new Set(xs)];
 const safeFile=s=>typeof s==='string'&&s.length>0&&!s.includes('\\')&&!s.includes(':')&&!s.startsWith('/')&&!s.split('/').some(x=>x==='..'||x==='.'||!x);
@@ -210,4 +211,4 @@ export function runRoutes(configPath,mode='render'){
  else receipts=[writeUTF8(outputs[0],renderRouteMap(value)),writeUTF8(outputs[1],JSON.stringify(value,null,2)+'\n'),writeUTF8(outputs[2],'# \u8def\u7dda\u52d5\u614b\u5716\u6838\u5c0d\n\n'+value.routes.length+' \u689d\u8def\u7dda\u986f\u793a\uff1b'+value.rejected.length+' \u689d\u672a\u986f\u793a\u3002\n\n'+value.routes.map(r=>'- '+r.name+'\uff1a'+r.hops.length+' \u6bb5\uff0c'+r.hops.filter(h=>h.manual).length+' \u6bb5\u4eba\u5de5\u5224\u8b80\u3002').join('\n')+'\n\n## \u9650\u5236\n\n\u7dda\u8868\u793a\u7a0b\u5f0f\u78bc\u88e1\u7684\u5f15\u7528\uff0c\u4e0d\u4ee3\u8868\u5be6\u969b\u57f7\u884c\u904e\u3002\u865b\u7dda\u662f\u6709\u539f\u6587\u4f46\u672a\u7531\u5de5\u5177\u627e\u5230\u9023\u7dda\u7684\u4eba\u5de5\u5224\u8b80\u3002\n'+value.limits.map(x=>'- '+x).join('\n')+'\n\n```json\n'+JSON.stringify(value.rejected,null,2)+'\n```\n')];
  return {status:value.status??'DRAFT',routes:value.routes?.length,candidates:value.candidates?.length,receipts};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){try{const args=process.argv.slice(2);if(args.length===1&&args[0]==='--help')console.log('Usage: node route-map.mjs [candidates|render] --config routes-config.json');else{if(args.length!==3||!['candidates','render'].includes(args[0])||args[1]!=='--config')throw Error('Use --help');console.log(JSON.stringify(runRoutes(args[2],args[0])));}}catch(e){console.error(e.message);process.exitCode=1;}}
+if(isMain(import.meta.url)){try{const args=process.argv.slice(2);if(args.length===1&&args[0]==='--help')console.log('Usage: node route-map.mjs [candidates|render] --config routes-config.json');else{if(args.length!==3||!['candidates','render'].includes(args[0])||args[1]!=='--config')throw Error('Use --help');console.log(JSON.stringify(runRoutes(args[2],args[0])));}}catch(e){console.error(e.message);process.exitCode=1;}}

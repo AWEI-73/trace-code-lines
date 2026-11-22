@@ -12,6 +12,7 @@ import {runOnce} from './run-once.mjs';
 import {inside,noLinks,digest} from './instrument.mjs';
 import {tokens} from './language-static.mjs';
 import {classifyTests} from './observations.mjs';
+import {isMain} from './is-main.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
 const defaults={maxFiles:20000,maxEntries:100000,maxFileBytes:2097152,maxTotalBytes:268435456,maxRecords:100000,maxQuestions:50,maxTests:20,maxMapRoots:8,timeoutMs:120000,minFreeBytes:6442450944};
@@ -280,7 +281,7 @@ export async function runAudit(configFile){
  card.readOnly={status:source.skipped.length?'UNKNOWN':'PASS',before:before.path,after:path.join(runRoot,'source-after.json'),sourceFiles:source.files.length,recordFiles:sourceReads.size,sourceSha256:source.sha256};card.sourceReads=[...sourceReads.values()];card.elapsedMs=Date.now()-started;card.callCount=1;
  card.outputs=[save(path.join(writeRoot,'audit.json'),card),save(path.join(writeRoot,'audit.md'),renderAudit(card))];return card;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  try{const a=process.argv.slice(2);if(a.length===1&&a[0]==='--help')console.log('Usage: node audit.mjs --init <repo> --out <config> | --config <file>');
  else if(a.length===4&&a[0]==='--init'&&a[2]==='--out')console.log(JSON.stringify(initAudit(a[1],a[3])));
  else if(a.length===2&&a[0]==='--config'){const r=await runAudit(a[1]);console.log(JSON.stringify({status:'COMPLETED',questions:r.questions.map(q=>({id:q.id,verdict:q.verdict})),outputs:r.outputs,elapsedMs:r.elapsedMs}));}
