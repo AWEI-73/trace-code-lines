@@ -79,7 +79,8 @@ function parseFile(ast,root,rel){
  if(/\.min\.[cm]?js$/.test(rel)||body.length>20000&&body.length/(body.split('\n').length)>400)return {rel,ok:false,error:'壓縮過的打包檔，沒解析',minified:true};
  if(lang==='python'&&!ast.langs.python)return null;
  const parser=new ast.Parser();parser.setLanguage(ast.langs[lang]);
- let tree;try{tree=parser.parse(body);}catch(e){return {rel,ok:false,error:'解析失敗'};}
+ let tree;try{tree=parser.parse(body);}catch(e){parser.delete?.();return {rel,ok:false,error:'解析失敗'};}
+ parser.delete?.();// the tree stays valid; parsers are WASM objects that are never garbage-collected
  const lines=body.split(/\r?\n/);
  const f={rel,ok:true,lang,lines,errors:tree.rootNode.hasError?1:0,units:new Map(),bindings:null,fields:new Map(),props:new Map(),supers:new Map(),calls:[],refs:[],imports:[],exports:new Map(),dynamic:[]};
  if(lang==='python'){parsePy(f,tree);f.tree=tree;f.bodySha=sha256(body);return f;}

@@ -268,7 +268,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
    console.log(['怎麼接：'+(m.answer?.text??'（沒有）'),'路線 '+m.stations.length+' 站：'+m.stations.map(s=>s.label+' '+s.file+(s.line?':'+s.line:'')).join(' → '),
     '這條路會碰：'+([...new Set(m.touches.route.map(t=>t.label))].join('、')||'無')+'；未知 '+m.unknowns.length+' 項'+(m.engine.name!=='tree-sitter'?'；【沒有語法解析】'+m.engine.reason:''),
     ...(command!=='route-report'?['路線資料：'+path.resolve(out)]:[]),...(html?['報告：'+html]:[]),...(m.answer?.draft?['給 agent：讀過路線上的原碼後，可用 route-report --route <路線.json> --out <報告.html> --answer "…" 改寫怎麼接。']:[])].join('\n'));
-  }catch(e){console.error('路線未建立：'+e.message);process.exitCode=1;}
+  }catch(e){console.error('路線未建立：'+e.message+(/Aborted\(\)/.test(String(e.message))?'\n語法樹解析把記憶體用完了（通常是 repo 太大）。請把 --root 指到要查的子資料夾（例如 server 或 packages/某套件）再跑。':''));process.exitCode=1;}
  }
  else if(command==='preflight'){
   try{
