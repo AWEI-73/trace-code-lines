@@ -619,7 +619,9 @@ export async function traceWired(root,{from,to,question='',ast=null}={}){
 // ---- preflight hook: AST capability findings, split by whether a real entry reaches them. ----
 export async function astPreflight(root,{entry=null}={}){
  root=path.resolve(root);const ast=await loadAst();if(!ast.ok)return {engine:{name:'regex-fallback',reason:ast.reason},files:new Set(),findings:null,entries:null};
- const g=buildGraph(ast,root),found=findEntries(root);
+ // Very large repos can exhaust the parser's WASM memory ("Aborted()"); fall back to text matching instead of failing the whole check.
+ let g;try{g=buildGraph(ast,root);}catch(e){return {engine:{name:'regex-fallback',reason:'語法樹解析中止（'+String(e?.message??e).split('.')[0]+'，通常是 repo 太大），改用文字比對'},files:new Set(),findings:null,entries:null};}
+ const found=findEntries(root);
  const chosen=entry?[chooseEntry(found,'',entry)].filter(Boolean):found.entries;
  const roots=[];for(const e of chosen){const f=g.files.get(e.file);if(!f)continue;if(e.kind==='bin'){roots.push(e.file+'::<top>');for(const u of [e.fn,e.fn?null:'<main>'])if(u&&f.units.has(e.file+'::'+u))roots.push(e.file+'::'+u);}else roots.push(...exportRoots(g,e.file));}
  // safety scan: anything a dynamic import prefix can load counts as reachable (inferred)
