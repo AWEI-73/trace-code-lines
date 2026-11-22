@@ -4,6 +4,7 @@
 // aliases declared in the file as "`SA` = `OS:path/to/file.md`". Prefixes map to folders with --map OS=/repo.
 import fs from 'node:fs';
 import path from 'node:path';
+import {isMain} from './is-main.mjs';
 const UNIT={px:/^px$/i,pt:/^(pt|points?)$/i,ms:/^ms$/i,'%':/^%$/,in:/^(in|inch(es)?|吋)$/i,words:/^(words?|個英文單字|英文單字)$/i,chars:/^(字|個字|characters?|chars?)$/i,s:/^(s|秒|seconds?)$/i,
  pages:/^(頁|pages?)$/i,slides:/^(張|slides?)$/i,kb:/^kb$/i,mb:/^mb$/i,emu:/^emu$/i};
 const unitOf=u=>{if(!u)return null;for(const [k,re] of Object.entries(UNIT))if(re.test(u.trim()))return k;return null;};
@@ -46,7 +47,7 @@ export function checkQuotes(text,{map={},file=''}={}){
  return {file,checked,ok:!findings.some(f=>f.severity!=='check'),findings,derived};}
 function findByName(base,name){let hit=null,n=0;const walk=d=>{if(hit||n++>20000)return;let es;try{es=fs.readdirSync(d,{withFileTypes:true});}catch{return;}for(const e of es){if(/^(node_modules|\.git|dist|build)$/.test(e.name))continue;const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.name===name){hit=p;return;}}};walk(base);return hit;}
 // CLI: node scripts/check-quotes.mjs --map OS=/repo,WL=/other draft.md …
-if(import.meta.url===`file://${process.argv[1]}`){const a=process.argv.slice(2);const mi=a.indexOf('--map');const map={};if(mi>=0){for(const kv of a[mi+1].split(',')){const [k,v]=kv.split('=');map[k]=v;}a.splice(mi,2);}
+if(isMain(import.meta.url)){const a=process.argv.slice(2);const mi=a.indexOf('--map');const map={};if(mi>=0){for(const kv of a[mi+1].split(',')){const [k,v]=kv.split('=');map[k]=v;}a.splice(mi,2);}
  const asJson=a.includes('--json');const files=a.filter(x=>x!=='--json');let bad=0;const all=[];
  for(const f of files){const r=checkQuotes(fs.readFileSync(f,'utf8'),{map,file:f});all.push(r);bad+=r.findings.filter(f=>f.severity!=='check').length;
   if(!asJson){console.log(f+'：核對 '+r.checked+' 個數字'+(r.findings.length?'，'+r.findings.length+' 個要看':'，都對得上')+(r.derived.length?'（另 '+r.derived.length+' 個是標明的換算，原文沒有）':''));for(const x of r.findings)console.log('  第 '+x.line+' 行 ['+({'unit-mismatch':'單位不同','range-end':'範圍的一端','not-in-source':'原文沒有'}[x.kind])+'] '+x.text);}}

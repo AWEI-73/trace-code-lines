@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {copyRepo,snapshot,snapOther,subPackages,netIsolation,trialStats} from './usage-route.mjs';
+import {isMain} from './is-main.mjs';
 const readJson=p=>{try{return JSON.parse(fs.readFileSync(p,'utf8'));}catch{return null;}};
 const HERE=path.dirname(new URL(import.meta.url).pathname);
 // formats a question can ask for, and how each shows up on a button
@@ -98,5 +99,5 @@ export function uiTrialHtml(u,esc){if(!u)return '';
   (rows?'<table><thead><tr><th>要的</th><th>按了</th><th>結果</th></tr></thead><tbody>'+rows+'</tbody></table>':'')+
   '<ul class="small"><li>連外：'+(u.outsideHosts?.length?'頁面想連 '+esc(u.outsideHosts.join('、'))+'（命名空間沒有網路，全被擋）':'沒有')+'；本機請求 '+esc(u.loopbackRequests)+' 個</li><li>改檔：'+(u.changedCount?esc(u.changed.join('、')):'repo 副本沒有被改')+'；家目錄／暫存：'+(u.homeWrites?.length?esc(u.homeWrites.join('、')):'沒有')+'</li>'+(u.console?.length?'<li>瀏覽器錯誤 '+u.console.length+' 則，例如：'+esc(u.console[0])+'</li>':'')+(u.driverError?'<li>驅動錯誤：'+esc(u.driverError)+'</li>':'')+'</ul>';}
 // child-process mode, so the UI trial runs while the command-line trial runs: node ui-trial.mjs <model.json> <result.json> [keepDir]
-if(import.meta.url===`file://${process.argv[1]}`){const [mf,out,keep]=process.argv.slice(2);const m=JSON.parse(fs.readFileSync(mf,'utf8'));
+if(isMain(import.meta.url)){const [mf,out,keep]=process.argv.slice(2);const m=JSON.parse(fs.readFileSync(mf,'utf8'));
  let r;try{r=runUiTrial(m.root,m,{keepDir:keep||null});}catch(e){r={ran:false,skipped:'介面試跑出錯：'+String(e.message??e).slice(0,200)};}fs.writeFileSync(out,JSON.stringify(r));}

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {walk,sha256} from './walker.mjs';
 import {writerCandidates} from './language-static.mjs';
 import {reconcile} from './coverage-reconcile.mjs';
+import {isMain} from './is-main.mjs';
 export function languageChecks(root) {
   const checks=[],rows=new Map(),put=(p,v)=>{fs.mkdirSync(join(root,p,'..'),{recursive:true});const s=typeof v==='string'?v:JSON.stringify(v);fs.writeFileSync(join(root,p),s,'utf8');assert.equal(fs.readFileSync(join(root,p),'utf8'),s);rows.set(p,{path:p,sha256:sha256(s)});};
   for(const [p,s] of Object.entries({
@@ -116,7 +117,7 @@ export function languageChecks(root) {
   return checks;
 }
 
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node language-self-test.mjs (equal external TEMP/TMP required)");process.exit(0);}
   process.on('uncaughtException',e=>{console.error(e.message);process.exitCode=1;});
 

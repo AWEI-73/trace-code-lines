@@ -6,6 +6,7 @@ import zlib from 'node:zlib';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {run,collect,remove,inside,noLinks,digest} from './instrument.mjs';
 import {contract} from './contract.mjs';
+import {isMain} from './is-main.mjs';
 const save=(p,v)=>fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n','utf8');
 export function verifyWriteRoots(paths,allowedRoots) {
  for(const p of paths){if(typeof p!=='string'||!path.isAbsolute(p)||!allowedRoots.some(r=>inside(r,p)))throw Error('ISOLATION_ROOT_ESCAPE: '+p);noLinks(p);}
@@ -80,7 +81,7 @@ export async function runOnce(c,{enable=false}={}) {
  limitation:'Exit status and boundary observations only. No real models, factory internals, real use or business acceptance established.'};
  save(c.outputDirectory+'.result.json',result);return result;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node run-once.mjs --config file [--enable]");process.exit(0);}
 
  const args=process.argv.slice(2);try{const p=args[args.indexOf('--config')+1],r=await runOnce(JSON.parse(fs.readFileSync(p,'utf8')),{enable:args.includes('--enable')});console.log(JSON.stringify(r,null,2));if(r.executed&&r.status!=='PASS')process.exitCode=1;}catch(e){console.error(e.message);process.exitCode=1;}

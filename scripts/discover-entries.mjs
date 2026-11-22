@@ -4,6 +4,7 @@ import {pathToFileURL} from 'node:url';
 import {hash} from './cassette.mjs';
 import {tokens} from './language-static.mjs';
 import {safeName,noLinks} from './walker.mjs';
+import {isMain} from './is-main.mjs';
 // options.mcpToolTables: pluggable patterns for tools declared as data rather than registerTool/.tool calls.
 // Each {rowPattern, flags?, files?, requireText?} — rowPattern needs a named group `name` (optionally `description`);
 // files is a path regex, requireText must appear in the file (e.g. 'tools/list'). Default none: behaviour unchanged.
@@ -55,6 +56,6 @@ export function discoverEntries(root,{mcpToolTables=[],inventory=null}={}){
  }
  if(inventory){if(!Array.isArray(inventory))throw Error('INVENTORY_ARRAY_REQUIRED');noLinks(root);for(const file of inventory){safeName(file);const p=path.join(root,file);noLinks(p);if(!fs.lstatSync(p).isFile())throw Error('INVENTORY_REGULAR_FILE_REQUIRED: '+file);const e={name:path.basename(file),isSymbolicLink:()=>false,isDirectory:()=>false};scanFile(p,file,e);}}else scan(root);return {schema:'entry-inventory-v1',root,entries,documents,files,skipped,coverage:'Lexical candidates only. Agent reads README, SKILL and source, adds missed entries and explicit argument formats; computed registrations remain UNKNOWN.'};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node discover-entries.mjs repo [--mcp-tables patterns.json]');process.exit(0);}
+if(isMain(import.meta.url)){if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node discover-entries.mjs repo [--mcp-tables patterns.json]');process.exit(0);}
 const i=process.argv.indexOf('--mcp-tables'),mcpToolTables=i>0?JSON.parse(fs.readFileSync(process.argv[i+1],'utf8')):[];
 console.log(JSON.stringify(discoverEntries(path.resolve(process.argv[2]),{mcpToolTables:Array.isArray(mcpToolTables)?mcpToolTables:mcpToolTables.mcpToolTables??[]}),null,2));}

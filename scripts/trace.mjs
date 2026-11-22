@@ -14,6 +14,7 @@ import {renderRouteHtml} from './route-report-html.mjs';
 import {uiTargets} from './ui-trial.mjs';
 import {checkQuotes} from './check-quotes.mjs';
 import {trialGate,preflight,resolveScope,scopeNotes,scopeLine,pendingText,answersFrom,ownerAsks,relayText,capLabel,parseCapability} from './preflight.mjs';
+import {isMain} from './is-main.mjs';
 // Dogfood ext round: the step hints say 超出範圍 etc. in Chinese, so --unknown accepts the Chinese class labels too.
 const UNKNOWN_CLASS_ZH={'沒去跑':'not-run','沒跑':'not-run','未試跑':'not-run','由模型決定':'model-choice','單次異常':'one-off','資料沒了':'evidence-lost','要負責人判斷':'owner-only','負責人判斷':'owner-only','範圍或授權外':'out-of-scope','超出範圍':'out-of-scope'};
 
@@ -211,7 +212,7 @@ export function traceOutput(c,command,file,books=playbooks){
  const limit=20-tail.length,head=r.flags.slice(0,Math.max(0,limit-1));if(r.flags.length>head.length)head.push('另有 '+(r.flags.length-head.length)+' 項提醒；可用摘要查看數量並回卡補齊。');
  return [...head,...tail];
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  const [command,...args]=process.argv.slice(2),get=k=>args.includes(k)?args[args.indexOf(k)+1]:undefined;
  if(command==='--help'||args.includes('--help'))console.log(traceHelp());
  else if(command==='check-quotes'){

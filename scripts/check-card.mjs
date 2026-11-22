@@ -8,6 +8,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {hash,anchor,canonical} from './cassette.mjs';
 import {writeUTF8} from './report.mjs';
+import {isMain} from './is-main.mjs';
 const esc=s=>String(s??'UNKNOWN').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function compareDeclarations(root,items=[]){
  return items.map(item=>{
@@ -88,7 +89,7 @@ export function writeCard(c,out,healthFile,options={}){
  if(healthFile&&!html.includes(section))throw Error('HEALTH_BODY_REQUIRED');
  receipts.push(writeUTF8(path.join(out,'health.html'),html));writeUTF8(path.join(out,'check-card-receipt.json'),JSON.stringify(receipts,null,2)+'\n');return card;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  if(process.argv.length===3&&process.argv[2]==='--help'){console.log('Usage: node check-card.mjs --config file');process.exit(0);}
  try{const a=process.argv.slice(2);if(a.length!==2||a[0]!=='--config')throw Error('Use --help');const c=JSON.parse(fs.readFileSync(a[a.indexOf('--config')+1],'utf8'));console.log(JSON.stringify(writeCard(c,c.outDir,c.healthFile,{base:path.dirname(path.resolve(a[1]))})));}catch(e){console.error(e.stack);process.exitCode=1;}
 }

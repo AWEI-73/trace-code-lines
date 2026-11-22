@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {isMain} from './is-main.mjs';
 
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const own = (obj, key) => obj != null && Object.hasOwn(obj, key);
@@ -205,7 +206,7 @@ export function census(c,{progress=()=>{}}={}) {
   }
   return result;
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node record-census.mjs --config file");process.exit(0);}
 
   try {

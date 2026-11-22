@@ -5,6 +5,7 @@ import {sha256,readBounded,noLinks} from './walker.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {isMain} from './is-main.mjs';
 const unique=xs=>[...new Set(xs)];
 // Effect names are review candidates, not evidence of payment or authorization.
 export function effectCategory(name){
@@ -257,7 +258,7 @@ export function renderPromptInventory(c){
  if(!c)return '';
  return '## 提示詞清冊（候選，不判對錯）\n\n'+c.groups.map(g=>'### '+g.file+'\n\n'+g.sites.map(s=>`- ${s.file}:${s.line} — ${s.basis}\n  ${JSON.stringify(s.text)}`).join('\n')).join('\n\n')+'\n\n限制：'+c.limitations.join(' ')+'\n跳過：'+JSON.stringify(c.skipped);
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  try{
   const args=process.argv.slice(2),value=k=>args[args.indexOf(k)+1];
   if(args.includes('--help'))console.log('Usage: stop-sites.mjs --prompts --root repo [--pattern regex] [--out prompt-sites.json]');

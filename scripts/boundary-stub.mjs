@@ -103,7 +103,9 @@ export async function main() {
  if(response.stderr)process.stderr.write(response.stderr+'\n');process.stdout.write(stdout);
  receipt.state='RESPONDED';checkpoint('responded');callerEnded=true;finish(response.exitCode??0);process.exitCode=response.exitCode??0;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+// Self-contained (copied next to the run by instrument.mjs): real paths so a symlinked path still runs.
+const isMainHere=()=>{try{return Boolean(process.argv[1])&&fs.realpathSync(process.argv[1])===fs.realpathSync(new URL(import.meta.url));}catch{return false;}};
+if(isMainHere()){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node boundary-stub.mjs (INSTRUMENT_CONFIG and TRACE_BOUNDARY_CALL environment required)");process.exit(0);}
 try{await main();}catch(e){console.error(e.message);process.exitCode=1;}}
 

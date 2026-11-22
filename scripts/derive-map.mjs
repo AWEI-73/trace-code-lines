@@ -9,6 +9,7 @@ import {writerCandidates} from './language-static.mjs';
 import {attachInferenceLayer} from './inference-layer.mjs';
 import {walk,safeName,noLinks,sha256,readBounded} from './walker.mjs';
 import {loadRepos,readKey,crossHops,declaredTarget,crossRules,markCross,closureMermaid,splitKey} from './cross-repo.mjs';
+import {isMain} from './is-main.mjs';
 
 export function toolVersion(){
   const skill=fs.readFileSync(new URL('../SKILL.md',import.meta.url),'utf8');
@@ -305,7 +306,7 @@ export function analyze(config,{calibrateOnly=false,progress=()=>{},inferredEdge
   if(result.readOnly.status==='FAIL')result.status='STOPPED_INTEGRITY_FAILURE';
   return result;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) {
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node derive-map.mjs --config file [--calibrate-only] [--inferred-edges file] [--calibration file] [--out file]");process.exit(0);}
 
   try {

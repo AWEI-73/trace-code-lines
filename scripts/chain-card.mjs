@@ -3,6 +3,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {readBounded,noLinks,sha256} from './walker.mjs';
 import {reviewUnknowns,unknownSummary,renderUnknowns} from './unknowns.mjs';
+import {isMain} from './is-main.mjs';
 
 export function initChain(question,root){
  return {question,root:path.resolve(root),version:{repo:path.resolve(root),commit:'UNKNOWN',running:'UNKNOWN'},
@@ -73,7 +74,7 @@ export function writeChainCard(c,out){
  const card=buildChainCard(c);fs.mkdirSync(dir,{recursive:true});
  fs.writeFileSync(targets[0],renderChainCard(card),'utf8');fs.writeFileSync(targets[1],JSON.stringify(card,null,2)+'\n','utf8');return card;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  try{
   const args=process.argv.slice(2),value=k=>args[args.indexOf(k)+1];
   if(args.includes('--help'))console.log('Usage: chain-card.mjs --init --question "question" --root repo --out input.json | --config input.json [--out output-directory]');

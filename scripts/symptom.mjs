@@ -5,6 +5,7 @@ import {readBounded} from './walker.mjs';
 import {gitRead,gitUnknown} from './git-evidence.mjs';
 import {tokens} from './language-static.mjs';
 import {readOptions,printReport,summaryLine} from './cli-output.mjs';
+import {isMain} from './is-main.mjs';
 
 const escape=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 export function writerPattern(field){
@@ -91,7 +92,7 @@ export function symptomSummary(r){
   r.differences?'比較以欄位路徑定位，沒有原碼行號。':'這是詞法候選，需回讀原碼；不證明已執行。'
  ].map(summaryLine);
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  const [mode,...args]=process.argv.slice(2),options=readOptions(args);
  if(mode==='--help'||options.help)console.log('症狀回溯：literal --root <repo> --text <字面>（錯誤候選優先，預設 20 筆）；writers --root <repo> --field <名稱>；compare --good <成功記錄> --bad <失敗記錄>。共用 --summary、--out <JSON>；搜尋可選 --rev、--safe-directory。');
  else{

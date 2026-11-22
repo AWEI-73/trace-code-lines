@@ -5,6 +5,7 @@ import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {noLinks,sha256} from './walker.mjs';
 import {displayGroups,renderGroups,renderGroupsMarkdown} from './display-groups.mjs';
+import {isMain} from './is-main.mjs';
 
 export const retainedAdvice='\u8981\u8655\u7406\uff1a\u7559\u5b58\u7269\u4ecd\u5f15\u7528\uff1b\u9700\u57f7\u884c\u8b49\u64da\u78ba\u8a8d\u65b0\u7248\u4ecd\u63a5\u53d7\u5b83';
 const defaults={maxFileBytes:4*1024**2,maxTotalBytes:256*1024**2,maxFiles:100000,maxEntries:250000,maxMatches:100000};
@@ -140,7 +141,7 @@ export function renderDeletionMarkdown(r,json='health.json'){
 export function renderDeletionHTML(r,json='health.json',id='deletion-impact'){
  if(!r)return '';return '<section id="'+esc(id)+'" style="overflow-wrap:anywhere"><h2>\u522a\u9664\u5f71\u97ff</h2><p>'+esc(r.status)+'; '+r.stats.filesRead+' files / '+r.stats.bytesRead+' bytes; limits exceeded: '+r.stats.limitExceeded+'</p>'+r.gaps.map(g=>'<p>UNKNOWN: '+esc(g)+'</p>').join('')+r.scopes.map(s=>'<p>'+esc(s.label)+': '+s.status+'; skipped '+s.skipped.length+' (full list: JSON)</p>').join('')+r.groups.map(item=>'<details><summary>'+esc(item.path)+' / '+esc(item.status)+'</summary><p>'+esc(item.reason)+'</p>'+Object.entries(item.repo).filter(([,s])=>s.items).map(([k,s])=>'<h3>Repo: '+k+'</h3>'+renderGroups(s,{json})).join('')+item.retained.map(g=>'<h3>'+esc(g.label)+' / '+esc(g.root)+'</h3><p>'+g.fileCount+' files / '+g.occurrences+' occurrences</p>'+renderGroups(g.display,{json})).join('')+'</details>').join('')+'<p><a href="'+esc(json)+'">\u5b8c\u6574\u6e05\u55ae\u8207\u7565\u904e\u7bc4\u570d</a></p></section>';
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  try{const args=process.argv.slice(2);if(args.length===1&&args[0]==='--help')console.log('Usage: node deletion-impact.mjs --config file (read-only; full JSON on stdout)');
  else{if(args.length!==2||args[0]!=='--config')throw Error('Use --help');const file=noLinks(path.resolve(args[1]));if(fs.statSync(file).size>1024**2)throw Error('Configuration exceeds 1 MiB');console.log(JSON.stringify(deletionImpact(JSON.parse(fs.readFileSync(file,'utf8')),{base:path.dirname(file)})));}}
  catch(e){console.error(JSON.stringify({status:'ERROR',message:e.message}));process.exitCode=1;}

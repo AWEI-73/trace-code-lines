@@ -4,6 +4,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {get,reader,sha256} from './evidence.mjs';
 import {contract,configSource} from './contract.mjs';
+import {isMain} from './is-main.mjs';
 export function versionChain(c){
   if(!c.allowedRoots?.length||c.allowedRoots.some(r=>!path.isAbsolute(r)))throw Error('Absolute allowedRoots required');
   const gaps=gapList(),io=reader(c.allowedRoots,gaps),globals={},hops=[],chains=[];
@@ -47,7 +48,7 @@ export function versionChain(c){
   }
   return {schema:'version-chain-v1',contract:contract('VERSION',[...io.sources.values()],[{id:'declared-chains',semantics:'READ_BACK_BINDING',definition:'Declared file/key chain at measurement time; not historical execution proof.'}],[{selector:'chains.length|hops.length|chains[*].hops.length',population:'declared-chains',unit:'declared chains/hops'}]),status:gaps.length?'PARTIAL':'PASS',hops,chains,gaps,config:c};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){console.log("Usage: node version-chain.mjs --config file");process.exit(0);}
 
   try{if(process.argv[2]!=='--config'||process.argv.length!==4)throw Error('Usage: version-chain.mjs --config file');const r=versionChain(JSON.parse(fs.readFileSync(process.argv[3],'utf8')));configSource(r,process.argv[3]);console.log(JSON.stringify(r,null,2));if(r.gaps.length)process.exitCode=2;}catch(e){console.error(e.message);process.exitCode=1;}
