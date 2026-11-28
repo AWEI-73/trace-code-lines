@@ -44,7 +44,7 @@ flows 每筆附 `link.identifier`、`sourceLine`、`sinkLine`、直接／一步�
 ## 一次命令填卡
 
 `trace.mjs fill --card <卡> --step <n> [--note "說明"] [--anchor "檔:行:文字"]… [--skip]`
-錨點使用鏈卡原有的 ±3 行唯一校正。既有章節會保留核對不符的錨點並提醒。下方結構化欄位有自己的填寫規則。
+錨點使用鏈卡原有的 ±3 行唯一校正。`fill` 先在記憶體核對整次命令，全部通過才寫卡並推進。任一參數或欄位出錯（包括 `ANCHOR_MISMATCH`）就以結束碼 1 回報，步驟與卡片原始位元組都維持原樣。修正後請重送整次命令。
 同命令可重複加入章節內容；錨點歸最近一筆章節，欄位以 `|` 分隔且不可留空。
 
 - `--chain "一站"`、`--conflict "現象|方向"`、`--cleared "查過不是問題"`、`--verify "檢查|結果"`。
@@ -65,13 +65,13 @@ flows 每筆附 `link.identifier`、`sourceLine`、`sinkLine`、直接／一步�
 
 | `fill` 旗標 | 欄位與用途 |
 | --- | --- |
-| `--knowhow "kind\|rule\|toolDetail\|verification"` | `kind` 可用 `preflight`、`invariant`、`verification`、`guardrail`、`policy`。`rule` 寫可跨工具重用的規則，`toolDetail` 寫來源工具的做法，`verification` 寫怎麼檢查及要看哪份證據。 |
-| `--compat-pin "surface\|target\|expectation\|probe"` | `surface` 可用 `local-process`、`mcp`、`cli`、`http`、`library`。`target` 是入口、工具名或契約，`expectation` 是來源支持的版本、雜湊或必要欄位，`probe` 說明怎麼快速讀回比對及何時應停下。 |
-| `--routing '<JSON 物件>'` | 必填 `consumes`、`produces`、`avoidWhen` 三個字串陣列。`avoidWhen` 至少一項，寫出具體不宜分流的情況。`executionClass` 可用 `deterministic`、`hybrid`、`unknown`。`maturity` 可用 `experimental`、`bounded`、`certified`、`legacy`、`unknown`。任一為 `unknown` 時須填 `unknownReason`。 |
+| `--knowhow "kind\|rule\|toolDetail\|verification"` | `kind` 可用 `preflight`、`invariant`、`verification`、`guardrail`、`policy`。`rule` 寫換工具後仍適用的領域規則，工具內部演算法與資料結構放在 `toolDetail`，`verification` 寫怎麼檢查及要看哪份證據。 |
+| `--compat-pin "surface\|target\|expectation\|probe"` | `surface` 可用 `local-process`、`mcp`、`cli`、`http`、`library`。釘選呼叫方可觀察的契約，例如 CLI 選項與結束碼、schema 必填欄位或匯出格式。避免釘選容易隨重構變動的內部原碼運算式。`probe` 說明怎麼讀回比對及何時應停下。 |
+| `--routing '<JSON 物件>'` 或 `--routing-file "<路徑.json>"` | 兩種方式擇一，使用相同欄位。必填 `consumes`、`produces`、`avoidWhen` 三個字串陣列。`avoidWhen` 至少一項，寫出具體不宜分流的情況。`executionClass` 可用 `deterministic`、`hybrid`、`unknown`。`maturity` 可用 `experimental`、`bounded`、`certified`、`legacy`、`unknown`。任一為 `unknown` 時須填 `unknownReason`。 |
 
-每筆 `--knowhow` 與 `--compat-pin` 都要在同一次填卡中後接至少一個 `--anchor "檔:行:原文片段"`。引用相對於受查根目錄，原文須在該行或附近 ±3 行的唯一匹配中出現。直接填卡 JSON 可附 `anchors: [{file,line,expect}]` 或單筆 `anchor: {file,line,expect}`，也可重用卡上已核對過的錨點物件，產報告和匯出時會對來源重讀。路由可附錨點，沒附時報告標成路由建議。缺錨、錨點不符或欄位無效會當場拒收該筆，CLI 結束碼為 1，同次其餘合法項目仍會寫入。
+每筆 `--knowhow` 與 `--compat-pin` 都要在同一次填卡中後接至少一個 `--anchor "檔:行:原文片段"`。引用相對於受查根目錄，原文須在該行或附近 ±3 行的唯一匹配中出現。直接填卡 JSON 可附 `anchors: [{file,line,expect}]` 或單筆 `anchor: {file,line,expect}`，也可重用卡上已核對過的錨點物件，產報告和匯出時會對來源重讀。路由可附錨點，沒附時報告標成路由建議。
 
-`--knowhow` 與 `--compat-pin` 可多次追加。可用 `fix --remove knowhow:1` 或 `fix --remove compat-pin:1` 更正。一次卡片只記一組路由，最後一筆有效的 `--routing` 取代原值。空的 `consumes` 或 `produces` 表示該路線沒有這類載體。若格式、已部署版本、重送或其他執行屬性尚未核實，請用既有 `--unknown` 記明原因。釘選與驗證欄記錄預期和檢查方法，實際結果另用 `--verify` 記錄。
+`--knowhow` 與 `--compat-pin` 可多次追加。可用 `fix --remove knowhow:1` 或 `fix --remove compat-pin:1` 更正。一張卡只記一組路由，填卡成功時最後一筆路由取代原值。空的 `consumes` 或 `produces` 表示該路線沒有這類載體。若格式、已部署版本、重送或其他執行屬性尚未核實，請用既有 `--unknown` 記明原因。釘選與驗證欄記錄預期和檢查方法，實際結果另用 `--verify` 記錄。
 
 ### 小範例
 
@@ -88,7 +88,13 @@ node scripts/trace.mjs report --card ../card.json --out ../report.html
 node scripts/trace.mjs export-integrate --card ../card.json --out ../handoff.json
 ```
 
-Windows PowerShell 5.1 呼叫 `node` 時，`--routing` 仍用外層單引號，內部每個 JSON 雙引號要寫成 `\"`，例如 `'{\"consumes\":[\"mp4\"]}'`。
+在 Windows PowerShell 5.1 可把同一個 JSON 物件存成 UTF-8 檔案。`--routing-file` 接受 `Out-File -Encoding utf8` 或 `Set-Content -Encoding utf8` 寫出的 BOM。路徑含空白時加引號，相對路徑以命令執行目錄為準，後續 `--anchor` 可直接接在檔案參數後。
+
+```powershell
+node scripts/trace.mjs fill --card ../card.json --step 6 --routing-file "../clip routing.json" --anchor "docs/clip-workflow.md:7:supplied MP4 files"
+```
+
+在 Windows PowerShell 5.1 使用內嵌的 `--routing` 時，以單引號包住 JSON，並將 JSON 的雙引號寫成 `\"`，例如 `'{\"consumes\":[\"mp4\"]}'`。
 
 Markdown 鏈卡與 HTML 報告會顯示有填寫的章節。匯出重讀各新欄位的來源錨點，有無效欄位或錨點就拒絕產檔。輸出須在受查根目錄外，路徑須可寫且檔案尚未存在。
 
@@ -103,4 +109,4 @@ Markdown 鏈卡與 HTML 報告會顯示有填寫的章節。匯出重讀各新�
 | `routing` | `{ consumes, produces, executionClass, maturity, avoidWhen, anchors }`，有填寫時包含 `unknownReason`。 |
 | `unknowns` | 既有未知項目及其原因、下一步等欄位，每項加上 `status: "UNKNOWN"`。 |
 
-錨點保留 `file`、`line`、`expect`、`sha256`、`status` 及適用的行號校正欄位。舊卡也可匯出，缺少的清單是 `[]`，缺少的路由是 `null`。交接供平台作者取用，權限相關決定和執行驗證仍以各自的證據為準。
+錨點保留 `file`、`line`、`expect`、`sha256`、`status` 及適用的行號校正欄位。進度與 HTML 報告的摘要對相同的 `(file, line, expect)` 只計一次，每條主張仍保有自己的錨點。舊卡也可匯出，缺少的清單是 `[]`，缺少的路由是 `null`。交接供平台作者取用，權限相關決定和執行驗證仍以各自的證據為準。

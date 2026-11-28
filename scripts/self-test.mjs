@@ -2200,17 +2200,26 @@ function p4Checks(root){
   assert.equal(new Set(owners.map(r=>r.anchors)).size,owners.length);
   const card=buildChainCard(c),md=renderChainCard(card);assert.equal(card.anchorReview.status,'PASS');assert.match(card.chain[0].anchors[0].sha256,/^[a-f0-9]{64}$/);assert(!md.includes(card.chain[0].anchors[0].sha256));assert.match(md,/雜湊：[a-f0-9]{8}(?:\n|$)/);
  });
- check('CLI persists valid fields around a named bad flag and never reassigns rejected anchors',()=>{
-  assert.equal(cli('trace',['start','--mode','symptom','--question','部分寫入','--root',repo,'--out',input]).status,0);
-  const r=cli('trace',['fill','--card',input,'--step','1','--note','說明已寫入','--version','a|b|c','--unknown','問題|not-run|未試|已讀|補試|Owner|尚待觀測']);
-  assert.equal(r.status,0,r.stderr);assert.match(r.stderr,/--version.*提交.*收到 3 欄/);assert(r.stderr.includes('其餘合法內容已寫入'));
-  const c=JSON.parse(fs.readFileSync(input));assert.equal(c.steps[0].notes,'說明已寫入');assert.equal(c.unknowns.length,1);assert.match(c.version.commit,/^[a-f0-9]{40}$/);assert(cli('trace',['status','--card',input]).stdout.includes('未知 1 項'));
-  const errors=[];fillTrace(c,['--step','2','--chain','保留','--anchor',a,'--conflict','缺方向','--anchor',a,'--verify','讀碼|已讀','--anchor',a,'--anchor','wrong','--verison','typo','--note','後面的合法說明'],errors);
-  assert.equal(c.chain[0].anchors.length,1);assert.equal(c.conflicts.length,0);assert.equal(c.verification[0].anchors.length,1);assert.equal(c.steps[1].notes,'後面的合法說明');assert.equal(errors.length,4);
+ check('CLI rejects the entire fill and reports invalid flags and misplaced anchors',()=>{
+  assert.equal(cli('trace',['start','--mode','symptom','--question','整次填卡','--root',repo,'--out',input]).status,0);
+  const before=fs.readFileSync(input),fill=(...args)=>cli('trace',['fill','--card',input,'--step','1',...args]);
+  const unknown='問題|not-run|未試|已讀|補試|Owner|尚待觀測';
+  // Atomic CLI contract: any error now exits 1 and leaves the original bytes and step intact.
+  const r=fill('--note','有效說明','--version','a|b|c','--unknown',unknown);
+  assert.equal(r.status,1,r.stderr);assert.match(r.stderr,/--version.*提交.*收到 3 欄/);assert.match(r.stderr,/本次填卡未寫入/);
+  assert.equal(r.stdout,'');assert.deepEqual(fs.readFileSync(input),before);assert.equal(JSON.parse(before).steps[0].status,'pending');
+  for(const [flag,value,reason] of [['--unknown',unknown+'|invalid',/--unknown.*末欄/],['--anchor',file+':1:absent anchor',/--anchor.*ANCHOR_MISMATCH/],['--step','invalid',/--step/]]){
+   const invalid=fill('--note','有效說明',flag,value);assert.equal(invalid.status,1,invalid.stderr);assert.match(invalid.stderr,reason);
+   assert.equal(invalid.stdout,'');assert.deepEqual(fs.readFileSync(input),before);
+  }
+  const mixed=fill('--chain','有效站點','--anchor',a,'--conflict','缺方向','--anchor',a,'--verify','讀碼|已讀','--anchor',a,'--anchor','wrong','--verison','typo','--note','合法說明');
+  assert.equal(mixed.status,1,mixed.stderr);assert.equal(mixed.stdout,'');
+  for(const reason of [/--conflict.*收到 1 欄/,/--anchor.*前一章節或步驟無效/,/--anchor.*行號須為正整數/,/--verison.*未知參數/])assert.match(mixed.stderr,reason);
+  assert.deepEqual(fs.readFileSync(input),before);
   assert.equal(cli('trace',['fill','--card',join(area,'missing'),'--step','1']).status,1);
  });
  check('all help and summary commands stay bounded and preserve JSON output',()=>{
-  for(const args of [['--help'],['fill','--help']]){const r=cli('trace',args);assert.equal(r.status,0);assert(r.stdout.trim().split('\n').length<=25);for(const flag of ['mode','question','root','out','card','step','note','skip','version','chain','cleared','conflict','verify','unknown','decision','condition','permission','interface','anchor','help'])assert(r.stdout.includes('--'+flag));}
+  for(const args of [['--help'],['fill','--help']]){const r=cli('trace',args);assert.equal(r.status,0);assert(r.stdout.trim().split('\n').length<=25);for(const flag of ['mode','question','root','out','card','step','note','skip','version','chain','cleared','conflict','verify','unknown','decision','condition','permission','interface','routing-file','anchor','help'])assert(r.stdout.includes('--'+flag));assert.match(r.stdout,/有錯.*結束碼 1/);}
   fs.writeFileSync(join(area,'good.json'),'{}');fs.writeFileSync(join(area,'bad.json'),'{"changed":1}');
   const modes=[['symptom','literal',['--text','import']],['symptom','writers',['--field','version']],['symptom','compare',['--good',join(area,'good.json'),'--bad',join(area,'bad.json')]],...['recent','pickaxe','churn','cochange'].map(m=>['git-evidence',m,['--since','2000-01-01','--paths',file,'--path',file,'--text','import']]),...['surface','secrets','flows','deps'].map(m=>['integrate',m,[]])];
   const sarif=join(area,'scan.sarif');fs.writeFileSync(sarif,JSON.stringify({runs:[{results:[{locations:[{physicalLocation:{artifactLocation:{uri:file},region:{startLine:1}}}]}]}]}));modes.push(['integrate','import-sarif',['--file',sarif]]);
@@ -2341,7 +2350,9 @@ function g360Checks(root){
   assert.equal(cli(['start','--mode','integrate','--question','可否接入','--root',repo,'--out',input]).status,0);
   const r=cli(['fill','--card',input,'--step','1','--note','已讀','--anchor',file+':2:const data','--chain','入口','--conflict','現象|方向','--cleared','排除','--verify','讀碼|已讀','--unknown','禁網試接|out-of-scope|缺框架|已讀|補試接|Owner|尚待觀測']);
   assert.equal(r.status,0);assert(r.stdout.includes('第 2 步／'));assert(r.stdout.trim().split('\n').length<=20);assert(!r.stdout.includes('第 3 步還沒有'));const c=JSON.parse(fs.readFileSync(input));assert.equal(c.steps[0].anchors[0].line,1);assert.equal(c.unknowns.length,1);assert.equal(c.conflicts.length,1);assert.equal(c.verification.length,1);assert.equal(c.cleared.length,1);
-  assert.equal(cli(['fill','--card',input,'--step','2','--skip','--note','缺執行環境']).status,0);const invalid=cli(['fill','--card',input,'--step','99']);assert.equal(invalid.status,0);assert(invalid.stderr.includes('--step'));
+  assert.equal(cli(['fill','--card',input,'--step','2','--skip','--note','缺執行環境']).status,0);
+  const before=fs.readFileSync(input),invalid=cli(['fill','--card',input,'--step','99']);
+  assert.equal(invalid.status,1,invalid.stderr);assert.match(invalid.stderr,/--step/);assert.equal(invalid.stdout,'');assert.deepEqual(fs.readFileSync(input),before);
  });
  check('integration card retains manual interfaces permissions verdict unknowns and checks anchors',()=>{
   const c=startTrace('integrate','可否接入',repo);fillTrace(c,['--step','1','--version','測試提交|未部署','--anchor',file+':1:const data','--decision','有條件可接','--condition','限縮權限','--permission','指定輸出目錄','--interface','命令列|路徑|候選|錯誤訊息|覆寫結果','--anchor',file+':1:const data']);assert.equal(c.version.commit,'測試提交');

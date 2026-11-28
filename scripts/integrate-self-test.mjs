@@ -17,6 +17,11 @@ export function integrateHandoffChecks(root){
  const run=(...args)=>spawnSync(process.execPath,[cli,...args],{encoding:'utf8',windowsHide:true});
  const ok=(...args)=>{const r=run(...args);assert.equal(r.status,0,r.stderr+r.stdout);return r;};
  const fill=(...args)=>['fill','--card',file,'--step','6',...args];
+ const rejectFill=(reason,...args)=>{
+  const before=fs.readFileSync(file),r=run(...fill(...args));
+  assert.equal(r.status,1,r.stderr);assert.match(r.stderr,reason);assert.equal(r.stdout,'');
+  assert(!/\n\s+at /.test(r.stderr));assert.deepEqual(fs.readFileSync(file),before);
+ };
  const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
  const check=(name,fn)=>{fn();checks.push('integrate handoff: '+name);};
  const route={consumes:['mp4'],produces:['mp4'],executionClass:'unknown',maturity:'experimental',avoidWhen:['No readable source','Request is text-to-video <script>'],unknownReason:'The live engine has not been observed'};
@@ -39,6 +44,13 @@ export function integrateHandoffChecks(root){
   const out=join(area,'legacy.json');ok('export-integrate','--card',file,'--out',out);
   const data=read(out);assert.deepEqual([data.knowhow,data.compatPins,data.routing,data.unknowns],[[],[],null,[]]);
  });
+ check('fill rolls back a valid note and skip when routing JSON or a normal anchor fails',()=>{
+  // Preserve noncanonical whitespace too, so parsing and rewriting cannot pass this check.
+  fs.writeFileSync(file,' \r\n'+fs.readFileSync(file,'utf8'));
+  rejectFill(/--routing.*JSON/,'--note','Must not save','--routing','{bad','--skip');
+  rejectFill(/--anchor.*ANCHOR_MISMATCH/,'--note','Must not save','--anchor','contract.md:1:absent');
+  assert.equal(read(file).steps[5].status,'pending');
+ });
  check('fill verifies multiple anchors, appends each record, and keeps routing arrays',()=>{
   ok(...fill('--knowhow',know,'--anchor','contract.md:2:Keep asset identity','--anchor',a2,
    '--knowhow',know.replace('invariant','verification'),'--anchor',a1,
@@ -49,10 +61,25 @@ export function integrateHandoffChecks(root){
   assert.equal(r.knowhow[0].anchors[0].line,1);assert.equal(r.knowhow[0].anchors[0].requestedLine,2);
   assert.equal(r.knowhow[0].anchors[0].sha256,sha256(Buffer.from(contents)));assert.equal(r.compatPins[0].surface,'mcp');
   assert.deepEqual(r.routing.avoidWhen,route.avoidWhen);
-  assert.equal(c.steps[5].sectionAnchors,5);assert.equal(inspectTrace(c).anchors.length,5);
+  assert.equal(c.steps[5].sectionAnchors,5);assert.equal(inspectTrace(c).anchors.length,3);
+  assert.match(ok('status','--card',file).stdout,/錨點通過 3／3 個/);
  });
- check('fill rejects missing, forged, malformed and out-of-root anchors and invalid enums without saving the rows',()=>{
-  const before=read(file);
+ check('routing file accepts UTF-8 BOM, spaces and trailing flags and is exclusive with inline JSON',()=>{
+  const routing=join(area,'routing with spaces.json'),json=JSON.stringify(route);
+  fs.writeFileSync(routing,'\uFEFF'+json+'\r\n','utf8');
+  const inline=['--routing',json],fromFile=['--routing-file',routing];
+  rejectFill(/--routing-file.*--routing.*擇一/,...fromFile,...inline);
+  rejectFill(/--routing-file.*--routing.*擇一/,...inline,...fromFile);
+  rejectFill(/--routing-file.*ENOENT/,'--routing-file',join(area,'missing routing.json'),'--note','Must not save');
+  rejectFill(/--routing-file.*路徑/,'--routing-file','--note','Must not save');
+  const bad=join(area,'bad routing.json');fs.writeFileSync(bad,JSON.stringify({...route,avoidWhen:[]}));
+  rejectFill(/--routing-file.*avoidWhen/,'--routing-file',bad,'--anchor',a3);
+  ok(...fill(...fromFile,'--note','Read routing file','--anchor',a3));
+  const c=read(file);
+  assert.deepEqual(c.integration.routing,{...route,anchors:[{file:'contract.md',line:3,expect:'supplied MP4',sha256:sha256(Buffer.from(contents)),status:'PASS'}]});
+  assert.equal(c.steps[5].notes,'Read routing file');assert.deepEqual(c.steps[5].anchors,[]);
+ });
+ check('fill rejects missing, forged, malformed and out-of-root anchors and invalid enums without saving any fields',()=>{
   for(const [flag,value,anchor,reason] of [
    ['--knowhow',know,null,/--anchor/],['--compat-pin',pin,null,/--anchor/],
    ['--knowhow',know,'contract.md:2:absent',/錨點不符/],
@@ -67,15 +94,10 @@ export function integrateHandoffChecks(root){
    ['--routing',JSON.stringify({...route,unknownReason:''}),null,/unknownReason/],
    ['--routing','{bad',null,/JSON/],
   ]){
-   const r=run(...fill(flag,value,...(anchor?['--anchor',anchor]:[])));
-   assert.equal(r.status,1,r.stderr);assert.match(r.stderr,reason);assert(!/\n\s+at /.test(r.stderr));assert.deepEqual(read(file),before);
+   rejectFill(reason,flag,value,...(anchor?['--anchor',anchor]:[]));
   }
-  const mixed=run(...fill('--compat-pin',pin,'--anchor',a2,'--knowhow',know,'--anchor',a1,'--anchor','contract.md:1:forged','--routing',JSON.stringify({...route,executionClass:'hybrid',unknownReason:undefined})));
-  assert.equal(mixed.status,1,mixed.stderr);const after=read(file);
-  assert.equal(after.integration.compatPins.length,2);assert.deepEqual(after.integration.knowhow,before.integration.knowhow);
-  assert.equal(after.integration.routing.executionClass,'hybrid');assert.deepEqual(after.integration.routing.anchors,[]);
-  ok('fix','--card',file,'--remove','compat-pin:2');
-  ok(...fill('--routing',JSON.stringify(route),'--anchor',a3));
+  // The CLI now discards valid claims on either side of an error in the same fill.
+  rejectFill(/--knowhow.*ANCHOR_MISMATCH/,'--compat-pin',pin,'--anchor',a2,'--knowhow',know,'--anchor',a1,'--anchor','contract.md:1:forged','--routing',JSON.stringify({...route,executionClass:'hybrid',unknownReason:undefined}));
  });
  check('new sections are integrate-only',()=>{
   const other=startTrace('change','Other question',repo),errors=[];
@@ -98,6 +120,8 @@ export function integrateHandoffChecks(root){
   assert.equal(data.schema,'trace-integrate-handoff-v1');
   assert.equal(data.source.root,repo);assert.equal(data.source.version.running,'UNKNOWN');assert(data.source.version.runningCause);
   assert.deepEqual(data.knowhow,machine.integration.knowhow);assert.deepEqual(data.compatPins,machine.integration.compatPins);
+  assert.deepEqual(data.knowhow[0].anchors[1],data.compatPins[0].anchors[0]);
+  assert.deepEqual(machine.anchors,{pass:3,total:3});
   assert.deepEqual(data.routing,{...route,anchors:raw.integration.routing.anchors});
   assert.deepEqual(data.unknowns,[{...raw.unknowns[0],status:'UNKNOWN'}]);
   assert.equal(run('export-integrate','--card',file,'--out',handoff).status,1);
