@@ -36,6 +36,7 @@ node scripts/trace.mjs status --card <卡片.json>
 
 - [劇本用法、通則與常見原因](references/playbooks.md)；步驟只在 [資料檔](assets/playbooks.json)。
 - [接入分診與接入卡](references/integrate.md)：邊界、機密、流向、相依及既有掃描結果；只交待確認的候選。
+- 接入時用 [結構化交接](references/integrate.md#領域知識轉接釘選與路由) 記下有來源的領域規則、相容性釘選與路由限制。
 - [鏈卡格式與錨點](references/chain-card.md)、[未知的交代與補查邊界](references/unknown-playbook.md)。
 - [原有細查路徑](references/detailed-workflow.md)：五步盤點、宣告對照、刪除影響、動態證據及專門工具，內容完整保留。
 - [用途路線、試跑與開卡前檢查](references/route.md)。

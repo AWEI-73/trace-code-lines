@@ -3,6 +3,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {readBounded,noLinks,sha256} from './walker.mjs';
 import {reviewUnknowns,unknownSummary,renderUnknowns} from './unknowns.mjs';
+import {reviewIntegrateFields,integrateSections} from './integrate-fields.mjs';
 
 export function initChain(question,root){
  return {question,root:path.resolve(root),version:{repo:path.resolve(root),commit:'UNKNOWN',running:'UNKNOWN'},
@@ -38,19 +39,22 @@ export function buildChainCard(c){
  const verification=rows(c.verification,'verification'),unknowns=rows(c.unknowns,'unknowns');
  const steps=Array.isArray(c.steps)?rows(c.steps,'steps'):undefined;
  const unknownReview=reviewUnknowns(unknowns);
+ const reviewed=c.mode==='integrate'?reviewIntegrateFields(c.integration,check):null;
  const integration=c.mode==='integrate'?{decision:c.integration?.decision??'尚未判斷',
   anchors:(c.integration?.anchors??[]).map(a=>check(a,'integration')),
-  conditions:rows(c.integration?.conditions,'conditions'),permissions:rows(c.integration?.permissions,'permissions'),interfaces:rows(c.integration?.interfaces,'interfaces',true)}:undefined;
+  conditions:rows(c.integration?.conditions,'conditions'),permissions:rows(c.integration?.permissions,'permissions'),interfaces:rows(c.integration?.interfaces,'interfaces',true),
+  ...reviewed.fields,...(reviewed.issues.length?{fieldIssues:reviewed.issues}:{})}:undefined;
  return {schema:'chain-card-v1',question:c.question,root,version:c.version??{repo:root,commit:'UNKNOWN',running:'UNKNOWN'},chain,conflicts,cleared,verification,unknowns:unknownReview.items,unknownReview,
   ...(c.mode?{mode:c.mode}:{}),...(steps?{steps}:{}),...(integration?{integration}:{}),
   anchorReview:{status:mismatches.length?'ANCHOR_MISMATCH':'PASS',mismatches},basis:'STATIC_ONLY unless separately supported by the listed execution evidence; anchor checks do not validate interpretation.'};
 }
 const anchorText=a=>`${a.file??'未填檔案'}:${a.line??'?'} — ${a.status==='PASS'?'核對通過':'錨點不符'}${a.corrected?'（行號已校正：'+a.requestedLine+' → '+a.line+'）':''}；比對文字：${JSON.stringify(a.expect??'')}；雜湊：${a.sha256?.slice(0,8)??'未取得'}`;
+const mdText=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replace(/[\r\n]+/g,' ');
 export function renderChainCard(c){
  const lines=['# '+c.question,'',`> 錨點${c.anchorReview.status==='PASS'?'核對通過':'不符'}；${unknownSummary(c.unknownReview)}`];
  for(const a of c.anchorReview.mismatches)lines.push('> 錨點不符：'+anchorText(a)+'；請回讀檔案與比對文字。');
  lines.push('','## ① 讀的是哪一份','',...Object.entries(c.version).map(([k,v])=>'- '+({repo:'原碼位置',commit:'提交',running:'執行版本',worktree:'工作樹',reason:'版本讀取原因'}[k]??'版本補充')+'：'+(v==='UNKNOWN'?'未知':v)),'','## ② 鏈','',c.chain.map(r=>r.label).join(' → '));
- const add=(r,text)=>{lines.push('',text);for(const a of r.anchors)lines.push('  - '+anchorText(a));if(r.basis)lines.push('  - '+r.basis);};
+ const add=(r,text,formatAnchor=anchorText)=>{lines.push('',text);for(const a of r.anchors)lines.push('  - '+formatAnchor(a));if(r.basis)lines.push('  - '+r.basis);};
  c.chain.forEach(r=>add(r,'- '+r.label));
  lines.push('','## ③ 衝突點','');if(!c.conflicts.length)lines.push('未列出衝突；不表示已證明沒有問題。');
  c.conflicts.forEach(r=>add(r,`- [${{critical:'最高',high:'高',medium:'中',low:'低'}[r.severity]??'未定嚴重度'}] 現象：${r.phenomenon??''}\n  - 方向：${r.direction??''}`));
@@ -62,6 +66,11 @@ export function renderChainCard(c){
  if(c.integration){const r=c.integration;lines.push('','## ⑥ 接入結論','',r.decision);
   add(r,'- 結論依據');for(const row of r.conditions)add(row,'- 條件：'+row.text);for(const row of r.permissions)add(row,'- 需要授權：'+row.text);
   for(const row of r.interfaces)add(row,`- 入口：${row.name}\n  - 輸入：${row.input}\n  - 輸出：${row.output}\n  - 錯誤回法：${row.error}\n  - 重送：${row.retry}`);
+  for(const issue of r.fieldIssues??[])lines.push('', '> 接入欄位待修正：'+mdText(issue));
+  for(const section of integrateSections(r)){
+   lines.push('','### '+section.title);
+   for(const {row,heading,details} of section.rows)add(row,'- '+mdText(heading)+details.map(([label,value])=>'\n  - '+label+'：'+mdText(value)).join(''),a=>mdText(anchorText(a)));
+  }
   lines.push('','平台宣告草稿請用既有 scripts/export-profile.mjs；本卡不代表已授權或完成試接。');
  }
  lines.push('','錨點與雜湊只核對引用，不替代語意覆核或執行證據。','');return lines.join('\n');

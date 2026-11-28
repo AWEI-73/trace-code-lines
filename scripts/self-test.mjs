@@ -35,6 +35,7 @@ import {skill8Checks} from './skill8-self-test.mjs';
 import {instrumentChecks} from './instrument-self-test.mjs';
 import {evidenceChecks} from './evidence-self-test.mjs';
 import {languageChecks} from './language-self-test.mjs';
+import {integrateHandoffChecks} from './integrate-self-test.mjs';
 import {census} from './record-census.mjs';
 import {classifyRecords} from './classify-records.mjs';
 import {loadAst,buildGraph,reach as astReach,touches as astTouches,targetsOf as astTargets} from './ast-graph.mjs';
@@ -566,7 +567,7 @@ try {
   const g52=languageEdges(g52File,g52Source,{rows:g52Rows,read:()=>'',sourceRoots:['lib/crewai/src']}).edges.filter(e=>e.basis==='PEP562_LITERAL_MAP');
   assert.equal(g52.length,4);assert(g52.every(e=>e.targets.length===1&&e.occurrences>1));assert.equal(new Set(g52.map(e=>JSON.stringify([e.path,e.kind,e.targets[0]]))).size,4);assert(g52.every(e=>e.sites.reduce((n,s)=>n+s.occurrences,0)===e.occurrences));
   newChecks.push('G52 real PEP 562 repeated export targets deduplicate with occurrence counts');
-  newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root));
+  newChecks.push(...await g7Checks(root),...g8Checks(root),...g9Checks(root),...g10Checks(root),...g11Checks(root),...integrateHandoffChecks(root));
   const addedChecks=[...p4Checks(root),...g360Checks(root),...g350Checks(root),...g340Checks(root),...g370Checks(root),...await g380Checks(root),...await g390Checks(root),...await g400Checks(root),...await g410Checks(root),...await g420Checks(root),...await g430Checks(root),...await g440Checks(root),...await g450Checks(root),...newChecks,...await runOnceChecks(join(root,'run-once')),...await instrumentChecks(join(root,'instrument')),...languageChecks(join(root,'languages')),...evidenceChecks(join(root,'evidence')),'record-census route-skeletons trace-one-job coverage-reconcile contracts',...await skill8Checks(join(root,'skill8')),...await g240Checks(root),...await g250Checks(root),...await g290Checks(root)];
   console.log(JSON.stringify({status:'PASS',synthetic:true,checks:['static closure cycle and JSON','missing/package/escape gaps','calibration set rejection','file populations','record populations and versions','JSON and JSONL','route skeletons','join success and failure','coverage a/b/c loaded-only non-V8','endpoint witness and rename',...addedChecks]}));
 } finally {

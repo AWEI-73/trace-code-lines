@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {inspectTrace,capabilityReview} from './trace.mjs';
 import {scanIntegration} from './integrate.mjs';
+import {integrateSections} from './integrate-fields.mjs';
 import {writeChainCard} from './chain-card.mjs';
 import {capLabel,TEST_PATH,LETTERS} from './preflight.mjs';
 import {renderRouteHtml} from './route-report-html.mjs';
@@ -110,8 +111,10 @@ export function buildReport({card,questions,triage,boundary,instrumentLog,ledger
  const c=card,p=c.preflight??null,r=inspectTrace(c),scope=p?.scope??null,all=collectCandidates(triage,scope);
  const cands=all.filter(x=>!x.excluded),code=cands.filter(x=>!x.test&&x.dim),tests=cands.filter(x=>x.test&&x.dim),excluded=all.filter(x=>x.excluded&&x.dim);
  const integ=c.integration??{},isInt=c.mode==='integrate',lastStep=(c.steps??[]).at(-1),last=lastStep?.notes;
+ const integrationSections=integrateSections(r.integrateFields);
  const summary=last&&[...last].length>4?last:null,decision=isInt?(integ.decision||'還沒下結論'):(r.next<0?'查完':'還在查');
  const cited=new Set([...(c.chain??[]),...(c.conflicts??[]),...(c.cleared??[]),...(integ.conditions??[]),...(integ.permissions??[]),...(c.steps??[])].flatMap(x=>(x.anchors??[]).map(at)));
+ for(const section of integrationSections)for(const {row} of section.rows)for(const a of row.anchors)if(a.status==='PASS')cited.add(at(a));
  const cr=isInt?capabilityReview(c):null,granted=scope?.capabilities??[],decisionCap=isInt&&cr?.cap?'有條件可接':(p?.decisionCap??null);
  // One row per capability: card-required (with anchors and refinements) and scan-inferred needs merged, so nothing is listed twice.
  const capRows=cr?[...new Set([...cr.missing,...cr.scanOnly])].map(v=>{const rows=cr.required.filter(x=>x.capability===v);return {capability:v,label:capLabel(v),onCard:rows.length>0,byScan:cr.scanOnly.includes(v)||(scope?.capabilityNeeds??[]).includes(v),refine:rows.map(x=>x.refine).filter(Boolean),anchors:rows.flatMap(x=>x.anchors.map(at))};}):[];
@@ -133,6 +136,7 @@ export function buildReport({card,questions,triage,boundary,instrumentLog,ledger
   ownerDecisions:decide,granted,needsNotGranted:needs,capabilities:cr?{granted,required:cr.required.map(x=>({capability:x.capability,refine:x.refine,text:x.text,anchors:x.anchors.map(at)})),missing:cr.missing,scanOnly:cr.scanOnly,needsReview:[...cr.review,...cr.freeText].map(x=>x.text)}:null,conditions:(integ.conditions??[]).map(x=>x.text),permissions:(integ.permissions??[]).map(x=>x.text),
   preflight:p?{simulated:p.simulated,answeredBy:p.answeredBy,acceptedDefaults:p.acceptedDefaults??false,questionsSha256:p.questionsSha256,questionsMatch:p.questionsMatch,scope,pending:p.pending,answers:p.answers}:null,
   ownerPending:decide,unknowns:(c.unknowns??[]).map(u=>({question:u.question,class:u.class,affects:u.affects??null,next:u.next})),
+  ...(integrationSections.length?{integration:r.integrateFields}:{}),
   anchors:{pass:r.anchors.filter(a=>a.status==='PASS').length,total:r.anchors.length},flags:r.flags,
   counts:{code:code.length,test:tests.length,excluded:excluded.length,codeByDimension:count(code),testByDimension:count(tests)},
   candidates:[...code.map(x=>({...x,citedOnCard:cited.has(x.file+':'+x.line)})),...tests.map(x=>({category:x.category,dim:x.dim,file:x.file,line:x.line,test:true,origin:x.origin}))],entryCount:cands.filter(x=>x.category==='入口候選').length,
@@ -142,6 +146,9 @@ export function buildReport({card,questions,triage,boundary,instrumentLog,ledger
  const json=JSON.stringify(machine).replaceAll('<','\\u003c').replaceAll('>','\\u003e').replaceAll('&','\\u0026');
  const codeIds=new Set(code.map(x=>x.file+':'+x.line));
  const ref=a=>codeIds.has(a)?'<a class="ref" href="#'+evId(...a.split(/:(?=\d+$)/))+'"><code>'+esc(a)+'</code></a>':'<code class="ref">'+esc(a)+'</code>';
+ const integrationHtml=integrationSections.map(({id,title,rows})=>'<section class="card" id="'+id+'"><h2>'+esc(title)+'</h2><ul>'+
+  rows.map(({row,heading,details})=>'<li><b>'+esc(heading)+'</b><ul>'+details.map(([label,value])=>'<li>'+esc(label)+'：'+esc(value)+'</li>').join('')+
+   row.anchors.map(a=>'<li>'+ref(a.file?at(a):'未填錨點')+' '+(a.status==='PASS'?'核對通過':'錨點不符')+'</li>').join('')+'</ul></li>').join('')+'</ul></section>').join('');
  const li=(x,cls)=>'<li class="'+cls+'"><span>'+esc(x.text)+(x.detail?'<span class="muted"> — '+esc(x.detail)+'</span>':'')+'</span> '+(x.anchors??[]).slice(0,3).map(ref).join(' ')+'</li>';
  const dimTables=Object.keys(DIM).filter(k=>k!=='f').map(k=>{const xs=code.filter(x=>x.dim===k),ts=tests.filter(x=>x.dim===k),ex=excluded.filter(x=>x.dim===k).length;const groups={};for(const x of xs)(groups[x.category]??=[]).push(x);
   const ordered=Object.entries(groups).sort((a,b)=>a[1].length-b[1].length);
@@ -185,6 +192,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break
  '<div class="stats"><a class="stat" href="#evidence">錨點核對 <b>'+machine.anchors.pass+'／'+machine.anchors.total+'</b></a><a class="stat" href="#evidence">程式碼線索 <b>'+code.length+'</b></a>'+(tests.length?'<span class="stat">測試 '+tests.length+'（另計）</span>':'')+(excluded.length?'<span class="stat">不查 '+excluded.length+'</span>':'')+'<a class="stat" href="#unknowns">未知 <b>'+(c.unknowns??[]).length+'</b></a></div></section>'+
  '<nav class="toc"><a href="#decision">結論</a><a href="#preflight">開卡前授權</a><a href="#route">路線圖</a>'+(boundary?.findings?.length?'<a href="#modules">模組方向</a>':'')+'<a href="#evidence">證據</a><a href="#unknowns">未知</a><a href="#dynamic">試跑</a>'+(ledger?'<a href="#ledger">埋雷對照</a>':'')+'<a href="#agent">給 agent</a></nav>'+
  ((integ.interfaces??[]).length?'<section class="card" id="interfaces"><h2>接起來長怎樣</h2><ul>'+integ.interfaces.map(x=>'<li><b>'+esc(x.name)+'</b>：輸入 '+esc(x.input)+'；輸出 '+esc(x.output)+'；出錯 '+esc(x.error)+'；重送 '+esc(x.retry)+' '+(x.anchors??[]).slice(0,2).map(a=>ref(typeof a==='string'?a:at(a))).join(' ')+'</li>').join('')+'</ul>'+((c.chain??[]).length?'<h3>查到的路線</h3><ol>'+c.chain.map(x=>'<li>'+esc(x.label)+' '+(x.anchors??[]).slice(0,3).map(a=>ref(at(a))).join(' ')+'</li>').join('')+'</ol>':'')+'</section>':'')+
+ integrationHtml+
  '<section class="card" id="preflight"><h2>開卡前：你決定了什麼 → 這次能查多深</h2>'+pf+
  (questions?'<details><summary>受查程式中需要你知道的線索 '+liveF.length+' 項'+(otherF?'（另有測試、退役或型別宣告 '+otherF+' 項不列）':'')+'</summary><table><tbody>'+liveF.map(f=>'<tr><td>'+esc(f.label)+'</td><td><code>'+esc(f.file+(f.line?':'+f.line:''))+'</code></td><td class="muted">'+esc(f.note??'')+'</td></tr>').join('')+'</tbody></table></details>'+
   '<details><summary>環境偵測（只看有沒有裝，不執行掃描工具）</summary><table class="compact"><tbody>'+[...questions.environment.runtimes,...questions.environment.scanners].map(t=>'<tr><td>'+esc(t.name)+'</td><td>'+(t.found?'<span class="badge ok">有</span> <code>'+esc(String(t.version).replace('UNKNOWN（只偵測路徑，不執行）','只看路徑'))+'</code>':'<span class="badge unk">沒裝</span>')+'</td></tr>').join('')+'</tbody></table></details>':'')+'</section>'+
