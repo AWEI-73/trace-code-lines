@@ -71,11 +71,18 @@ export function capabilityReview(c){
  return {granted,required,missing,scanOnly,review,freeText,cap};
 }
 export function inspectTrace(input,books=playbooks){
- const c=object(input),book=books.modes[c.mode],flags=[],anchors=[];
+ const c=object(input),book=books.modes[c.mode],flags=[],anchors=new Map();
  const steps=array(book?.steps),saved=array(c.steps),root=typeof c.root==='string'?c.root:'.';
  if(!book)flags.push('尚未選定可用的情境，請依劇本說明補選。');
  if(!c.question||!c.root)flags.push('問題或受查位置尚未填齊。');
- const check=a=>{const r=checkChainAnchor(root,a);anchors.push(r);return r;};
+ // Only the integrate status/report tally counts distinct anchors. Each claim keeps its own check.
+ const check=a=>{
+  const r=checkChainAnchor(root,a);
+  const key=c.mode==='integrate'&&typeof r.file==='string'&&Number.isInteger(r.line)&&typeof r.expect==='string'
+   ?JSON.stringify([r.file,r.line,r.expect]):Symbol();
+  if(!anchors.has(key)||r.status!=='PASS')anchors.set(key,r);
+  return r;
+ };
  let next=-1,done=0,skipped=0;
  steps.forEach((s,i)=>{
   const r=object(saved.find(r=>r?.id===s.id));if(r.status==='skipped')skipped++;else if(completed(r))done++;if(!completed(r)&&next<0)next=i;
@@ -115,28 +122,32 @@ export function inspectTrace(input,books=playbooks){
   if(r.flags.includes('UNKNOWN_AFFECTS_INVALID'))flags.push('未知第 '+(r.index+1)+' 項的是否影響結論選項無效。');
   if(r.flags.includes('應先補做'))flags.push('未知第 '+(r.index+1)+' 項可先補做。');
  }
- return {book,steps,next,done,skipped,flags,anchors,unknowns,...(Object.keys(integrateFields).length?{integrateFields}:{})};
+ return {book,steps,next,done,skipped,flags,anchors:[...anchors.values()],unknowns,...(Object.keys(integrateFields).length?{integrateFields}:{})};
 }
 export function stepText(step,index,total){
  return ['第 '+(index+1)+' 步／共 '+total+' 步','要做：'+one(step.do),'工具：'+one(step.tool),'停止：'+one(step.stop),'填入：'+one(step.section)];
 }
-// Repeated options append rows; no JSON editing required. A repeated fill appends again.
+// Apply options to the supplied draft. The CLI commits it only when there are no errors.
+// Repeated row options append rows, including on subsequent successful fills.
 export function fillTrace(c,args,errors=[]){
  const entries=[];
  for(let i=0;i<args.length;i++){
   const flag=args[i],value=flag==='--skip'?undefined:args[i+1]?.startsWith('--')?undefined:args[++i];
   entries.push({flag,value});
  }
+ if(entries.some(e=>e.flag==='--routing')&&entries.some(e=>e.flag==='--routing-file')){
+  errors.push('--routing-file 與 --routing 只能擇一。');return c;
+ }
  const n=Number(entries.find(e=>e.flag==='--step')?.value),step=c.steps?.[n-1];
  const validStep=Number.isInteger(n)&&n>0&&step;
  if(!validStep)errors.push('--step：期望卡片內的步驟編號；收到 '+(Number.isNaN(n)?'未填':n)+'，步驟內容未寫入。');
  let owner=validStep?step:null,touched=false,skip=false,sectionAnchors=0,pending=null;
- const sections=new Set(['--chain','--conflict','--cleared','--verify','--unknown','--decision','--condition','--permission','--interface',...Object.keys(integrateFillFlags)]);
+ const sections=new Set(['--chain','--conflict','--cleared','--verify','--unknown','--decision','--condition','--permission','--interface','--routing-file',...Object.keys(integrateFillFlags)]);
  const formats={'--conflict':'現象|方向','--verify':'檢查|結果','--unknown':'問題|類別|原因|試過|下一步|成本|理解|會不會改變本題結論（末欄可省略）','--interface':'名稱|輸入|輸出|錯誤|重送'};
  // Keep an entire structured row pending until its own anchors have been read.
  const savePending=()=>{
   if(!pending)return;
-  const {flag,row,error}=pending,{key,format}=integrateFillFlags[flag];pending=null;
+  const {flag,field,row,error}=pending,{key,format}=integrateFillFlags[field];pending=null;
   if(error||format&&!row.anchors.length){
    errors.push(flag+'：'+(error??'每筆至少要有一個通過核對的 --anchor')+'。');return;
   }
@@ -144,16 +155,30 @@ export function fillTrace(c,args,errors=[]){
   if(format)(r[key]??=[]).push(row);else r[key]=row;
   sectionAnchors+=row.anchors.length;touched=true;
  };
+ const controls=new Set();
  for(const {flag,value} of entries){
   if(sections.has(flag)){savePending();owner=null;} // A rejected section must not steal the previous section's anchors.
   try{
-   if(['--card','--step'].includes(flag))continue;
+   if(flag==='--card'||flag==='--step'){
+    if(controls.has(flag))throw Error('同一命令只能填一次');
+    controls.add(flag);
+    if(flag==='--card'&&!value?.trim())throw Error('期望卡片路徑');
+    continue;
+   }
    if(flag==='--skip'){skip=true;touched=true;continue;}
    if(!['--note','--anchor','--version',...sections].includes(flag))throw Error('未知參數；請用 fill --help 查看格式');
-   if(Object.hasOwn(integrateFillFlags,flag)){
+   const field=flag==='--routing-file'?'--routing':flag;
+   if(Object.hasOwn(integrateFillFlags,field)){
     if(c.mode!=='integrate')throw Error('期望接入情境（integrate），目前為 '+c.mode);
     if(!validStep)throw Error('無有效 --step，項目未寫入');
-    owner={...parseIntegrateField(flag,value??''),anchors:[]};pending={flag,row:owner};continue;
+    let input=value??'';
+    if(flag==='--routing-file'){
+     if(!input.trim())throw Error('期望 UTF-8 JSON 檔案路徑');
+     const file=noLinks(input);
+     if(!fs.statSync(file).isFile())throw Error('期望一般 JSON 檔案');
+     input=fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'');
+    }
+    owner={...parseIntegrateField(field,input),anchors:[]};pending={flag,field,row:owner};continue;
    }
    const format=formats[flag]??(flag==='--version'?'提交 或 提交|執行版本':flag==='--anchor'?'檔案:行號:比對文字':'非空文字');
    const p=value===undefined?[]:value.split('|');
@@ -167,8 +192,8 @@ export function fillTrace(c,args,errors=[]){
     if(!m||!m[3].trim())throw Error('期望 '+format+'；收到 '+value.split(':').length+' 欄（行號須為正整數）');
     if(!owner)throw Error('前一章節或步驟無效，錨點未寫入；請連同該章節重送');
     const anchor=checkChainAnchor(c.root,{file:m[1],line:Number(m[2]),expect:m[3]});
+    if(anchor.status!=='PASS')throw Error('來源錨點不符 '+m[1]+':'+m[2]+'（'+anchor.status+'：'+anchor.reason+'）');
     if(pending){
-     if(anchor.status!=='PASS')throw Error('來源錨點不符 '+m[1]+':'+m[2]+'（'+anchor.reason+'）');
      owner.anchors.push(anchor);continue;
     }
     (owner.anchors??=[]).push(anchor);if(owner!==step)sectionAnchors++;touched=true;continue;
@@ -195,7 +220,7 @@ export function fillTrace(c,args,errors=[]){
   }catch(e){if(pending&&flag==='--anchor')pending.error??=e.message;else errors.push(flag+'：'+e.message+'。');}
  }
  savePending();
- if(c.mode==='integrate'&&c.integration?.decision==='可接'){const cr=capabilityReview(c);if(cr.cap){c.integration.decision='';errors.push('--decision：'+cr.cap.reason+'，結論最多「有條件可接」；結論已清空，請改填。');}}
+ if(c.mode==='integrate'&&c.integration?.decision==='可接'){const cr=capabilityReview(c);if(cr.cap){c.integration.decision='';errors.push('--decision：'+cr.cap.reason+'，結論最多「有條件可接」；請改填。');}}
  if(validStep&&touched){step.status=skip?'skipped':'done';if(sectionAnchors)step.sectionAnchors=(step.sectionAnchors??0)+sectionAnchors;}
  return c;
 }
@@ -221,26 +246,21 @@ export function traceHelp(){
   '走完：report --card <卡片.json> --out <報告.html>：自動跑唯讀分診、套用不查範圍、產鏈卡與單檔網頁報告。',
   'start：--mode <symptom|takeover|change|integrate> --question <問題> --root <repo> --out <卡片.json>（須在 repo 外）。',
   'start 自動讀提交及工作樹；Git 拒絕時保留未知與原因。next/status：--card <卡片.json>。',
-  'fill：--card <卡片.json> --step <正整數>；以下可重複，合法項目寫入，錯誤項目逐一回報。',
-  '--note <說明>；--skip 跳過本步（搭配 --note 原因）。',
-  '--version "提交" 或 "提交|執行版本"',
-  '--chain "一站"；--cleared "排除項目"',
-  '--conflict "現象|方向"；--verify "檢查|結果"',
+  'fill：--card <卡片.json> --step <正整數>；整次通過才寫卡並推進。有錯（含錨點不符）即結束碼 1，原卡逐位元組保留。',
+  '--note <說明>；--skip 跳過本步（搭配 --note 原因）；--version "提交" 或 "提交|執行版本"。',
+  '--chain "一站"；--cleared "排除項目"；--conflict "現象|方向"；--verify "檢查|結果"。',
   '--unknown "問題|類別|原因|試過|下一步|成本|理解|會不會改變本題結論"；類別：沒去跑、由模型決定、單次異常、資料沒了、要負責人判斷、範圍或授權外（或超出範圍）；末欄可省略：yes＝會、no＝不會、unsure＝不確定。',
-  '僅 integrate：--decision <可接|有條件可接|不建議>',
+  '僅 integrate：--decision <可接|有條件可接|不建議>；--interface "名稱|輸入|輸出|錯誤|重送"。',
   '--condition "條件"；--permission "固定選項|一句範圍補充（可省）"：讀檔、寫檔、執行其他程式、連外網、用真帳號、花錢、讀機密、讓模型下系統指令；對不上的保留為需人看。',
-  '--interface "名稱|輸入|輸出|錯誤|重送"',
   '--knowhow "kind|rule|toolDetail|verification"：kind 為 '+integrateFillFlags['--knowhow'].enums.kind.join('|')+'。',
   '--compat-pin "surface|target|expectation|probe"：surface 為 '+integrateFillFlags['--compat-pin'].enums.surface.join('|')+'。',
-  '上列兩項每筆都要在同次 fill 後接 --anchor；有錨點不符或缺錨時該筆不寫入。',
-  '--routing <JSON 物件>：consumes、produces、avoidWhen（非空），均為字串陣列；executionClass 為 '+integrateFillFlags['--routing'].enums.executionClass.join('|')+'，maturity 為 '+integrateFillFlags['--routing'].enums.maturity.join('|')+'；有 unknown 時須填 unknownReason。重填會取代路由。',
+  '上列兩項每筆同次後接 --anchor；領域規則與工具細節分欄，釘選可觀察的 CLI、schema 或匯出契約。見 references/integrate.md。',
+  '--routing <JSON 物件> 或 --routing-file "<路徑.json>"（互斥；UTF-8 可含 BOM）：consumes、produces、avoidWhen（非空）皆為字串陣列；executionClass 為 '+integrateFillFlags['--routing'].enums.executionClass.join('|')+'，maturity 為 '+integrateFillFlags['--routing'].enums.maturity.join('|')+'；有 unknown 時須填 unknownReason。重填會取代路由。',
   'export-integrate --card <卡片.json> --out <交接.json>：送出前重核錨點，輸出須在受查資料夾外。',
   'fix --card <卡片.json> --remove "章節:序號"（如 interface:2、未知:1，可重複）--class "未知序號=類別"：修正已填的項目，不用手改卡片。\n'+
   '--anchor "檔案:行號:比對文字"：歸前面最近的章節；第一章節前歸步驟，其他參數不改歸屬。',
-  '章節為 chain/conflict/cleared/verify/unknown/decision/condition/permission/interface/knowhow/compat-pin/routing；欄位均不可空白。',
-  '例（start）：node scripts/trace.mjs start --mode symptom --question "為何出錯" --root . --out ../card.json',
-  '例（fill）：node scripts/trace.mjs fill --card ../card.json --step 1 --note "已讀" --chain "入口" --anchor "main.mjs:1:run"',
-  '例（next/status）：node scripts/trace.mjs status --card ../card.json（將 status 換成 next 看下一步）'
+  '章節為 chain/conflict/cleared/verify/unknown/decision/condition/permission/interface/knowhow/compat-pin/routing/routing-file；欄位均不可空白。',
+  '例（fill）：node scripts/trace.mjs fill --card ../card.json --step 1 --note "已讀" --chain "入口" --anchor "main.mjs:1:run"'
  ].join('\n');
 }
 export function traceOutput(c,command,file,books=playbooks){
@@ -382,8 +402,16 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
   let c,file;try{file=path.resolve(get('--card'));c=JSON.parse(fs.readFileSync(file,'utf8'));}catch{console.error('卡片讀不到，或內容不是有效的資料格式。');process.exitCode=1;}
   if(!process.exitCode)try{
    if(command==='fix'){noLinks(file);const rel=path.relative(path.resolve(c.root),file);if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('卡片請放在受查資料夾外。');const done=fixTrace(c,args);fs.writeFileSync(file,JSON.stringify(c,null,2)+'\n','utf8');console.log(done.join('\n'));}
-   if(command==='fill'){noLinks(file);const rel=path.relative(path.resolve(c.root),file);if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('卡片請放在受查資料夾外。');const errors=[];fillTrace(c,args,errors);fs.writeFileSync(file,JSON.stringify(c,null,2)+'\n','utf8');if(errors.length){console.error(errors.join('\n')+'\n其餘合法內容已寫入；只需補送被拒絕的項目。');if(Object.keys(integrateFillFlags).some(f=>errors.some(e=>e.startsWith(f+'：'))))process.exitCode=1;}}
-   console.log(traceOutput(c,command==='fix'?'status':command,file).join('\n'));
+   if(command==='fill'){
+    noLinks(file);const rel=path.relative(path.resolve(c.root),file);
+    if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('卡片請放在受查資料夾外。');
+    const draft=structuredClone(c),errors=[];
+    fillTrace(draft,args,errors);
+    if(errors.length)throw Error(errors.join('\n')+'\n本次填卡未寫入；請修正後重送整次命令。');
+    const output=traceOutput(draft,command,file).join('\n');
+    fs.writeFileSync(file,JSON.stringify(draft,null,2)+'\n','utf8');
+    console.log(output);
+   }else console.log(traceOutput(c,command==='fix'?'status':command,file).join('\n'));
   }catch(e){console.error(e.message);process.exitCode=1;}
  }else console.log('先用 preflight 做開卡前檢查，再用 start 選情境與問題；填卡後用 next 看下一步，或用 status 看進度。用法見 references/playbooks.md。');
 }
